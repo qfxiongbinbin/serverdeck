@@ -1,0 +1,21 @@
+.DS_Store
+*.log
+
+# Node / Vite
+ServerDeck/node_modules/
+ServerDeck/dist/
+ServerDeck/.vite/
+ServerDeck/vite.config.ts.timestamp-*
+
+# Tauri / Rust build outputs
+ServerDeck/src-tauri/target/
+ServerDeck/src-tauri/gen/
+
+# Environment files
+ServerDeck/.env
+ServerDeck/.env.*
+!ServerDeck/.env.example
+
+# Editor / IDE
+.idea/
+.vscode/
