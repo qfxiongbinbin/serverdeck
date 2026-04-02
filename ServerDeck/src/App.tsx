@@ -14,6 +14,7 @@ import {
   Save,
   Search,
   Server,
+  Wrench,
   TerminalSquare,
   Trash2,
   Users,
@@ -32,6 +33,7 @@ import {
 } from "./lib/api";
 
 const HOSTS_TAB_ID = "hosts";
+const SETTINGS_TAB_ID = "settings";
 
 const blankHost: SavedHost = {
   id: "",
@@ -90,6 +92,7 @@ export default function App() {
   const terminalTabsRef = useRef<TerminalTab[]>([]);
 
   const isHostsView = activeTabId === HOSTS_TAB_ID;
+  const isSettingsView = activeTabId === SETTINGS_TAB_ID;
 
   const selectedHost = useMemo(
     () => hosts.find((item) => item.id === selectedId) ?? null,
@@ -279,6 +282,12 @@ export default function App() {
 
   function closeDrawer() {
     setDrawerOpen(false);
+  }
+
+  function openSettings() {
+    setContextMenu(null);
+    setDrawerOpen(false);
+    setActiveTabId(SETTINGS_TAB_ID);
   }
 
   async function handleSave() {
@@ -554,10 +563,27 @@ export default function App() {
 
       <div className="workspace">
         <aside className="sidebar">
-          <button type="button" className="side-nav side-nav--active" onClick={() => setActiveTabId(HOSTS_TAB_ID)}>
-            <Server size={18} />
-            Hosts
-          </button>
+          <div className="sidebar__top">
+            <button
+              type="button"
+              className={`side-nav ${isHostsView ? "side-nav--active" : ""}`}
+              onClick={() => setActiveTabId(HOSTS_TAB_ID)}
+            >
+              <Server size={18} />
+              Hosts
+            </button>
+          </div>
+
+          <div className="sidebar__bottom">
+            <button
+              type="button"
+              className={`side-nav ${isSettingsView ? "side-nav--active" : ""}`}
+              onClick={openSettings}
+            >
+              <Wrench size={18} />
+              Settings
+            </button>
+          </div>
         </aside>
 
         <main className="mainpane">
@@ -760,6 +786,64 @@ export default function App() {
                     </div>
                   </aside>
                 ) : null}
+              </div>
+            </section>
+          ) : isSettingsView ? (
+            <section className="settings-screen">
+              <div className="settings-screen__header">
+                <div>
+                  <h2>Settings</h2>
+                  <span>Application preferences and connection defaults.</span>
+                </div>
+              </div>
+
+              <div className="settings-list">
+                <section className="settings-section">
+                  <h3>General</h3>
+                  <div className="settings-item">
+                    <div>
+                      <strong>App Theme</strong>
+                      <span>System theme support will be added here.</span>
+                    </div>
+                    <span className="settings-pill">Auto</span>
+                  </div>
+                  <div className="settings-item">
+                    <div>
+                      <strong>Language</strong>
+                      <span>Current interface language for the desktop app.</span>
+                    </div>
+                    <span className="settings-pill">English</span>
+                  </div>
+                </section>
+
+                <section className="settings-section">
+                  <h3>Connection</h3>
+                  <div className="settings-item">
+                    <div>
+                      <strong>SSH Defaults</strong>
+                      <span>Default connect timeout and keepalive settings.</span>
+                    </div>
+                    <span className="settings-pill">5s / 30s</span>
+                  </div>
+                  <div className="settings-item">
+                    <div>
+                      <strong>Terminal</strong>
+                      <span>Font size, shell behavior and session preferences.</span>
+                    </div>
+                    <span className="settings-pill">Default</span>
+                  </div>
+                </section>
+
+                <section className="settings-section">
+                  <h3>About</h3>
+                  <div className="settings-item">
+                    <div>
+                      <strong>ServerDeck</strong>
+                      <span>Remote server workbench for macOS.</span>
+                    </div>
+                    <span className="settings-pill">v0.1.0</span>
+                  </div>
+                </section>
               </div>
             </section>
           ) : (

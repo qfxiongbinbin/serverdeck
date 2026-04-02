@@ -16,6 +16,7 @@
         "title": "ServerDeck",
         "width": 1600,
         "height": 980,
+        "center": true,
         "resizable": true
       }
     ],

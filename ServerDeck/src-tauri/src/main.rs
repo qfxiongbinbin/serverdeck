@@ -2,6 +2,7 @@ use dirs::home_dir;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -98,6 +99,33 @@ fn expand_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+fn resolve_binary(name: &str) -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+
+    if let Some(path) = env::var_os("PATH") {
+        candidates.extend(env::split_paths(&path).map(|dir| dir.join(name)));
+    }
+
+    match name {
+        "ssh" => {
+            candidates.push(PathBuf::from("/usr/bin/ssh"));
+            candidates.push(PathBuf::from("/opt/homebrew/bin/ssh"));
+            candidates.push(PathBuf::from("/usr/local/bin/ssh"));
+        }
+        "sshpass" => {
+            candidates.push(PathBuf::from("/opt/homebrew/bin/sshpass"));
+            candidates.push(PathBuf::from("/usr/local/bin/sshpass"));
+            candidates.push(PathBuf::from("/usr/bin/sshpass"));
+        }
+        _ => {}
+    }
+
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| format!("Required executable not found: {}", name))
+}
+
 fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
     let read_dir = fs::read_dir(path).map_err(|error| error.to_string())?;
@@ -148,12 +176,12 @@ fn append_ssh_options(command: &mut Command, host: &HostRecord) {
 fn build_ssh_command(host: &HostRecord) -> Command {
     let destination = format!("{}@{}", host.username, host.address);
     let mut command = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != "" {
-        let mut sshpass = Command::new("sshpass");
+        let mut sshpass = Command::new(resolve_binary("sshpass").unwrap_or_else(|_| PathBuf::from("sshpass")));
         sshpass.arg("-p").arg(host.password.clone().unwrap_or_default());
-        sshpass.arg("ssh");
+        sshpass.arg(resolve_binary("ssh").unwrap_or_else(|_| PathBuf::from("ssh")));
         sshpass
     } else {
-        Command::new("ssh")
+        Command::new(resolve_binary("ssh").unwrap_or_else(|_| PathBuf::from("ssh")))
     };
 
     append_ssh_options(&mut command, host);
@@ -354,17 +382,37 @@ fn start_terminal_session(
     eprintln!("[DEBUG] PTY opened successfully");
 
     let destination = format!("{}@{}", host.username, host.address);
-    let mut cmd = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != ""
-    {
+    let mut cmd = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != "" {
         eprintln!("[DEBUG] Using sshpass for password auth");
-        let mut c = CommandBuilder::new("sshpass");
+        let mut c = CommandBuilder::new(
+            resolve_binary("sshpass")
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(|error| {
+                    eprintln!("[DEBUG] {}", error);
+                    error
+                })?,
+        );
         c.arg("-p");
         c.arg(host.password.clone().unwrap_or_default());
-        c.arg("ssh");
+        c.arg(
+            resolve_binary("ssh")
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(|error| {
+                    eprintln!("[DEBUG] {}", error);
+                    error
+                })?,
+        );
         c
     } else {
         eprintln!("[DEBUG] Using direct SSH (key auth or no password)");
-        CommandBuilder::new("ssh")
+        CommandBuilder::new(
+            resolve_binary("ssh")
+                .map(|path| path.to_string_lossy().into_owned())
+                .map_err(|error| {
+                    eprintln!("[DEBUG] {}", error);
+                    error
+                })?,
+        )
     };
 
     cmd.arg("-tt");
