@@ -31,9 +31,15 @@ import {
   type SavedHost,
   type TerminalEventPayload
 } from "./lib/api";
+import {
+  defaultTerminalThemeId,
+  terminalThemePresets,
+  type TerminalThemePreset
+} from "./data/terminalThemes";
 
 const HOSTS_TAB_ID = "hosts";
 const SETTINGS_TAB_ID = "settings";
+const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 
 const blankHost: SavedHost = {
   id: "",
@@ -64,6 +70,17 @@ type ContextMenuState = {
   y: number;
 };
 
+type AppSettings = {
+  terminalThemeId: string;
+  terminalFontSize: number;
+};
+
+const terminalFontSizeOptions = [
+  { label: "S", value: 12 },
+  { label: "M", value: 14 },
+  { label: "L", value: 16 }
+] as const;
+
 function getHostTitle(host: SavedHost) {
   return host.label.trim() || host.address.trim() || "Untitled Host";
 }
@@ -85,9 +102,14 @@ export default function App() {
   const [statusTone, setStatusTone] = useState<"neutral" | "success" | "error">("neutral");
   const [busy, setBusy] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [settings, setSettings] = useState<AppSettings>({
+    terminalThemeId: defaultTerminalThemeId,
+    terminalFontSize: 14
+  });
 
   const terminalEl = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
   const activeTabIdRef = useRef(HOSTS_TAB_ID);
   const terminalTabsRef = useRef<TerminalTab[]>([]);
 
@@ -102,6 +124,11 @@ export default function App() {
   const activeTerminalTab = useMemo(
     () => terminalTabs.find((tab) => tab.id === activeTabId) ?? null,
     [activeTabId, terminalTabs]
+  );
+
+  const activeTerminalTheme = useMemo<TerminalThemePreset>(
+    () => terminalThemePresets.find((item) => item.id === settings.terminalThemeId) ?? terminalThemePresets[0],
+    [settings.terminalThemeId]
   );
 
   const filteredHosts = useMemo(() => {
@@ -126,6 +153,31 @@ export default function App() {
   useEffect(() => {
     void refreshHosts();
   }, []);
+
+  useEffect(() => {
+    const savedSettings = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (!savedSettings) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(savedSettings) as Partial<AppSettings>;
+      setSettings({
+        terminalThemeId:
+          terminalThemePresets.find((item) => item.id === parsed.terminalThemeId)?.id ?? defaultTerminalThemeId,
+        terminalFontSize:
+          typeof parsed.terminalFontSize === "number" && parsed.terminalFontSize >= 10 && parsed.terminalFontSize <= 24
+            ? parsed.terminalFontSize
+            : 14
+      });
+    } catch {
+      window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
+  }, [settings]);
 
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
@@ -175,12 +227,8 @@ export default function App() {
 
     const terminal = new Terminal({
       cursorBlink: true,
-      fontSize: 13,
-      theme: {
-        background: "#0b1220",
-        foreground: "#dce7f5",
-        cursor: "#4da3ff"
-      }
+      fontSize: settings.terminalFontSize,
+      theme: activeTerminalTheme.theme
     });
 
     const fitAddon = new FitAddon();
@@ -190,6 +238,7 @@ export default function App() {
     terminal.focus();
 
     terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
 
     if (activeTerminalTab.buffer.length > 0) {
       terminal.write(activeTerminalTab.buffer.join(""));
@@ -209,8 +258,26 @@ export default function App() {
       disposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
+      fitAddonRef.current = null;
     };
-  }, [activeTerminalTab?.id]);
+  }, [activeTerminalTab?.id, activeTerminalTheme, settings.terminalFontSize]);
+
+  useEffect(() => {
+    if (!terminalRef.current) {
+      return;
+    }
+
+    terminalRef.current.options.theme = activeTerminalTheme.theme;
+  }, [activeTerminalTheme]);
+
+  useEffect(() => {
+    if (!terminalRef.current) {
+      return;
+    }
+
+    terminalRef.current.options.fontSize = settings.terminalFontSize;
+    fitAddonRef.current?.fit();
+  }, [settings.terminalFontSize]);
 
   useEffect(() => {
     let cleanup: null | (() => void) = null;
@@ -288,6 +355,19 @@ export default function App() {
     setContextMenu(null);
     setDrawerOpen(false);
     setActiveTabId(SETTINGS_TAB_ID);
+  }
+
+  function handleSelectTerminalTheme(themeId: string) {
+    const selectedTheme = terminalThemePresets.find((item) => item.id === themeId);
+    setSettings((current) => ({ ...current, terminalThemeId: themeId }));
+    setStatus(`Applied terminal theme ${selectedTheme?.name ?? themeId}`);
+    setStatusTone("success");
+  }
+
+  function handleSelectTerminalFontSize(fontSize: number) {
+    setSettings((current) => ({ ...current, terminalFontSize: fontSize }));
+    setStatus(`Applied terminal font size ${fontSize}px`);
+    setStatusTone("success");
   }
 
   async function handleSave() {
@@ -828,9 +908,55 @@ export default function App() {
                   <div className="settings-item">
                     <div>
                       <strong>Terminal</strong>
-                      <span>Font size, shell behavior and session preferences.</span>
+                      <span>Font size for all terminal sessions.</span>
                     </div>
-                    <span className="settings-pill">Default</span>
+                    <div className="settings-chip-group">
+                      {terminalFontSizeOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`settings-chip ${settings.terminalFontSize === option.value ? "settings-chip--active" : ""}`}
+                          onClick={() => handleSelectTerminalFontSize(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </section>
+
+                <section className="settings-section">
+                  <h3>Terminal Theme</h3>
+                  <div className="theme-list theme-list--grid">
+                    {terminalThemePresets.map((theme) => {
+                      const selected = theme.id === settings.terminalThemeId;
+
+                      return (
+                        <button
+                          key={theme.id}
+                          type="button"
+                          className={`theme-card theme-card--grid ${selected ? "theme-card--active" : ""}`}
+                          onClick={() => handleSelectTerminalTheme(theme.id)}
+                        >
+                          <div
+                            className="theme-card__preview"
+                            style={{ background: theme.preview.background, borderColor: theme.preview.border }}
+                          >
+                            <span style={{ background: theme.preview.lines[0] }} />
+                            <span style={{ background: theme.preview.lines[1] }} />
+                            <span style={{ background: theme.preview.lines[2] }} />
+                          </div>
+
+                          <div className="theme-card__body">
+                            <div className="theme-card__title">{theme.name}</div>
+                          </div>
+
+                          <span className={`theme-card__check ${selected ? "theme-card__check--active" : ""}`}>
+                            {selected ? "Selected" : "Select"}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </section>
 
@@ -847,8 +973,12 @@ export default function App() {
               </div>
             </section>
           ) : (
-            <section className="terminal-screen">
-              <div className="terminal-frame" ref={terminalEl} />
+            <section className="terminal-screen" style={{ background: activeTerminalTheme.theme.background }}>
+              <div
+                className="terminal-frame"
+                ref={terminalEl}
+                style={{ background: activeTerminalTheme.theme.background }}
+              />
             </section>
           )}
         </main>
