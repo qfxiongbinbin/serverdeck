@@ -287,6 +287,19 @@ fn run_sftp_batch(host: &HostRecord, batch: &str) -> Result<std::process::Output
     child.wait_with_output().map_err(|error| error.to_string())
 }
 
+fn ensure_sftp_success(output: &std::process::Output, fallback: &str) -> Result<(), String> {
+    if output.status.success() {
+        return Ok(());
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if stderr.is_empty() {
+        fallback.to_string()
+    } else {
+        stderr
+    })
+}
+
 fn emit_terminal_output(app: &AppHandle, session_id: &str, data: String, stream: &str) {
     eprintln!("[DEBUG] Emitting terminal-output event, stream: {}, data_len: {}", stream, data.len());
     let result = app.emit(
@@ -442,19 +455,89 @@ fn list_remote_directory(host: HostRecord, path: String) -> Result<Vec<FileEntry
     let batch = format!("cd {}\nls -la\nbye\n", escape_sftp_path(remote_path));
     let output = run_sftp_batch(&host, &batch)?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            "Remote SFTP command failed".to_string()
-        } else {
-            stderr
-        });
-    }
+    ensure_sftp_success(&output, "Remote SFTP command failed")?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let mut entries = stdout.lines().filter_map(parse_sftp_ls_line).collect::<Vec<_>>();
     entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(entries)
+}
+
+#[tauri::command]
+fn upload_to_remote(host: HostRecord, local_path: String, remote_dir: String) -> Result<bool, String> {
+    let local_path_buf = expand_path(&local_path);
+    let local_path_str = local_path_buf.to_string_lossy().into_owned();
+    let is_dir = local_path_buf.is_dir();
+    let remote_target = if remote_dir.trim().is_empty() { "." } else { remote_dir.trim() };
+    let batch = if is_dir {
+        format!(
+            "cd {}\nput -r {}\nbye\n",
+            escape_sftp_path(remote_target),
+            escape_sftp_path(&local_path_str)
+        )
+    } else {
+        format!(
+            "cd {}\nput {}\nbye\n",
+            escape_sftp_path(remote_target),
+            escape_sftp_path(&local_path_str)
+        )
+    };
+
+    let output = run_sftp_batch(&host, &batch)?;
+    ensure_sftp_success(&output, "Upload failed")?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn download_from_remote(
+    host: HostRecord,
+    remote_path: String,
+    local_dir: String,
+    is_dir: bool,
+) -> Result<bool, String> {
+    let local_dir_buf = expand_path(&local_dir);
+    let local_dir_str = local_dir_buf.to_string_lossy().into_owned();
+    let batch = if is_dir {
+        format!(
+            "lcd {}\nget -r {}\nbye\n",
+            escape_sftp_path(&local_dir_str),
+            escape_sftp_path(&remote_path)
+        )
+    } else {
+        format!(
+            "lcd {}\nget {}\nbye\n",
+            escape_sftp_path(&local_dir_str),
+            escape_sftp_path(&remote_path)
+        )
+    };
+
+    let output = run_sftp_batch(&host, &batch)?;
+    ensure_sftp_success(&output, "Download failed")?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn delete_local_entry(path: String, is_dir: bool) -> Result<bool, String> {
+    let expanded = expand_path(&path);
+    if is_dir {
+        fs::remove_dir_all(&expanded).map_err(|error| error.to_string())?;
+    } else {
+        fs::remove_file(&expanded).map_err(|error| error.to_string())?;
+    }
+    Ok(true)
+}
+
+#[tauri::command]
+fn delete_remote_entry(host: HostRecord, remote_path: String, is_dir: bool) -> Result<bool, String> {
+    let batch = if is_dir {
+        format!("rmdir {}\nbye\n", escape_sftp_path(&remote_path))
+    } else {
+        format!("rm {}\nbye\n", escape_sftp_path(&remote_path))
+    };
+
+    let output = run_sftp_batch(&host, &batch)?;
+    ensure_sftp_success(&output, "Delete failed")?;
+    Ok(true)
 }
 
 #[tauri::command]
@@ -633,6 +716,10 @@ fn main() {
             test_connection,
             list_local_directory,
             list_remote_directory,
+            upload_to_remote,
+            download_from_remote,
+            delete_local_entry,
+            delete_remote_entry,
             start_terminal_session,
             write_terminal_input,
             close_terminal_session

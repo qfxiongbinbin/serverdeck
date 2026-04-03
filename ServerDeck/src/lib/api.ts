@@ -120,6 +120,34 @@ export async function listRemoteDirectory(host: SavedHost, path: string) {
   return [];
 }
 
+export async function uploadToRemote(host: SavedHost, localPath: string, remoteDir: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("upload_to_remote", { host, localPath, remoteDir });
+  }
+  return true;
+}
+
+export async function downloadFromRemote(host: SavedHost, remotePath: string, localDir: string, isDir: boolean) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("download_from_remote", { host, remotePath, localDir, isDir });
+  }
+  return true;
+}
+
+export async function deleteLocalEntry(path: string, isDir: boolean) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("delete_local_entry", { path, isDir });
+  }
+  return true;
+}
+
+export async function deleteRemoteEntry(host: SavedHost, remotePath: string, isDir: boolean) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("delete_remote_entry", { host, remotePath, isDir });
+  }
+  return true;
+}
+
 export async function startTerminalSession(host: SavedHost) {
   if (hasTauri()) {
     return tauriInvoke<string>("start_terminal_session", { host });

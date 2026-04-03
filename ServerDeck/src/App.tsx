@@ -30,13 +30,17 @@ import {
 } from "lucide-react";
 import {
   closeTerminalSession,
+  deleteLocalEntry,
   deleteHost,
+  deleteRemoteEntry,
+  downloadFromRemote,
   listLocalDirectory,
   listRemoteDirectory,
   listHosts,
   saveHost,
   startTerminalSession,
   testConnection,
+  uploadToRemote,
   writeTerminalInput,
   type FileEntry,
   type SavedHost,
@@ -80,6 +84,21 @@ type ContextMenuState = {
   host: SavedHost;
   x: number;
   y: number;
+};
+
+type FileMenuState = {
+  side: "local" | "remote";
+  entry: FileEntry;
+  x: number;
+  y: number;
+};
+
+type TransferJob = {
+  id: string;
+  name: string;
+  direction: "upload" | "download";
+  status: "running" | "success" | "error";
+  detail: string;
 };
 
 type AppSettings = {
@@ -188,6 +207,7 @@ function FileBrowserPane({
   error,
   emptyText,
   disabled,
+  onContextMenu,
   onPathChange,
   onRefresh,
   onOpenDir,
@@ -200,6 +220,7 @@ function FileBrowserPane({
   error?: string;
   emptyText: string;
   disabled?: boolean;
+  onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>, entry: FileEntry) => void;
   onPathChange: (path: string) => void;
   onRefresh: () => void;
   onOpenDir: (entry: FileEntry) => void;
@@ -235,6 +256,7 @@ function FileBrowserPane({
                 type="button"
                 className="browser-row"
                 onClick={() => entry.is_dir && onOpenDir(entry)}
+                onContextMenu={(event) => onContextMenu?.(event, entry)}
                 disabled={disabled || !entry.is_dir}
               >
                 <div className="browser-row__name">
@@ -266,6 +288,8 @@ export default function App() {
   const [statusTone, setStatusTone] = useState<"neutral" | "success" | "error">("neutral");
   const [busy, setBusy] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
+  const [transferJobs, setTransferJobs] = useState<TransferJob[]>([]);
   const [settings, setSettings] = useState<AppSettings>({
     terminalThemeId: defaultTerminalThemeId,
     terminalFontSize: 14
@@ -278,6 +302,8 @@ export default function App() {
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [localError, setLocalError] = useState("");
   const [remoteError, setRemoteError] = useState("");
+  const [localRefreshTick, setLocalRefreshTick] = useState(0);
+  const [remoteRefreshTick, setRemoteRefreshTick] = useState(0);
 
   const terminalEl = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -367,11 +393,14 @@ export default function App() {
   }, [drawerMode, selectedHost]);
 
   useEffect(() => {
-    if (!contextMenu) {
+    if (!contextMenu && !fileMenu) {
       return;
     }
 
-    const closeMenu = () => setContextMenu(null);
+    const closeMenu = () => {
+      setContextMenu(null);
+      setFileMenu(null);
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         closeMenu();
@@ -389,7 +418,7 @@ export default function App() {
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("scroll", closeMenu, true);
     };
-  }, [contextMenu]);
+  }, [contextMenu, fileMenu]);
 
   useEffect(() => {
     if (!isSftpView) {
@@ -416,7 +445,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, localPath]);
+  }, [isSftpView, localPath, localRefreshTick]);
 
   useEffect(() => {
     if (!isSftpView || !selectedHost) {
@@ -445,7 +474,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, selectedHost, remotePath]);
+  }, [isSftpView, selectedHost, remotePath, remoteRefreshTick]);
 
   useEffect(() => {
     if (!activeTerminalTab || !terminalEl.current) {
@@ -582,6 +611,7 @@ export default function App() {
 
   function openSettings() {
     setContextMenu(null);
+    setFileMenu(null);
     setDrawerOpen(false);
     setActiveTabId(SETTINGS_TAB_ID);
   }
@@ -597,6 +627,82 @@ export default function App() {
     setSettings((current) => ({ ...current, terminalFontSize: fontSize }));
     setStatus(`Applied terminal font size ${fontSize}px`);
     setStatusTone("success");
+  }
+
+  function startTransferJob(name: string, direction: TransferJob["direction"], detail: string) {
+    const id = crypto.randomUUID();
+    const nextJob: TransferJob = { id, name, direction, status: "running", detail };
+    setTransferJobs((current) => [nextJob, ...current].slice(0, 8));
+    return id;
+  }
+
+  function removeTransferJob(id: string) {
+    setTransferJobs((current) => current.filter((job) => job.id !== id));
+  }
+
+  function finishTransferJob(id: string, status: TransferJob["status"], detail: string) {
+    setTransferJobs((current) => current.map((job) => (job.id === id ? { ...job, status, detail } : job)));
+
+    if (status === "success") {
+      window.setTimeout(() => {
+        removeTransferJob(id);
+      }, 1400);
+    }
+  }
+
+  async function handleUploadEntry(entry: FileEntry) {
+    if (!selectedHost) return;
+    const jobId = startTransferJob(entry.name, "upload", `Uploading to ${remotePath}`);
+    try {
+      await uploadToRemote(selectedHost, entry.path, remotePath);
+      setStatus(`Uploaded ${entry.name}`);
+      setStatusTone("success");
+      finishTransferJob(jobId, "success", `Uploaded to ${remotePath}`);
+      setFileMenu(null);
+      setRemoteRefreshTick((current) => current + 1);
+    } catch (error) {
+      const message = getErrorMessage(error, `Upload failed for ${entry.name}`);
+      setStatus(message);
+      setStatusTone("error");
+      finishTransferJob(jobId, "error", message);
+    }
+  }
+
+  async function handleDownloadEntry(entry: FileEntry) {
+    if (!selectedHost) return;
+    const remoteTarget = joinChildPath(remotePath, entry.name);
+    const jobId = startTransferJob(entry.name, "download", `Downloading to ${localPath}`);
+    try {
+      await downloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir);
+      setStatus(`Downloaded ${entry.name}`);
+      setStatusTone("success");
+      finishTransferJob(jobId, "success", `Downloaded to ${localPath}`);
+      setFileMenu(null);
+      setLocalRefreshTick((current) => current + 1);
+    } catch (error) {
+      const message = getErrorMessage(error, `Download failed for ${entry.name}`);
+      setStatus(message);
+      setStatusTone("error");
+      finishTransferJob(jobId, "error", message);
+    }
+  }
+
+  async function handleDeleteLocalFile(entry: FileEntry) {
+    await deleteLocalEntry(entry.path, entry.is_dir);
+    setStatus(`Deleted local ${entry.name}`);
+    setStatusTone("success");
+    setFileMenu(null);
+    setLocalRefreshTick((current) => current + 1);
+  }
+
+  async function handleDeleteRemoteFile(entry: FileEntry) {
+    if (!selectedHost) return;
+    const remoteTarget = joinChildPath(remotePath, entry.name);
+    await deleteRemoteEntry(selectedHost, remoteTarget, entry.is_dir);
+    setStatus(`Deleted remote ${entry.name}`);
+    setStatusTone("success");
+    setFileMenu(null);
+    setRemoteRefreshTick((current) => current + 1);
   }
 
   function handleSelectSftpHost(hostId: string) {
@@ -821,6 +927,19 @@ export default function App() {
       top: Math.max(12, top)
     };
   }, [contextMenu]);
+
+  const fileMenuPosition = useMemo(() => {
+    if (!fileMenu || typeof window === "undefined") {
+      return { left: 0, top: 0 };
+    }
+
+    const menuWidth = 220;
+    const menuHeight = 160;
+    return {
+      left: Math.max(12, Math.min(fileMenu.x, window.innerWidth - menuWidth - 16)),
+      top: Math.max(12, Math.min(fileMenu.y, window.innerHeight - menuHeight - 16))
+    };
+  }, [fileMenu]);
 
   return (
     <div className="app-shell">
@@ -1143,7 +1262,12 @@ export default function App() {
                   error={localError}
                   emptyText="No local files"
                   onPathChange={setLocalPath}
-                  onRefresh={() => setLocalPath((current) => `${current}`)}
+                  onContextMenu={(event, entry) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setFileMenu({ side: "local", entry, x: event.clientX, y: event.clientY });
+                  }}
+                  onRefresh={() => setLocalRefreshTick((current) => current + 1)}
                   onGoUp={() => setLocalPath((current) => getParentPath(current))}
                   onOpenDir={(entry) => setLocalPath((current) => joinChildPath(current, entry.name))}
                 />
@@ -1157,11 +1281,39 @@ export default function App() {
                   emptyText={selectedHost ? "No remote files" : "Select a host first"}
                   disabled={!selectedHost}
                   onPathChange={setRemotePath}
-                  onRefresh={() => setRemotePath((current) => `${current}`)}
+                  onContextMenu={(event, entry) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setFileMenu({ side: "remote", entry, x: event.clientX, y: event.clientY });
+                  }}
+                  onRefresh={() => setRemoteRefreshTick((current) => current + 1)}
                   onGoUp={() => setRemotePath((current) => getParentPath(current))}
                   onOpenDir={(entry) => setRemotePath((current) => joinChildPath(current, entry.name))}
                 />
               </div>
+
+              {transferJobs.length ? <div className="transfer-panel">
+                <div className="transfer-panel__header">
+                  <strong>Transfers</strong>
+                  <span>{`${transferJobs.length} item(s)`}</span>
+                </div>
+
+                <div className="transfer-list">
+                  {transferJobs.map((job) => (
+                    <div key={job.id} className="transfer-item">
+                      <div className="transfer-item__meta">
+                        <strong>{job.name}</strong>
+                        <span>
+                          {job.direction === "upload" ? "Upload" : "Download"} · {job.detail}
+                        </span>
+                      </div>
+                      <div className={`transfer-progress transfer-progress--${job.status}`}>
+                        <span />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div> : null}
             </section>
           ) : isSettingsView ? (
             <section className="settings-screen">
@@ -1361,6 +1513,47 @@ export default function App() {
             <Trash2 size={18} />
             <span>Remove</span>
           </button>
+        </div>
+      ) : null}
+
+      {fileMenu ? (
+        <div
+          className="context-menu context-menu--compact"
+          style={{ left: fileMenuPosition.left, top: fileMenuPosition.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          {fileMenu.side === "local" ? (
+            <>
+              <button type="button" className="context-menu__item" onClick={() => void handleUploadEntry(fileMenu.entry)}>
+                <FolderOpen size={18} />
+                <span>Upload</span>
+              </button>
+              <button
+                type="button"
+                className="context-menu__item context-menu__item--danger"
+                onClick={() => void handleDeleteLocalFile(fileMenu.entry)}
+              >
+                <Trash2 size={18} />
+                <span>Delete</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="context-menu__item" onClick={() => void handleDownloadEntry(fileMenu.entry)}>
+                <FolderOpen size={18} />
+                <span>Download</span>
+              </button>
+              <button
+                type="button"
+                className="context-menu__item context-menu__item--danger"
+                onClick={() => void handleDeleteRemoteFile(fileMenu.entry)}
+              >
+                <Trash2 size={18} />
+                <span>Delete</span>
+              </button>
+            </>
+          )}
         </div>
       ) : null}
     </div>
