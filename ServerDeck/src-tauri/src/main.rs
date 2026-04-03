@@ -6,7 +6,7 @@ use std::env;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
@@ -112,6 +112,11 @@ fn resolve_binary(name: &str) -> Result<PathBuf, String> {
             candidates.push(PathBuf::from("/opt/homebrew/bin/ssh"));
             candidates.push(PathBuf::from("/usr/local/bin/ssh"));
         }
+        "sftp" => {
+            candidates.push(PathBuf::from("/usr/bin/sftp"));
+            candidates.push(PathBuf::from("/opt/homebrew/bin/sftp"));
+            candidates.push(PathBuf::from("/usr/local/bin/sftp"));
+        }
         "sshpass" => {
             candidates.push(PathBuf::from("/opt/homebrew/bin/sshpass"));
             candidates.push(PathBuf::from("/usr/local/bin/sshpass"));
@@ -187,6 +192,99 @@ fn build_ssh_command(host: &HostRecord) -> Command {
     append_ssh_options(&mut command, host);
     command.arg(destination);
     command
+}
+
+fn build_sftp_command(host: &HostRecord) -> Command {
+    let mut command = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != "" {
+        let mut sshpass = Command::new(resolve_binary("sshpass").unwrap_or_else(|_| PathBuf::from("sshpass")));
+        sshpass.arg("-p").arg(host.password.clone().unwrap_or_default());
+        sshpass.arg(resolve_binary("sftp").unwrap_or_else(|_| PathBuf::from("sftp")));
+        sshpass
+    } else {
+        Command::new(resolve_binary("sftp").unwrap_or_else(|_| PathBuf::from("sftp")))
+    };
+
+    command
+        .arg("-o")
+        .arg("StrictHostKeyChecking=accept-new")
+        .arg("-o")
+        .arg("BatchMode=no")
+        .arg("-o")
+        .arg("ServerAliveInterval=30")
+        .arg("-o")
+        .arg("ConnectTimeout=5")
+        .arg("-P")
+        .arg(host.port.to_string());
+
+    if host.auth_type == "key" {
+        if let Some(key_path) = &host.private_key_path {
+            if !key_path.trim().is_empty() {
+                command.arg("-i").arg(expand_path(key_path));
+            }
+        }
+    }
+
+    command
+}
+
+fn escape_sftp_path(path: &str) -> String {
+    if path.contains(' ') || path.contains('"') {
+        format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
+    } else {
+        path.to_string()
+    }
+}
+
+fn parse_sftp_ls_line(line: &str) -> Option<FileEntry> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    if parts.len() < 9 {
+        return None;
+    }
+
+    let mode = parts[0];
+    let is_dir = mode.starts_with('d');
+    let size = parts[4].parse::<u64>().unwrap_or(0);
+    let modified = format!("{} {} {}", parts[5], parts[6], parts[7]);
+    let name = parts[8..].join(" ");
+
+    if name == "." || name == ".." {
+        return None;
+    }
+
+    Some(FileEntry {
+        name: name.clone(),
+        path: name,
+        is_dir,
+        size,
+        modified,
+    })
+}
+
+fn run_sftp_batch(host: &HostRecord, batch: &str) -> Result<std::process::Output, String> {
+    let destination = format!("{}@{}", host.username, host.address);
+    let mut child = build_sftp_command(host)
+        .arg("-b")
+        .arg("-")
+        .arg(destination)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(batch.as_bytes())
+            .and_then(|_| stdin.flush())
+            .map_err(|error| error.to_string())?;
+    }
+
+    child.wait_with_output().map_err(|error| error.to_string())
 }
 
 fn emit_terminal_output(app: &AppHandle, session_id: &str, data: String, stream: &str) {
@@ -336,22 +434,27 @@ fn list_local_directory(path: String) -> Result<Vec<FileEntry>, String> {
 
 #[tauri::command]
 fn list_remote_directory(host: HostRecord, path: String) -> Result<Vec<FileEntry>, String> {
-    let remote_path = if path.trim().is_empty() { "~" } else { path.trim() };
-    let command = format!("python3 -c \"import os,json,stat; p=os.path.expanduser(r'{}'); items=[]; \
-for name in sorted(os.listdir(p), key=str.lower): \
- fp=os.path.join(p,name); st=os.stat(fp); items.append({{'name':name,'path':fp,'is_dir':stat.S_ISDIR(st.st_mode),'size':st.st_size,'modified':str(int(st.st_mtime))}}); \
-print(json.dumps(items))\"", remote_path.replace('\\', "\\\\").replace('\'', "\\'"));
-
-    let output = build_ssh_command(&host)
-        .arg(command)
-        .output()
-        .map_err(|error| error.to_string())?;
+    let remote_path = if path.trim().is_empty() || path.trim() == "~" {
+        "."
+    } else {
+        path.trim()
+    };
+    let batch = format!("cd {}\nls -la\nbye\n", escape_sftp_path(remote_path));
+    let output = run_sftp_batch(&host, &batch)?;
 
     if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Remote SFTP command failed".to_string()
+        } else {
+            stderr
+        });
     }
 
-    serde_json::from_slice::<Vec<FileEntry>>(&output.stdout).map_err(|error| error.to_string())
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut entries = stdout.lines().filter_map(parse_sftp_ls_line).collect::<Vec<_>>();
+    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(entries)
 }
 
 #[tauri::command]

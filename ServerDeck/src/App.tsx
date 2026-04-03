@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import {
   ChevronRight,
   Copy,
+  FolderOpen,
   Info,
   Link2,
   Pencil,
@@ -23,11 +24,14 @@ import {
 import {
   closeTerminalSession,
   deleteHost,
+  listLocalDirectory,
+  listRemoteDirectory,
   listHosts,
   saveHost,
   startTerminalSession,
   testConnection,
   writeTerminalInput,
+  type FileEntry,
   type SavedHost,
   type TerminalEventPayload
 } from "./lib/api";
@@ -38,6 +42,7 @@ import {
 } from "./data/terminalThemes";
 
 const HOSTS_TAB_ID = "hosts";
+const SFTP_TAB_ID = "sftp";
 const SETTINGS_TAB_ID = "settings";
 const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 
@@ -89,6 +94,125 @@ function getHostBadge(host: SavedHost) {
   return getHostTitle(host).slice(0, 1).toUpperCase();
 }
 
+function formatFileSize(size: number) {
+  if (size <= 0) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = size;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function formatModified(value: string) {
+  if (!value) return "-";
+  const numeric = Number(value);
+  const date = Number.isNaN(numeric) ? new Date(value) : new Date(numeric * 1000);
+  return Number.isNaN(date.valueOf()) ? value : date.toLocaleDateString();
+}
+
+function getParentPath(path: string) {
+  const trimmed = path.trim();
+  if (!trimmed || trimmed === ".") {
+    return ".";
+  }
+  if (trimmed === "~" || trimmed === "/") {
+    return trimmed;
+  }
+  const normalized = trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
+  const parts = normalized.split("/").filter(Boolean);
+  if (normalized.startsWith("~")) {
+    if (parts.length <= 1) return "~";
+    return `~/${parts.slice(1, -1).join("/")}`;
+  }
+  if (parts.length <= 1) return "/";
+  return `/${parts.slice(0, -1).join("/")}`;
+}
+
+function joinChildPath(basePath: string, name: string) {
+  if (basePath === ".") return `./${name}`;
+  if (basePath === "~") return `~/${name}`;
+  if (basePath === "/") return `/${name}`;
+  return `${basePath.replace(/\/$/, "")}/${name}`;
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error) return error.message;
+  if (typeof error === "string") return error;
+  return fallback;
+}
+
+function FileBrowserPane({
+  title,
+  path,
+  items,
+  loading,
+  error,
+  emptyText,
+  disabled,
+  onPathChange,
+  onRefresh,
+  onOpenDir,
+  onGoUp
+}: {
+  title: string;
+  path: string;
+  items: FileEntry[];
+  loading: boolean;
+  error?: string;
+  emptyText: string;
+  disabled?: boolean;
+  onPathChange: (path: string) => void;
+  onRefresh: () => void;
+  onOpenDir: (entry: FileEntry) => void;
+  onGoUp: () => void;
+}) {
+  return (
+    <section className={`browser-pane ${disabled ? "browser-pane--disabled" : ""}`}>
+      <div className="browser-pane__header">
+        <strong>{title}</strong>
+        <button type="button" className="row-button" onClick={onRefresh} disabled={disabled}>
+          Refresh
+        </button>
+      </div>
+
+      <div className="browser-pathbar">
+        <button type="button" className="row-button" onClick={onGoUp} disabled={disabled}>
+          Up
+        </button>
+        <input value={path} onChange={(event) => onPathChange(event.target.value)} disabled={disabled} />
+      </div>
+
+      <div className="browser-list">
+        {loading ? <div className="browser-empty">Loading...</div> : null}
+        {!loading && error ? <div className="browser-error">{error}</div> : null}
+        {!loading && !error && items.length === 0 ? <div className="browser-empty">{emptyText}</div> : null}
+        {!loading && !error &&
+          items.map((entry) => (
+            <button
+              key={entry.path}
+              type="button"
+              className="browser-row"
+              onClick={() => entry.is_dir && onOpenDir(entry)}
+              disabled={disabled || !entry.is_dir}
+            >
+              <div className="browser-row__name">
+                <span className={`browser-row__icon ${entry.is_dir ? "browser-row__icon--dir" : ""}`}>
+                  {entry.is_dir ? "DIR" : "FILE"}
+                </span>
+                <span>{entry.name}</span>
+              </div>
+              <span>{formatModified(entry.modified)}</span>
+              <span>{entry.is_dir ? "-" : formatFileSize(entry.size)}</span>
+            </button>
+          ))}
+      </div>
+    </section>
+  );
+}
+
 export default function App() {
   const [activeTabId, setActiveTabId] = useState(HOSTS_TAB_ID);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
@@ -106,6 +230,14 @@ export default function App() {
     terminalThemeId: defaultTerminalThemeId,
     terminalFontSize: 14
   });
+  const [localPath, setLocalPath] = useState("~");
+  const [remotePath, setRemotePath] = useState(".");
+  const [localEntries, setLocalEntries] = useState<FileEntry[]>([]);
+  const [remoteEntries, setRemoteEntries] = useState<FileEntry[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
+  const [remoteLoading, setRemoteLoading] = useState(false);
+  const [localError, setLocalError] = useState("");
+  const [remoteError, setRemoteError] = useState("");
 
   const terminalEl = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -114,6 +246,7 @@ export default function App() {
   const terminalTabsRef = useRef<TerminalTab[]>([]);
 
   const isHostsView = activeTabId === HOSTS_TAB_ID;
+  const isSftpView = activeTabId === SFTP_TAB_ID;
   const isSettingsView = activeTabId === SETTINGS_TAB_ID;
 
   const selectedHost = useMemo(
@@ -217,6 +350,62 @@ export default function App() {
       window.removeEventListener("scroll", closeMenu, true);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!isSftpView) {
+      return;
+    }
+
+    let cancelled = false;
+    setLocalLoading(true);
+    setLocalError("");
+    void listLocalDirectory(localPath)
+      .then((items) => {
+        if (!cancelled) setLocalEntries(items);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setLocalEntries([]);
+          setLocalError(getErrorMessage(error, "Failed to load local directory"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLocalLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSftpView, localPath]);
+
+  useEffect(() => {
+    if (!isSftpView || !selectedHost) {
+      setRemoteEntries([]);
+      setRemoteError("");
+      return;
+    }
+
+    let cancelled = false;
+    setRemoteLoading(true);
+    setRemoteError("");
+    void listRemoteDirectory(selectedHost, remotePath)
+      .then((items) => {
+        if (!cancelled) setRemoteEntries(items);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setRemoteEntries([]);
+          setRemoteError(getErrorMessage(error, "Failed to load remote directory"));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setRemoteLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSftpView, selectedHost, remotePath]);
 
   useEffect(() => {
     if (!activeTerminalTab || !terminalEl.current) {
@@ -368,6 +557,13 @@ export default function App() {
     setSettings((current) => ({ ...current, terminalFontSize: fontSize }));
     setStatus(`Applied terminal font size ${fontSize}px`);
     setStatusTone("success");
+  }
+
+  function handleSelectSftpHost(hostId: string) {
+    setSelectedId(hostId);
+    setRemotePath(".");
+    setRemoteEntries([]);
+    setRemoteError("");
   }
 
   async function handleSave() {
@@ -602,6 +798,15 @@ export default function App() {
           >
             <Server size={16} />
             Hosts
+          </button>
+
+          <button
+            type="button"
+            className={`top-tab ${isSftpView ? "top-tab--active" : ""}`}
+            onClick={() => setActiveTabId(SFTP_TAB_ID)}
+          >
+            <FolderOpen size={16} />
+            SFTP
           </button>
 
           {terminalTabs.map((tab) => (
@@ -866,6 +1071,56 @@ export default function App() {
                     </div>
                   </aside>
                 ) : null}
+              </div>
+            </section>
+          ) : isSftpView ? (
+            <section className="sftp-screen">
+              <div className="sftp-screen__header">
+                <div>
+                  <h2>SFTP</h2>
+                  <span>Choose a host before browsing remote files.</span>
+                </div>
+
+                <label className="sftp-host-select">
+                  <span>Select Host</span>
+                  <select value={selectedId} onChange={(event) => handleSelectSftpHost(event.target.value)}>
+                    <option value="">Select host</option>
+                    {hosts.map((host) => (
+                      <option key={host.id} value={host.id}>
+                        {getHostTitle(host)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+
+              <div className="sftp-browser-grid">
+                <FileBrowserPane
+                  title="Local"
+                  path={localPath}
+                  items={localEntries}
+                  loading={localLoading}
+                  error={localError}
+                  emptyText="No local files"
+                  onPathChange={setLocalPath}
+                  onRefresh={() => setLocalPath((current) => `${current}`)}
+                  onGoUp={() => setLocalPath((current) => getParentPath(current))}
+                  onOpenDir={(entry) => setLocalPath((current) => joinChildPath(current, entry.name))}
+                />
+
+                <FileBrowserPane
+                  title="Remote"
+                  path={remotePath}
+                  items={remoteEntries}
+                  loading={remoteLoading}
+                  error={remoteError}
+                  emptyText={selectedHost ? "No remote files" : "Select a host first"}
+                  disabled={!selectedHost}
+                  onPathChange={setRemotePath}
+                  onRefresh={() => setRemotePath((current) => `${current}`)}
+                  onGoUp={() => setRemotePath((current) => getParentPath(current))}
+                  onOpenDir={(entry) => setRemotePath((current) => joinChildPath(current, entry.name))}
+                />
               </div>
             </section>
           ) : isSettingsView ? (
