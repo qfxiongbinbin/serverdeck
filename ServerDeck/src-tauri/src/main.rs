@@ -12,6 +12,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
+const GITHUB_RELEASE_API: &str = "https://api.github.com/repos/qfxiongbinbin/serverdeck/releases/latest";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HostRecord {
@@ -42,6 +44,30 @@ struct TerminalOutputPayload {
     stream: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateInfo {
+    current_version: String,
+    latest_version: String,
+    has_update: bool,
+    download_url: Option<String>,
+    asset_name: Option<String>,
+    release_page_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubRelease {
+    tag_name: String,
+    html_url: Option<String>,
+    assets: Vec<GithubAsset>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubAsset {
+    name: String,
+    browser_download_url: String,
+}
+
 struct TerminalSession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
@@ -58,6 +84,12 @@ fn storage_dir() -> Result<PathBuf, String> {
     Ok(dir)
 }
 
+fn downloads_dir() -> Result<PathBuf, String> {
+    dirs::download_dir()
+        .or_else(home_dir)
+        .ok_or_else(|| "Cannot resolve downloads directory".to_string())
+}
+
 fn hosts_file() -> Result<PathBuf, String> {
     Ok(storage_dir()?.join("hosts.json"))
 }
@@ -67,6 +99,53 @@ fn now_millis() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().to_string())
         .unwrap_or_else(|_| "0".into())
+}
+
+fn normalize_version(version: &str) -> String {
+    version.trim_start_matches('v').to_string()
+}
+
+fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
+    let parse = |value: &str| {
+        normalize_version(value)
+            .split('.')
+            .map(|part| part.parse::<u64>().unwrap_or(0))
+            .collect::<Vec<_>>()
+    };
+
+    let left_parts = parse(left);
+    let right_parts = parse(right);
+    let max_len = left_parts.len().max(right_parts.len());
+
+    for index in 0..max_len {
+        let a = *left_parts.get(index).unwrap_or(&0);
+        let b = *right_parts.get(index).unwrap_or(&0);
+        match a.cmp(&b) {
+            std::cmp::Ordering::Equal => continue,
+            ordering => return ordering,
+        }
+    }
+
+    std::cmp::Ordering::Equal
+}
+
+fn fetch_latest_release() -> Result<GithubRelease, String> {
+    let output = Command::new(resolve_binary("curl").unwrap_or_else(|_| PathBuf::from("curl")))
+        .arg("-L")
+        .arg("-sS")
+        .arg("-H")
+        .arg("Accept: application/vnd.github+json")
+        .arg("-H")
+        .arg("User-Agent: ServerDeck")
+        .arg(GITHUB_RELEASE_API)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    serde_json::from_slice::<GithubRelease>(&output.stdout).map_err(|error| error.to_string())
 }
 
 fn read_hosts() -> Result<Vec<HostRecord>, String> {
@@ -121,6 +200,11 @@ fn resolve_binary(name: &str) -> Result<PathBuf, String> {
             candidates.push(PathBuf::from("/opt/homebrew/bin/sshpass"));
             candidates.push(PathBuf::from("/usr/local/bin/sshpass"));
             candidates.push(PathBuf::from("/usr/bin/sshpass"));
+        }
+        "curl" => {
+            candidates.push(PathBuf::from("/usr/bin/curl"));
+            candidates.push(PathBuf::from("/opt/homebrew/bin/curl"));
+            candidates.push(PathBuf::from("/usr/local/bin/curl"));
         }
         _ => {}
     }
@@ -399,6 +483,54 @@ fn wire_terminal_pty_exit(
 #[tauri::command]
 fn list_hosts() -> Result<Vec<HostRecord>, String> {
     read_hosts()
+}
+
+#[tauri::command]
+fn check_for_update() -> Result<UpdateInfo, String> {
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let release = fetch_latest_release()?;
+    let latest_version = normalize_version(&release.tag_name);
+    let has_update = compare_versions(&latest_version, &current_version).is_gt();
+    let asset = release
+        .assets
+        .iter()
+        .find(|asset| asset.name.ends_with(".dmg") || asset.name.ends_with(".app.tar.gz"));
+
+    Ok(UpdateInfo {
+        current_version,
+        latest_version,
+        has_update,
+        download_url: asset.map(|item| item.browser_download_url.clone()),
+        asset_name: asset.map(|item| item.name.clone()),
+        release_page_url: release.html_url,
+    })
+}
+
+#[tauri::command]
+fn download_and_open_update(download_url: String, asset_name: String) -> Result<String, String> {
+    let target_path = downloads_dir()?.join(asset_name);
+    let curl_output = Command::new(resolve_binary("curl").unwrap_or_else(|_| PathBuf::from("curl")))
+        .arg("-L")
+        .arg("-o")
+        .arg(&target_path)
+        .arg(&download_url)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !curl_output.status.success() {
+        return Err(String::from_utf8_lossy(&curl_output.stderr).trim().to_string());
+    }
+
+    let open_output = Command::new("open")
+        .arg(&target_path)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !open_output.status.success() {
+        return Err(String::from_utf8_lossy(&open_output.stderr).trim().to_string());
+    }
+
+    Ok(target_path.display().to_string())
 }
 
 #[tauri::command]
@@ -711,6 +843,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             list_hosts,
+            check_for_update,
+            download_and_open_update,
             save_host,
             delete_host,
             test_connection,

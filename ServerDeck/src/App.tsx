@@ -6,6 +6,7 @@ import "@xterm/xterm/css/xterm.css";
 import {
   ChevronRight,
   Copy,
+  Download,
   File,
   FileArchive,
   FileCode2,
@@ -29,10 +30,12 @@ import {
   X
 } from "lucide-react";
 import {
+  checkForUpdate,
   closeTerminalSession,
   deleteLocalEntry,
   deleteHost,
   deleteRemoteEntry,
+  downloadAndOpenUpdate,
   downloadFromRemote,
   listLocalDirectory,
   listRemoteDirectory,
@@ -44,7 +47,8 @@ import {
   writeTerminalInput,
   type FileEntry,
   type SavedHost,
-  type TerminalEventPayload
+  type TerminalEventPayload,
+  type UpdateInfo
 } from "./lib/api";
 import {
   defaultTerminalThemeId,
@@ -290,6 +294,8 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
   const [transferJobs, setTransferJobs] = useState<TransferJob[]>([]);
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [updateBusy, setUpdateBusy] = useState(false);
   const [settings, setSettings] = useState<AppSettings>({
     terminalThemeId: defaultTerminalThemeId,
     terminalFontSize: 14
@@ -351,6 +357,16 @@ export default function App() {
 
   useEffect(() => {
     void refreshHosts();
+  }, []);
+
+  useEffect(() => {
+    void checkForUpdate()
+      .then((info) => {
+        setUpdateInfo(info);
+      })
+      .catch(() => {
+        setUpdateInfo(null);
+      });
   }, []);
 
   useEffect(() => {
@@ -614,6 +630,29 @@ export default function App() {
     setFileMenu(null);
     setDrawerOpen(false);
     setActiveTabId(SETTINGS_TAB_ID);
+  }
+
+  function handleUpdateClick() {
+    if (!updateInfo?.hasUpdate || !updateInfo.downloadUrl || !updateInfo.assetName) {
+      return;
+    }
+
+    setUpdateBusy(true);
+    setStatusTone("neutral");
+    setStatus(`Downloading update ${updateInfo.latestVersion}...`);
+
+    void downloadAndOpenUpdate(updateInfo.downloadUrl, updateInfo.assetName)
+      .then((savedPath) => {
+        setStatus(`Update downloaded to ${savedPath}`);
+        setStatusTone("success");
+      })
+      .catch((error) => {
+        setStatus(getErrorMessage(error, "Update download failed"));
+        setStatusTone("error");
+      })
+      .finally(() => {
+        setUpdateBusy(false);
+      });
   }
 
   function handleSelectTerminalTheme(themeId: string) {
@@ -1019,6 +1058,13 @@ export default function App() {
           </div>
 
           <div className="sidebar__bottom">
+            {updateInfo?.hasUpdate ? (
+              <button type="button" className="side-nav side-nav--update" onClick={handleUpdateClick} disabled={updateBusy}>
+                <Download size={18} />
+                {updateBusy ? "Updating" : "Update"}
+              </button>
+            ) : null}
+
             <button
               type="button"
               className={`side-nav ${isSettingsView ? "side-nav--active" : ""}`}
