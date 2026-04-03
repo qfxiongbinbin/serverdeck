@@ -220,6 +220,12 @@ select {
   color: var(--text);
 }
 
+.side-nav--update {
+  background: rgba(255, 193, 7, 0.12);
+  border-color: rgba(255, 193, 7, 0.22);
+  color: #ffd54f;
+}
+
 .mainpane {
   min-width: 0;
   min-height: 0;

@@ -25,6 +25,15 @@ export type TerminalEventPayload = {
   stream?: "stdout" | "stderr" | "system";
 };
 
+export type UpdateInfo = {
+  currentVersion: string;
+  latestVersion: string;
+  hasUpdate: boolean;
+  downloadUrl?: string | null;
+  assetName?: string | null;
+  releasePageUrl?: string | null;
+};
+
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;
@@ -146,6 +155,27 @@ export async function deleteRemoteEntry(host: SavedHost, remotePath: string, isD
     return tauriInvoke<boolean>("delete_remote_entry", { host, remotePath, isDir });
   }
   return true;
+}
+
+export async function checkForUpdate() {
+  if (hasTauri()) {
+    return tauriInvoke<UpdateInfo>("check_for_update");
+  }
+  return {
+    currentVersion: "0.1.0",
+    latestVersion: "0.1.0",
+    hasUpdate: false,
+    downloadUrl: null,
+    assetName: null,
+    releasePageUrl: null
+  } satisfies UpdateInfo;
+}
+
+export async function downloadAndOpenUpdate(downloadUrl: string, assetName: string) {
+  if (hasTauri()) {
+    return tauriInvoke<string>("download_and_open_update", { downloadUrl, assetName });
+  }
+  return "";
 }
 
 export async function startTerminalSession(host: SavedHost) {
