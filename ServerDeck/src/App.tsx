@@ -6,6 +6,13 @@ import "@xterm/xterm/css/xterm.css";
 import {
   ChevronRight,
   Copy,
+  File,
+  FileArchive,
+  FileCode2,
+  FileImage,
+  FileSpreadsheet,
+  FileText,
+  Folder,
   FolderOpen,
   Info,
   Link2,
@@ -144,6 +151,35 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function getFileIcon(entry: FileEntry) {
+  if (entry.is_dir) {
+    return { icon: Folder, className: "browser-row__icon--dir" };
+  }
+
+  const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
+
+  if (["txt", "md", "log", "rtf"].includes(ext)) {
+    return { icon: FileText, className: "browser-row__icon--text" };
+  }
+  if (["xls", "xlsx", "csv", "numbers"].includes(ext)) {
+    return { icon: FileSpreadsheet, className: "browser-row__icon--sheet" };
+  }
+  if (["doc", "docx", "pages", "pdf"].includes(ext)) {
+    return { icon: FileText, className: "browser-row__icon--doc" };
+  }
+  if (["js", "ts", "tsx", "jsx", "json", "py", "sh", "rs", "go", "java", "c", "cpp", "yml", "yaml"].includes(ext)) {
+    return { icon: FileCode2, className: "browser-row__icon--code" };
+  }
+  if (["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].includes(ext)) {
+    return { icon: FileImage, className: "browser-row__icon--image" };
+  }
+  if (["zip", "tar", "gz", "tgz", "rar", "7z"].includes(ext)) {
+    return { icon: FileArchive, className: "browser-row__icon--archive" };
+  }
+
+  return { icon: File, className: "browser-row__icon--file" };
+}
+
 function FileBrowserPane({
   title,
   path,
@@ -190,24 +226,28 @@ function FileBrowserPane({
         {!loading && error ? <div className="browser-error">{error}</div> : null}
         {!loading && !error && items.length === 0 ? <div className="browser-empty">{emptyText}</div> : null}
         {!loading && !error &&
-          items.map((entry) => (
-            <button
-              key={entry.path}
-              type="button"
-              className="browser-row"
-              onClick={() => entry.is_dir && onOpenDir(entry)}
-              disabled={disabled || !entry.is_dir}
-            >
-              <div className="browser-row__name">
-                <span className={`browser-row__icon ${entry.is_dir ? "browser-row__icon--dir" : ""}`}>
-                  {entry.is_dir ? "DIR" : "FILE"}
-                </span>
-                <span>{entry.name}</span>
-              </div>
-              <span>{formatModified(entry.modified)}</span>
-              <span>{entry.is_dir ? "-" : formatFileSize(entry.size)}</span>
-            </button>
-          ))}
+          items.map((entry) => {
+            const { icon: FileIcon, className } = getFileIcon(entry);
+
+            return (
+              <button
+                key={entry.path}
+                type="button"
+                className="browser-row"
+                onClick={() => entry.is_dir && onOpenDir(entry)}
+                disabled={disabled || !entry.is_dir}
+              >
+                <div className="browser-row__name">
+                  <span className={`browser-row__icon ${className}`}>
+                    <FileIcon size={14} />
+                  </span>
+                  <span>{entry.name}</span>
+                </div>
+                <span>{formatModified(entry.modified)}</span>
+                <span>{entry.is_dir ? "-" : formatFileSize(entry.size)}</span>
+              </button>
+            );
+          })}
       </div>
     </section>
   );
