@@ -1508,18 +1508,17 @@ export default function App() {
                       <strong>App Theme</strong>
                       <span>Choose the light or dark app appearance.</span>
                     </div>
-                    <div className="settings-chip-group">
+                    <select
+                      className="settings-select"
+                      value={settings.appTheme}
+                      onChange={(event) => handleSelectAppTheme(event.target.value as AppSettings["appTheme"])}
+                    >
                       {appThemeOptions.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          className={`settings-chip ${settings.appTheme === option.value ? "settings-chip--active" : ""}`}
-                          onClick={() => handleSelectAppTheme(option.value)}
-                        >
+                        <option key={option.value} value={option.value}>
                           {option.label}
-                        </button>
+                        </option>
                       ))}
-                    </div>
+                    </select>
                   </div>
                   <div className="settings-item">
                     <div>
@@ -1544,18 +1543,17 @@ export default function App() {
                       <strong>Terminal</strong>
                       <span>Font size for all terminal sessions.</span>
                     </div>
-                    <div className="settings-chip-group">
+                    <select
+                      className="settings-select"
+                      value={String(settings.terminalFontSize)}
+                      onChange={(event) => handleSelectTerminalFontSize(Number(event.target.value))}
+                    >
                       {terminalFontSizeOptions.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          className={`settings-chip ${settings.terminalFontSize === option.value ? "settings-chip--active" : ""}`}
-                          onClick={() => handleSelectTerminalFontSize(option.value)}
-                        >
-                          {option.label}
-                        </button>
+                        <option key={option.value} value={option.value}>
+                          {option.label} ({option.value}px)
+                        </option>
                       ))}
-                    </div>
+                    </select>
                   </div>
                 </section>
 
