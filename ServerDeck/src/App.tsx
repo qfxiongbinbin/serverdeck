@@ -62,6 +62,7 @@ const SFTP_TAB_ID = "sftp";
 const SETTINGS_TAB_ID = "settings";
 const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 const DEFAULT_APP_SETTINGS: AppSettings = {
+  appTheme: "dark",
   terminalThemeId: defaultTerminalThemeId,
   terminalFontSize: 14
 };
@@ -111,9 +112,15 @@ type TransferJob = {
 };
 
 type AppSettings = {
+  appTheme: "light" | "dark";
   terminalThemeId: string;
   terminalFontSize: number;
 };
+
+const appThemeOptions = [
+  { label: "Light", value: "light" },
+  { label: "Dark", value: "dark" }
+] as const;
 
 const terminalFontSizeOptions = [
   { label: "S", value: 12 },
@@ -380,6 +387,7 @@ export default function App() {
     try {
       const parsed = JSON.parse(savedSettings) as Partial<AppSettings>;
       setSettings({
+          appTheme: parsed.appTheme === "light" ? "light" : DEFAULT_APP_SETTINGS.appTheme,
           terminalThemeId:
             terminalThemePresets.find((item) => item.id === parsed.terminalThemeId)?.id ?? defaultTerminalThemeId,
           terminalFontSize:
@@ -395,6 +403,11 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    document.documentElement.dataset.appTheme = settings.appTheme;
+    document.documentElement.style.colorScheme = settings.appTheme;
+  }, [settings.appTheme]);
 
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
@@ -692,6 +705,12 @@ export default function App() {
     const selectedTheme = terminalThemePresets.find((item) => item.id === themeId);
     setSettings((current) => ({ ...current, terminalThemeId: themeId }));
     setStatus(`Applied terminal theme ${selectedTheme?.name ?? themeId}`);
+    setStatusTone("success");
+  }
+
+  function handleSelectAppTheme(appTheme: AppSettings["appTheme"]) {
+    setSettings((current) => ({ ...current, appTheme }));
+    setStatus(`Applied ${appTheme} app theme`);
     setStatusTone("success");
   }
 
@@ -1409,9 +1428,20 @@ export default function App() {
                   <div className="settings-item">
                     <div>
                       <strong>App Theme</strong>
-                      <span>System theme support will be added here.</span>
+                      <span>Choose the light or dark app appearance.</span>
                     </div>
-                    <span className="settings-pill">Auto</span>
+                    <div className="settings-chip-group">
+                      {appThemeOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`settings-chip ${settings.appTheme === option.value ? "settings-chip--active" : ""}`}
+                          onClick={() => handleSelectAppTheme(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="settings-item">
                     <div>

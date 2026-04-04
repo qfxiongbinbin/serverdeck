@@ -1,8 +1,10 @@
 :root {
+  color-scheme: dark;
   font-family: "SF Pro Display", "PingFang SC", sans-serif;
   color: #e8eef5;
   background: #0f1420;
   --bg: #0f1420;
+  --app-gradient-start: #1a2032;
   --panel: #171f2d;
   --panel-soft: #1e293b;
   --panel-muted: #202b3f;
@@ -18,6 +20,52 @@
   --white-muted: #63758d;
   --success: #30c48d;
   --error: #ff6a6a;
+  --input-bg: #101726;
+  --input-text: var(--text);
+  --input-border: var(--line-soft);
+  --chrome-bg: #242034;
+  --chrome-brand-text: #f2f4fa;
+  --chrome-tab-bg: rgba(255, 255, 255, 0.08);
+  --chrome-tab-text: #f4f6fb;
+  --chrome-tab-muted: #c7cfdd;
+  --chrome-tab-active-bg: rgba(255, 255, 255, 0.14);
+  --chrome-tab-active-border: rgba(255, 255, 255, 0.12);
+  --chrome-hover-bg: rgba(255, 255, 255, 0.12);
+  --chrome-sidebar-bg: rgba(255, 255, 255, 0.03);
+  --chrome-sidebar-active-bg: rgba(255, 255, 255, 0.08);
+  --chrome-sidebar-active-border: rgba(255, 255, 255, 0.08);
+  --update-nav-bg: rgba(255, 193, 7, 0.12);
+  --update-nav-border: rgba(255, 193, 7, 0.22);
+  --update-nav-text: #ffd54f;
+}
+
+:root[data-app-theme="light"] {
+  color-scheme: light;
+  color: #1c2940;
+  background: #e9eef7;
+  --bg: #eef3fb;
+  --app-gradient-start: #f7faff;
+  --line: #d7deea;
+  --line-soft: rgba(21, 39, 70, 0.12);
+  --text: #1c2940;
+  --muted: #617389;
+  --input-bg: #ffffff;
+  --input-text: #1c2940;
+  --input-border: #d7deea;
+  --chrome-bg: #f6f8fc;
+  --chrome-brand-text: #1c2940;
+  --chrome-tab-bg: rgba(33, 52, 84, 0.06);
+  --chrome-tab-text: #20324c;
+  --chrome-tab-muted: #6b7a90;
+  --chrome-tab-active-bg: #ffffff;
+  --chrome-tab-active-border: rgba(33, 52, 84, 0.12);
+  --chrome-hover-bg: rgba(33, 52, 84, 0.08);
+  --chrome-sidebar-bg: rgba(255, 255, 255, 0.7);
+  --chrome-sidebar-active-bg: #ffffff;
+  --chrome-sidebar-active-border: rgba(33, 52, 84, 0.12);
+  --update-nav-bg: #fff5d9;
+  --update-nav-border: #f1d98a;
+  --update-nav-text: #9b6a00;
 }
 
 * {
@@ -30,7 +78,7 @@ body,
   margin: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(180deg, #1a2032 0%, var(--bg) 100%);
+  background: linear-gradient(180deg, var(--app-gradient-start) 0%, var(--bg) 100%);
   overflow: hidden;
 }
 
@@ -59,9 +107,9 @@ select {
   width: 100%;
   padding: 12px 14px;
   border-radius: 12px;
-  border: 1px solid var(--line-soft);
-  background: #101726;
-  color: var(--text);
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--input-text);
 }
 
 .app-shell {
@@ -79,7 +127,7 @@ select {
   gap: 14px;
   padding: 0 16px;
   border-bottom: 1px solid var(--line-soft);
-  background: #242034;
+  background: var(--chrome-bg);
 }
 
 .topbar__brand {
@@ -87,7 +135,7 @@ select {
   display: flex;
   align-items: center;
   gap: 10px;
-  color: #f2f4fa;
+  color: var(--chrome-brand-text);
   font-size: 13px;
   font-weight: 600;
 }
@@ -120,20 +168,20 @@ select {
   padding: 0 12px;
   border: 1px solid transparent;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.08);
-  color: #f4f6fb;
+  background: var(--chrome-tab-bg);
+  color: var(--chrome-tab-text);
   white-space: nowrap;
   cursor: pointer;
   font-size: 12px;
 }
 
 .top-tab--active {
-  background: rgba(255, 255, 255, 0.14);
-  border-color: rgba(255, 255, 255, 0.12);
+  background: var(--chrome-tab-active-bg);
+  border-color: var(--chrome-tab-active-border);
 }
 
 .top-tab--ghost {
-  color: #c7cfdd;
+  color: var(--chrome-tab-muted);
 }
 
 .top-tab__label {
@@ -174,7 +222,7 @@ select {
 }
 
 .top-tab__close:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--chrome-hover-bg);
 }
 
 .workspace {
@@ -192,7 +240,7 @@ select {
   min-height: 0;
   padding: 12px 10px;
   border-right: 1px solid var(--line-soft);
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--chrome-sidebar-bg);
 }
 
 .sidebar__top,
@@ -215,15 +263,15 @@ select {
 }
 
 .side-nav--active {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: var(--chrome-sidebar-active-bg);
+  border-color: var(--chrome-sidebar-active-border);
   color: var(--text);
 }
 
 .side-nav--update {
-  background: rgba(255, 193, 7, 0.12);
-  border-color: rgba(255, 193, 7, 0.22);
-  color: #ffd54f;
+  background: var(--update-nav-bg);
+  border-color: var(--update-nav-border);
+  color: var(--update-nav-text);
 }
 
 .mainpane {
