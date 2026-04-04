@@ -741,12 +741,27 @@ fn start_terminal_session(
 }
 
 #[tauri::command]
-fn start_local_terminal_session(app: AppHandle, state: State<AppState>) -> Result<String, String> {
+fn start_local_terminal_session(
+    app: AppHandle,
+    state: State<AppState>,
+    cwd: Option<String>,
+) -> Result<String, String> {
     let session_id = Uuid::new_v4().to_string();
     eprintln!("[DEBUG] Starting local terminal session: {}", session_id);
 
     let shell = resolve_local_shell()?;
-    let cmd = CommandBuilder::new(shell.to_string_lossy().into_owned());
+    let mut cmd = CommandBuilder::new(shell.to_string_lossy().into_owned());
+
+    if let Some(path) = cwd {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            let expanded = expand_path(trimmed);
+            if !expanded.is_dir() {
+                return Err(format!("Local terminal directory not found: {}", expanded.display()));
+            }
+            cmd.cwd(expanded.as_os_str());
+        }
+    }
 
     spawn_terminal_command(
         app,

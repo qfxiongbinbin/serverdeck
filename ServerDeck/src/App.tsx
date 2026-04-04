@@ -78,6 +78,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   appTheme: "dark",
   language: "en",
   projects: [],
+  localTerminalDefaultPath: "",
   sshConnectTimeoutSeconds: 5,
   sshServerAliveIntervalSeconds: 30,
   terminalThemeId: defaultTerminalThemeId,
@@ -141,6 +142,7 @@ type AppSettings = {
   appTheme: "light" | "dark";
   language: AppLanguage;
   projects: ManagedProject[];
+  localTerminalDefaultPath: string;
   sshConnectTimeoutSeconds: number;
   sshServerAliveIntervalSeconds: number;
   terminalThemeId: string;
@@ -714,6 +716,10 @@ export default function App() {
                   }))
                   .filter((project) => project.name.trim())
               : DEFAULT_APP_SETTINGS.projects,
+          localTerminalDefaultPath:
+            typeof parsed.localTerminalDefaultPath === "string"
+              ? parsed.localTerminalDefaultPath
+              : DEFAULT_APP_SETTINGS.localTerminalDefaultPath,
           sshConnectTimeoutSeconds:
             typeof parsed.sshConnectTimeoutSeconds === "number" &&
             sshConnectTimeoutOptions.includes(parsed.sshConnectTimeoutSeconds as (typeof sshConnectTimeoutOptions)[number])
@@ -1197,6 +1203,10 @@ export default function App() {
     setStatusTone("success");
   }
 
+  function handleLocalTerminalDefaultPathChange(path: string) {
+    setSettings((current) => ({ ...current, localTerminalDefaultPath: path }));
+  }
+
   function startTransferJob(name: string, direction: TransferJob["direction"], detail: string) {
     const id = crypto.randomUUID();
     const nextJob: TransferJob = { id, name, direction, status: "running", detail };
@@ -1467,7 +1477,7 @@ export default function App() {
 
     try {
       setStatus(messages.openingLocalTerminal);
-      const sessionId = await startLocalTerminalSession();
+      const sessionId = await startLocalTerminalSession(settings.localTerminalDefaultPath.trim() || undefined);
       const localTabCount = terminalTabsRef.current.filter((tab) => tab.kind === "local").length;
       const title = localTabCount > 0 ? `${messages.localTerminal} ${localTabCount + 1}` : messages.localTerminal;
       const tabId = crypto.randomUUID();
@@ -2282,6 +2292,23 @@ export default function App() {
                       </div>
 
                       <div className="settings-card">
+                        <div className="settings-item settings-item--panel settings-item--stacked">
+                          <div>
+                            <strong>{messages.localTerminalDefaultPath}</strong>
+                            <span>{messages.localTerminalDefaultPathDescription}</span>
+                          </div>
+                          <input
+                            className="settings-input"
+                            value={settings.localTerminalDefaultPath}
+                            placeholder={messages.localTerminalDefaultPathPlaceholder}
+                            onChange={(event) => handleLocalTerminalDefaultPathChange(event.target.value)}
+                            onBlur={() => {
+                              setStatus(messages.localTerminalPathSaved);
+                              setStatusTone("success");
+                            }}
+                          />
+                        </div>
+
                         <div className="settings-item settings-item--panel">
                           <div>
                             <strong>{messages.terminal}</strong>

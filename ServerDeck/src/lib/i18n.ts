@@ -72,6 +72,10 @@ type Messages = {
   localTerminal: string;
   openingLocalTerminal: string;
   localTerminalOpened: string;
+  localTerminalDefaultPath: string;
+  localTerminalDefaultPathDescription: string;
+  localTerminalDefaultPathPlaceholder: string;
+  localTerminalPathSaved: string;
   update: string;
   settings: string;
   searchPlaceholder: string;
@@ -260,6 +264,10 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     localTerminal: "Local Terminal",
     openingLocalTerminal: "Opening local terminal...",
     localTerminalOpened: "Local terminal opened",
+    localTerminalDefaultPath: "Default Local Terminal Directory",
+    localTerminalDefaultPathDescription: "Optional directory used when opening a local terminal tab.",
+    localTerminalDefaultPathPlaceholder: "Use system default shell directory",
+    localTerminalPathSaved: "Saved local terminal default directory",
     update: "Update",
     settings: "Settings",
     searchPlaceholder: "Find a host or ssh user@hostname...",
@@ -446,6 +454,10 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     localTerminal: "本地终端",
     openingLocalTerminal: "正在打开本地终端...",
     localTerminalOpened: "已打开本地终端",
+    localTerminalDefaultPath: "本地终端默认目录",
+    localTerminalDefaultPathDescription: "打开本地终端标签页时使用的默认目录，可选。",
+    localTerminalDefaultPathPlaceholder: "使用系统默认 shell 目录",
+    localTerminalPathSaved: "已保存本地终端默认目录",
     update: "更新",
     settings: "设置",
     searchPlaceholder: "搜索主机或输入 ssh user@hostname...",
@@ -632,6 +644,10 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     localTerminal: "ローカルターミナル",
     openingLocalTerminal: "ローカルターミナルを開いています...",
     localTerminalOpened: "ローカルターミナルを開きました",
+    localTerminalDefaultPath: "ローカルターミナルの既定ディレクトリ",
+    localTerminalDefaultPathDescription: "ローカルターミナルタブを開くときに使う既定ディレクトリです。任意です。",
+    localTerminalDefaultPathPlaceholder: "システム既定の shell ディレクトリを使用",
+    localTerminalPathSaved: "ローカルターミナルの既定ディレクトリを保存しました",
     update: "更新",
     settings: "設定",
     searchPlaceholder: "ホストを検索、または ssh user@hostname... を入力",

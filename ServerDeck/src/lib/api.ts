@@ -192,9 +192,9 @@ export async function startTerminalSession(host: SavedHost, sshOptions: SshConne
   return crypto.randomUUID();
 }
 
-export async function startLocalTerminalSession() {
+export async function startLocalTerminalSession(cwd?: string) {
   if (hasTauri()) {
-    return tauriInvoke<string>("start_local_terminal_session");
+    return tauriInvoke<string>("start_local_terminal_session", { cwd });
   }
   return crypto.randomUUID();
 }
