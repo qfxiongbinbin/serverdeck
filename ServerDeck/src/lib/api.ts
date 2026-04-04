@@ -31,6 +31,27 @@ export type SshConnectionOptions = {
   serverAliveIntervalSeconds: number;
 };
 
+export type ServerObservation = {
+  hostname: string;
+  operatingSystem: string;
+  uptime: string;
+  loadAverage: string;
+  cpuCores: string;
+  cpuUsage: string;
+  memoryUsage: string;
+  memoryPercent: string;
+  diskUsage: string;
+  diskPercent: string;
+  networkUsage: string;
+  topProcesses: Array<{
+    pid: string;
+    command: string;
+    cpuPercent: number;
+    memoryPercent: number;
+  }>;
+  capturedAt: string;
+};
+
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;
@@ -192,11 +213,35 @@ export async function startTerminalSession(host: SavedHost, sshOptions: SshConne
   return crypto.randomUUID();
 }
 
-export async function startLocalTerminalSession() {
+export async function startLocalTerminalSession(cwd?: string) {
   if (hasTauri()) {
-    return tauriInvoke<string>("start_local_terminal_session");
+    return tauriInvoke<string>("start_local_terminal_session", { cwd });
   }
   return crypto.randomUUID();
+}
+
+export async function observeServer(host: SavedHost, sshOptions: SshConnectionOptions) {
+  if (hasTauri()) {
+    return tauriInvoke<ServerObservation>("observe_server", { host, sshOptions });
+  }
+  return {
+    hostname: host.label || host.address,
+    operatingSystem: "Mock OS",
+    uptime: "Unknown",
+    loadAverage: "0.00 0.00 0.00",
+    cpuCores: "4",
+    cpuUsage: "12%",
+    memoryUsage: "Unknown",
+    memoryPercent: "Unknown",
+    diskUsage: "Unknown",
+    diskPercent: "Unknown",
+    networkUsage: "Unknown",
+    topProcesses: [
+      { pid: "1234", command: "sshd", cpuPercent: 1.2, memoryPercent: 0.4 },
+      { pid: "5678", command: "node", cpuPercent: 0.8, memoryPercent: 1.1 }
+    ],
+    capturedAt: new Date().toISOString()
+  };
 }
 
 export async function writeTerminalInput(sessionId: string, data: string) {

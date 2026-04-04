@@ -1319,6 +1319,10 @@ select {
   padding-right: 4px;
 }
 
+.settings-content--wide {
+  grid-column: 1 / -1;
+}
+
 .settings-panel {
   display: grid;
   gap: 14px;
@@ -1394,6 +1398,194 @@ select {
   gap: 12px;
 }
 
+.monitor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.monitor-gauges {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.gauge-card {
+  display: grid;
+  gap: 12px;
+  min-height: 320px;
+  padding: 18px;
+  border: 1px solid var(--settings-border);
+  border-radius: 18px;
+  background: var(--settings-card-bg);
+  overflow: hidden;
+}
+
+.gauge-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.gauge-card strong {
+  font-size: 13px;
+  color: var(--settings-muted);
+}
+
+.gauge-card__value-badge {
+  min-width: 58px;
+  height: 28px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--settings-control-bg);
+  color: var(--settings-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.gauge-card__echart {
+  width: 100%;
+  height: 220px;
+}
+
+.gauge-card__detail {
+  font-size: 13px;
+  color: var(--settings-muted);
+  text-align: center;
+}
+
+.monitor-toolbar__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.monitor-header__titlewrap {
+  position: relative;
+}
+
+.monitor-header__titleline {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.monitor-info-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--settings-text);
+}
+
+.monitor-info-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 12;
+  width: min(420px, 70vw);
+  padding: 14px;
+  border: 1px solid var(--settings-border);
+  border-radius: 18px;
+  background: var(--settings-card-bg);
+  box-shadow: 0 18px 48px rgba(15, 20, 32, 0.18);
+}
+
+.monitor-info-popover__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.monitor-info-popover__header strong {
+  color: var(--settings-text);
+}
+
+.monitor-info-popover__body {
+  display: grid;
+  gap: 10px;
+}
+
+.monitor-info-popover__body div {
+  display: grid;
+  gap: 4px;
+}
+
+.monitor-info-popover__body strong {
+  font-size: 12px;
+  color: var(--settings-muted);
+}
+
+.monitor-info-popover__body span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--settings-text);
+  overflow-wrap: anywhere;
+}
+
+.monitor-card {
+  display: grid;
+  gap: 8px;
+  min-height: 108px;
+  padding: 18px;
+  border: 1px solid var(--settings-border);
+  border-radius: 18px;
+  background: var(--settings-card-bg);
+}
+
+.monitor-card--wide {
+  grid-column: 1 / -1;
+}
+
+.monitor-card strong {
+  font-size: 13px;
+  color: var(--settings-muted);
+}
+
+.monitor-card span {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--settings-text);
+  overflow-wrap: anywhere;
+}
+
+.monitor-process-list {
+  display: grid;
+  gap: 8px;
+}
+
+.monitor-process-list code {
+  display: block;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--settings-control-bg);
+  color: var(--settings-control-text);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.process-chart {
+  display: grid;
+  gap: 12px;
+}
+
+.process-chart__tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.process-chart__echart {
+  width: 100%;
+  height: 220px;
+}
+
 .settings-item {
   display: flex;
   align-items: center;
@@ -1409,6 +1601,11 @@ select {
 
 .settings-item--panel {
   min-height: 92px;
+}
+
+.settings-item--stacked {
+  align-items: stretch;
+  flex-direction: column;
 }
 
 .settings-item--form {
@@ -1604,6 +1801,32 @@ select {
   -webkit-appearance: none;
   color-scheme: auto;
   transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.settings-input {
+  width: 100%;
+  height: 42px;
+  padding: 0 14px;
+  border-radius: 14px;
+  border: 1px solid var(--settings-control-border);
+  background: var(--settings-control-bg);
+  color: var(--settings-control-text);
+}
+
+.settings-input::placeholder {
+  color: var(--settings-muted);
+}
+
+.settings-input:hover {
+  border-color: var(--settings-nav-active-border);
+  background: var(--settings-control-hover-bg);
+}
+
+.settings-input:focus,
+.settings-input:focus-visible {
+  outline: none;
+  border-color: #7db1ff;
+  box-shadow: 0 0 0 3px rgba(77, 163, 255, 0.18);
 }
 
 .settings-select:hover {

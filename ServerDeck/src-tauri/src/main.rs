@@ -38,6 +38,33 @@ struct SshConnectionOptions {
     server_alive_interval_seconds: u16,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ServerObservation {
+    hostname: String,
+    operating_system: String,
+    uptime: String,
+    load_average: String,
+    cpu_cores: String,
+    cpu_usage: String,
+    memory_usage: String,
+    memory_percent: String,
+    disk_usage: String,
+    disk_percent: String,
+    network_usage: String,
+    top_processes: Vec<ProcessObservation>,
+    captured_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ProcessObservation {
+    pid: String,
+    command: String,
+    cpu_percent: f64,
+    memory_percent: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FileEntry {
     name: String,
@@ -236,6 +263,44 @@ fn build_ssh_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> C
     append_ssh_options(&mut command, host, ssh_options);
     command.arg(destination);
     command
+}
+
+fn parse_observation_value(output: &str, key: &str) -> String {
+    output
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix(&format!("{}=", key))
+                .map(|value| value.trim().to_string())
+        })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Unknown".to_string())
+}
+
+fn parse_observation_list(output: &str, key: &str) -> Vec<String> {
+    parse_observation_value(output, key)
+        .split("||")
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty() && value != "Unknown")
+        .collect()
+}
+
+fn parse_process_observations(output: &str, key: &str) -> Vec<ProcessObservation> {
+    parse_observation_list(output, key)
+        .into_iter()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 4 {
+                return None;
+            }
+
+            Some(ProcessObservation {
+                pid: parts[0].to_string(),
+                command: parts[1].to_string(),
+                cpu_percent: parts[2].parse::<f64>().unwrap_or(0.0),
+                memory_percent: parts[3].parse::<f64>().unwrap_or(0.0),
+            })
+        })
+        .collect()
 }
 
 fn build_sftp_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> Command {
@@ -545,6 +610,74 @@ fn test_connection(host: HostRecord, ssh_options: SshConnectionOptions) -> Resul
 }
 
 #[tauri::command]
+fn observe_server(host: HostRecord, ssh_options: SshConnectionOptions) -> Result<ServerObservation, String> {
+    let script = r#"
+HOSTNAME=$(hostname 2>/dev/null || echo Unknown)
+OS=$(uname -srmo 2>/dev/null || uname -a 2>/dev/null || echo Unknown)
+UPTIME=$(uptime -p 2>/dev/null || uptime 2>/dev/null || echo Unknown)
+LOAD=$(cat /proc/loadavg 2>/dev/null | awk '{print $1" "$2" "$3}' || uptime 2>/dev/null | sed 's/.*load averages*: //' || echo Unknown)
+CPU_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo Unknown)
+CPU_USAGE=$(top -bn1 2>/dev/null | awk -F'id,' '/Cpu\(s\)/ {split($1,a,","); split(a[length(a)],b," "); print 100-b[length(b)] "%"}' || top -l 1 -n 0 2>/dev/null | awk '/CPU usage:/ {print $3}' || echo Unknown)
+MEMORY_USAGE=$(free -h 2>/dev/null | awk '/^Mem:/ {print $3 " / " $2}' || echo Unknown)
+MEMORY_PERCENT=$(free 2>/dev/null | awk '/^Mem:/ {printf "%.0f%%", ($3/$2)*100}' || echo Unknown)
+DISK_USAGE=$(df -h / 2>/dev/null | awk 'NR==2 {print $3 " / " $2}' || echo Unknown)
+DISK_PERCENT=$(df -h / 2>/dev/null | awk 'NR==2 {print $5}' || echo Unknown)
+NET_LINUX=$(cat /proc/net/dev 2>/dev/null | awk 'NR>2 {gsub(":","",$1); if ($1!="lo") {rx+=$2; tx+=$10}} END {if (rx>0 || tx>0) printf "RX %.1f MB / TX %.1f MB", rx/1024/1024, tx/1024/1024}')
+NET_MAC=$(netstat -ib 2>/dev/null | awk 'NR>1 && $1 !~ /lo0/ && $7 ~ /^[0-9]+$/ && $10 ~ /^[0-9]+$/ {rx+=$7; tx+=$10} END {if (rx>0 || tx>0) printf "RX %.1f MB / TX %.1f MB", rx/1024/1024, tx/1024/1024}')
+NETWORK_USAGE=${NET_LINUX:-$NET_MAC}
+if [ -z "$NETWORK_USAGE" ]; then NETWORK_USAGE=Unknown; fi
+TOP_PROCESSES=$(ps -eo pid,comm,%cpu,%mem --sort=-%cpu 2>/dev/null | sed -n '2,6p' | awk '{$1=$1; print}' | paste -sd '||' -)
+if [ -z "$TOP_PROCESSES" ]; then TOP_PROCESSES=$(ps -Ao pid,comm,%cpu,%mem -r 2>/dev/null | sed -n '2,6p' | awk '{$1=$1; print}' | paste -sd '||' -); fi
+printf 'hostname=%s\n' "$HOSTNAME"
+printf 'operating_system=%s\n' "$OS"
+printf 'uptime=%s\n' "$UPTIME"
+printf 'load_average=%s\n' "$LOAD"
+printf 'cpu_cores=%s\n' "$CPU_CORES"
+printf 'cpu_usage=%s\n' "$CPU_USAGE"
+printf 'memory_usage=%s\n' "$MEMORY_USAGE"
+printf 'memory_percent=%s\n' "$MEMORY_PERCENT"
+printf 'disk_usage=%s\n' "$DISK_USAGE"
+printf 'disk_percent=%s\n' "$DISK_PERCENT"
+printf 'network_usage=%s\n' "$NETWORK_USAGE"
+printf 'top_processes=%s\n' "$TOP_PROCESSES"
+"#;
+
+    let output = build_ssh_command(&host, &ssh_options)
+        .arg("sh")
+        .arg("-lc")
+        .arg(script)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Server observation failed".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    Ok(ServerObservation {
+        hostname: parse_observation_value(&stdout, "hostname"),
+        operating_system: parse_observation_value(&stdout, "operating_system"),
+        uptime: parse_observation_value(&stdout, "uptime"),
+        load_average: parse_observation_value(&stdout, "load_average"),
+        cpu_cores: parse_observation_value(&stdout, "cpu_cores"),
+        cpu_usage: parse_observation_value(&stdout, "cpu_usage"),
+        memory_usage: parse_observation_value(&stdout, "memory_usage"),
+        memory_percent: parse_observation_value(&stdout, "memory_percent"),
+        disk_usage: parse_observation_value(&stdout, "disk_usage"),
+        disk_percent: parse_observation_value(&stdout, "disk_percent"),
+        network_usage: parse_observation_value(&stdout, "network_usage"),
+        top_processes: parse_process_observations(&stdout, "top_processes"),
+        captured_at: now_millis(),
+    })
+}
+
+#[tauri::command]
 fn list_local_directory(path: String) -> Result<Vec<FileEntry>, String> {
     file_entries_from_dir(&expand_path(&path))
 }
@@ -741,12 +874,27 @@ fn start_terminal_session(
 }
 
 #[tauri::command]
-fn start_local_terminal_session(app: AppHandle, state: State<AppState>) -> Result<String, String> {
+fn start_local_terminal_session(
+    app: AppHandle,
+    state: State<AppState>,
+    cwd: Option<String>,
+) -> Result<String, String> {
     let session_id = Uuid::new_v4().to_string();
     eprintln!("[DEBUG] Starting local terminal session: {}", session_id);
 
     let shell = resolve_local_shell()?;
-    let cmd = CommandBuilder::new(shell.to_string_lossy().into_owned());
+    let mut cmd = CommandBuilder::new(shell.to_string_lossy().into_owned());
+
+    if let Some(path) = cwd {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            let expanded = expand_path(trimmed);
+            if !expanded.is_dir() {
+                return Err(format!("Local terminal directory not found: {}", expanded.display()));
+            }
+            cmd.cwd(expanded.as_os_str());
+        }
+    }
 
     spawn_terminal_command(
         app,
@@ -813,6 +961,7 @@ fn main() {
             save_host,
             delete_host,
             test_connection,
+            observe_server,
             list_local_directory,
             list_remote_directory,
             upload_to_remote,
