@@ -50,8 +50,15 @@ import {
   writeTerminalInput,
   type FileEntry,
   type SavedHost,
+  type SshConnectionOptions,
   type TerminalEventPayload
 } from "./lib/api";
+import {
+  getDocumentLanguageTag,
+  languageOptions,
+  messagesByLanguage,
+  type AppLanguage
+} from "./lib/i18n";
 import {
   defaultTerminalThemeId,
   terminalThemePresets,
@@ -64,6 +71,9 @@ const SETTINGS_TAB_ID = "settings";
 const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 const DEFAULT_APP_SETTINGS: AppSettings = {
   appTheme: "dark",
+  language: "en",
+  sshConnectTimeoutSeconds: 5,
+  sshServerAliveIntervalSeconds: 30,
   terminalThemeId: defaultTerminalThemeId,
   terminalFontSize: 14
 };
@@ -114,6 +124,9 @@ type TransferJob = {
 
 type AppSettings = {
   appTheme: "light" | "dark";
+  language: AppLanguage;
+  sshConnectTimeoutSeconds: number;
+  sshServerAliveIntervalSeconds: number;
   terminalThemeId: string;
   terminalFontSize: number;
 };
@@ -121,23 +134,21 @@ type AppSettings = {
 type UpdateStage = "idle" | "downloading" | "ready";
 type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
 
-const appThemeOptions = [
-  { label: "Light", value: "light" },
-  { label: "Dark", value: "dark" }
-] as const;
-
 const terminalFontSizeOptions = [
   { label: "S", value: 12 },
   { label: "M", value: 14 },
   { label: "L", value: 16 }
 ] as const;
 
-function getHostTitle(host: SavedHost) {
-  return host.label.trim() || host.address.trim() || "Untitled Host";
+const sshConnectTimeoutOptions = [5, 10, 15, 30] as const;
+const sshServerAliveIntervalOptions = [15, 30, 60, 120] as const;
+
+function getHostTitle(host: SavedHost, fallback = "Untitled Host") {
+  return host.label.trim() || host.address.trim() || fallback;
 }
 
-function getHostBadge(host: SavedHost) {
-  return getHostTitle(host).slice(0, 1).toUpperCase();
+function getHostBadge(host: SavedHost, fallback = "Untitled Host") {
+  return getHostTitle(host, fallback).slice(0, 1).toUpperCase();
 }
 
 function hasTauriRuntime() {
@@ -225,6 +236,9 @@ function getFileIcon(entry: FileEntry) {
 
 function FileBrowserPane({
   title,
+  refreshLabel,
+  upLabel,
+  loadingText,
   path,
   items,
   loading,
@@ -238,6 +252,9 @@ function FileBrowserPane({
   onGoUp
 }: {
   title: string;
+  refreshLabel: string;
+  upLabel: string;
+  loadingText: string;
   path: string;
   items: FileEntry[];
   loading: boolean;
@@ -255,19 +272,19 @@ function FileBrowserPane({
       <div className="browser-pane__header">
         <strong>{title}</strong>
         <button type="button" className="row-button" onClick={onRefresh} disabled={disabled}>
-          Refresh
+          {refreshLabel}
         </button>
       </div>
 
       <div className="browser-pathbar">
         <button type="button" className="row-button" onClick={onGoUp} disabled={disabled}>
-          Up
+          {upLabel}
         </button>
         <input value={path} onChange={(event) => onPathChange(event.target.value)} disabled={disabled} />
       </div>
 
       <div className="browser-list">
-        {loading ? <div className="browser-empty">Loading...</div> : null}
+        {loading ? <div className="browser-empty">{loadingText}</div> : null}
         {!loading && error ? <div className="browser-error">{error}</div> : null}
         {!loading && !error && items.length === 0 ? <div className="browser-empty">{emptyText}</div> : null}
         {!loading && !error &&
@@ -308,7 +325,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
-  const [status, setStatus] = useState("Ready");
+  const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
   const [statusTone, setStatusTone] = useState<"neutral" | "success" | "error">("neutral");
   const [busy, setBusy] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -319,7 +336,7 @@ export default function App() {
   const [updateCheckState, setUpdateCheckState] = useState<UpdateCheckState>(
     hasTauriRuntime() ? "idle" : "unsupported"
   );
-  const [updateCheckMessage, setUpdateCheckMessage] = useState("");
+  const [updateCheckError, setUpdateCheckError] = useState("");
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateStage, setUpdateStage] = useState<UpdateStage>("idle");
   const [updateDownloadedBytes, setUpdateDownloadedBytes] = useState(0);
@@ -362,6 +379,33 @@ export default function App() {
     [settings.terminalThemeId]
   );
 
+  const messages = useMemo(() => messagesByLanguage[settings.language], [settings.language]);
+  const sshOptions = useMemo<SshConnectionOptions>(
+    () => ({
+      connectTimeoutSeconds: settings.sshConnectTimeoutSeconds,
+      serverAliveIntervalSeconds: settings.sshServerAliveIntervalSeconds
+    }),
+    [settings.sshConnectTimeoutSeconds, settings.sshServerAliveIntervalSeconds]
+  );
+
+  const appThemeOptions = useMemo(
+    () => [
+      { label: messages.light, value: "light" },
+      { label: messages.dark, value: "dark" }
+    ] as const,
+    [messages.dark, messages.light]
+  );
+
+  const getDisplayHostTitle = useCallback(
+    (host: SavedHost) => getHostTitle(host, messages.untitledHost),
+    [messages.untitledHost]
+  );
+
+  const getDisplayHostBadge = useCallback(
+    (host: SavedHost) => getHostBadge(host, messages.untitledHost),
+    [messages.untitledHost]
+  );
+
   const filteredHosts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return hosts;
@@ -396,15 +440,15 @@ export default function App() {
   const checkForUpdates = useCallback(async (options?: { silent?: boolean }) => {
     if (!hasTauriRuntime()) {
       setUpdateCheckState("unsupported");
-      setUpdateCheckMessage("Updater is only available in the desktop app.");
+      setUpdateCheckError("");
       return null;
     }
 
     setUpdateCheckState("checking");
-    setUpdateCheckMessage("");
+    setUpdateCheckError("");
 
     if (!options?.silent) {
-      setStatus("Checking for updates...");
+      setStatus(messages.checkingForUpdates);
       setStatusTone("neutral");
     }
 
@@ -414,10 +458,9 @@ export default function App() {
 
       if (update) {
         setUpdateCheckState("available");
-        setUpdateCheckMessage(`Version ${update.version} is available.`);
 
         if (!options?.silent) {
-          setStatus(`Update ${update.version} is available`);
+          setStatus(messages.updateAvailableStatus(update.version));
           setStatusTone("success");
         }
 
@@ -425,19 +468,18 @@ export default function App() {
       }
 
       setUpdateCheckState("upToDate");
-      setUpdateCheckMessage("You are already on the latest version.");
 
       if (!options?.silent) {
-        setStatus("You are already on the latest version");
+        setStatus(messages.latestVersion);
         setStatusTone("success");
       }
 
       return null;
     } catch (error) {
-      const message = getErrorMessage(error, "Update check failed");
+      const message = getErrorMessage(error, messages.updateCheckFailed);
       setAvailableUpdate(null);
       setUpdateCheckState("error");
-      setUpdateCheckMessage(message);
+      setUpdateCheckError(message);
 
       if (!options?.silent) {
         setStatus(message);
@@ -446,7 +488,7 @@ export default function App() {
 
       return null;
     }
-  }, []);
+  }, [messages]);
 
   useEffect(() => {
     if (!hasTauriRuntime()) {
@@ -492,6 +534,19 @@ export default function App() {
       const parsed = JSON.parse(savedSettings) as Partial<AppSettings>;
       setSettings({
           appTheme: parsed.appTheme === "light" ? "light" : DEFAULT_APP_SETTINGS.appTheme,
+          language: languageOptions.find((item) => item.value === parsed.language)?.value ?? DEFAULT_APP_SETTINGS.language,
+          sshConnectTimeoutSeconds:
+            typeof parsed.sshConnectTimeoutSeconds === "number" &&
+            sshConnectTimeoutOptions.includes(parsed.sshConnectTimeoutSeconds as (typeof sshConnectTimeoutOptions)[number])
+              ? parsed.sshConnectTimeoutSeconds
+              : DEFAULT_APP_SETTINGS.sshConnectTimeoutSeconds,
+          sshServerAliveIntervalSeconds:
+            typeof parsed.sshServerAliveIntervalSeconds === "number" &&
+            sshServerAliveIntervalOptions.includes(
+              parsed.sshServerAliveIntervalSeconds as (typeof sshServerAliveIntervalOptions)[number]
+            )
+              ? parsed.sshServerAliveIntervalSeconds
+              : DEFAULT_APP_SETTINGS.sshServerAliveIntervalSeconds,
           terminalThemeId:
             terminalThemePresets.find((item) => item.id === parsed.terminalThemeId)?.id ?? defaultTerminalThemeId,
           terminalFontSize:
@@ -511,7 +566,8 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.appTheme = settings.appTheme;
     document.documentElement.style.colorScheme = settings.appTheme;
-  }, [settings.appTheme]);
+    document.documentElement.lang = getDocumentLanguageTag(settings.language);
+  }, [settings.appTheme, settings.language]);
 
   useEffect(() => {
     activeTabIdRef.current = activeTabId;
@@ -570,7 +626,7 @@ export default function App() {
       .catch((error) => {
         if (!cancelled) {
           setLocalEntries([]);
-          setLocalError(getErrorMessage(error, "Failed to load local directory"));
+          setLocalError(getErrorMessage(error, messages.failedLoadLocalDirectory));
         }
       })
       .finally(() => {
@@ -592,14 +648,14 @@ export default function App() {
     let cancelled = false;
     setRemoteLoading(true);
     setRemoteError("");
-    void listRemoteDirectory(selectedHost, remotePath)
+    void listRemoteDirectory(selectedHost, remotePath, sshOptions)
       .then((items) => {
         if (!cancelled) setRemoteEntries(items);
       })
       .catch((error) => {
         if (!cancelled) {
           setRemoteEntries([]);
-          setRemoteError(getErrorMessage(error, "Failed to load remote directory"));
+          setRemoteError(getErrorMessage(error, messages.failedLoadRemoteDirectory));
         }
       })
       .finally(() => {
@@ -609,7 +665,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, selectedHost, remotePath, remoteRefreshTick]);
+  }, [isSftpView, selectedHost, remotePath, remoteRefreshTick, sshOptions]);
 
   useEffect(() => {
     if (!activeTerminalTab || !terminalEl.current) {
@@ -689,7 +745,7 @@ export default function App() {
 
       const nextStatusText =
         matchingTab.state === "connecting" && event.payload.stream === "stdout"
-          ? "Connected"
+          ? messages.connected
           : matchingTab.statusText;
 
       setTerminalTabs((prev) =>
@@ -712,7 +768,7 @@ export default function App() {
         cleanup = unlisten;
       })
       .catch(() => {
-        setStatus("Failed to subscribe terminal output events");
+        setStatus(messages.failedSubscribeTerminalEvents);
         setStatusTone("error");
       });
 
@@ -728,7 +784,7 @@ export default function App() {
     setDrawerOpen(true);
     setSelectedId("");
     setDraft(blankHost);
-    setStatus("Ready");
+    setStatus(messages.ready);
     setStatusTone("neutral");
   }
 
@@ -776,7 +832,7 @@ export default function App() {
     setUpdateContentLength(null);
     setUpdateStage("downloading");
     setStatusTone("neutral");
-    setStatus(`Downloading update ${availableUpdate.version}...`);
+    setStatus(messages.downloadUpdateStatus(availableUpdate.version));
 
     try {
       await availableUpdate.downloadAndInstall((event: DownloadEvent) => {
@@ -791,12 +847,12 @@ export default function App() {
       });
 
       setUpdateStage("ready");
-      setStatus(`Update ${availableUpdate.version} is ready to restart`);
+      setStatus(messages.updateReadyStatus(availableUpdate.version));
       setStatusTone("success");
     } catch (error) {
       setUpdateStage("idle");
-      setUpdateError(getErrorMessage(error, "Update download failed"));
-      setStatus(getErrorMessage(error, "Update download failed"));
+      setUpdateError(getErrorMessage(error, messages.updateDownloadFailed));
+      setStatus(getErrorMessage(error, messages.updateDownloadFailed));
       setStatusTone("error");
     }
   }
@@ -806,13 +862,13 @@ export default function App() {
       return;
     }
 
-    setStatus("Restarting to apply update...");
+    setStatus(messages.restartingToApplyUpdate);
     setStatusTone("neutral");
 
     try {
       await relaunch();
     } catch (error) {
-      setStatus(getErrorMessage(error, "Restart failed"));
+      setStatus(getErrorMessage(error, messages.restartFailed));
       setStatusTone("error");
     }
   }
@@ -838,10 +894,10 @@ export default function App() {
       setSettings(DEFAULT_APP_SETTINGS);
       setLocalPath("~");
       setRemotePath(".");
-      setStatus("Cleared local app data");
+      setStatus(messages.clearDataSuccess);
       setStatusTone("success");
     } catch (error) {
-      setStatus(getErrorMessage(error, "Failed to clear local data"));
+      setStatus(getErrorMessage(error, messages.clearDataFailed));
       setStatusTone("error");
     } finally {
       setBusy(false);
@@ -851,19 +907,38 @@ export default function App() {
   function handleSelectTerminalTheme(themeId: string) {
     const selectedTheme = terminalThemePresets.find((item) => item.id === themeId);
     setSettings((current) => ({ ...current, terminalThemeId: themeId }));
-    setStatus(`Applied terminal theme ${selectedTheme?.name ?? themeId}`);
+    setStatus(messages.appliedTerminalTheme(selectedTheme?.name ?? themeId));
     setStatusTone("success");
   }
 
   function handleSelectAppTheme(appTheme: AppSettings["appTheme"]) {
     setSettings((current) => ({ ...current, appTheme }));
-    setStatus(`Applied ${appTheme} app theme`);
+    setStatus(messages.appliedAppTheme(appTheme === "light" ? messages.light : messages.dark));
+    setStatusTone("success");
+  }
+
+  function handleSelectLanguage(language: AppLanguage) {
+    const label = languageOptions.find((item) => item.value === language)?.label ?? language;
+    setSettings((current) => ({ ...current, language }));
+    setStatus(messagesByLanguage[language].appliedLanguage(label));
+    setStatusTone("success");
+  }
+
+  function handleSelectSshDefaults(field: "sshConnectTimeoutSeconds" | "sshServerAliveIntervalSeconds", value: number) {
+    const nextSettings = {
+      ...settings,
+      [field]: value
+    };
+    setSettings(nextSettings);
+    setStatus(
+      messages.appliedSshDefaults(nextSettings.sshConnectTimeoutSeconds, nextSettings.sshServerAliveIntervalSeconds)
+    );
     setStatusTone("success");
   }
 
   function handleSelectTerminalFontSize(fontSize: number) {
     setSettings((current) => ({ ...current, terminalFontSize: fontSize }));
-    setStatus(`Applied terminal font size ${fontSize}px`);
+    setStatus(messages.appliedTerminalFontSize(fontSize));
     setStatusTone("success");
   }
 
@@ -890,16 +965,16 @@ export default function App() {
 
   async function handleUploadEntry(entry: FileEntry) {
     if (!selectedHost) return;
-    const jobId = startTransferJob(entry.name, "upload", `Uploading to ${remotePath}`);
+    const jobId = startTransferJob(entry.name, "upload", messages.uploadingTo(remotePath));
     try {
-      await uploadToRemote(selectedHost, entry.path, remotePath);
-      setStatus(`Uploaded ${entry.name}`);
+      await uploadToRemote(selectedHost, entry.path, remotePath, sshOptions);
+      setStatus(messages.uploaded(entry.name));
       setStatusTone("success");
-      finishTransferJob(jobId, "success", `Uploaded to ${remotePath}`);
+      finishTransferJob(jobId, "success", messages.uploadedTo(remotePath));
       setFileMenu(null);
       setRemoteRefreshTick((current) => current + 1);
     } catch (error) {
-      const message = getErrorMessage(error, `Upload failed for ${entry.name}`);
+      const message = getErrorMessage(error, messages.uploadFailed(entry.name));
       setStatus(message);
       setStatusTone("error");
       finishTransferJob(jobId, "error", message);
@@ -909,16 +984,16 @@ export default function App() {
   async function handleDownloadEntry(entry: FileEntry) {
     if (!selectedHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
-    const jobId = startTransferJob(entry.name, "download", `Downloading to ${localPath}`);
+    const jobId = startTransferJob(entry.name, "download", messages.downloadingTo(localPath));
     try {
-      await downloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir);
-      setStatus(`Downloaded ${entry.name}`);
+      await downloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir, sshOptions);
+      setStatus(messages.downloaded(entry.name));
       setStatusTone("success");
-      finishTransferJob(jobId, "success", `Downloaded to ${localPath}`);
+      finishTransferJob(jobId, "success", messages.downloadedTo(localPath));
       setFileMenu(null);
       setLocalRefreshTick((current) => current + 1);
     } catch (error) {
-      const message = getErrorMessage(error, `Download failed for ${entry.name}`);
+      const message = getErrorMessage(error, messages.downloadFailed(entry.name));
       setStatus(message);
       setStatusTone("error");
       finishTransferJob(jobId, "error", message);
@@ -927,7 +1002,7 @@ export default function App() {
 
   async function handleDeleteLocalFile(entry: FileEntry) {
     await deleteLocalEntry(entry.path, entry.is_dir);
-    setStatus(`Deleted local ${entry.name}`);
+    setStatus(messages.deletedLocal(entry.name));
     setStatusTone("success");
     setFileMenu(null);
     setLocalRefreshTick((current) => current + 1);
@@ -936,8 +1011,8 @@ export default function App() {
   async function handleDeleteRemoteFile(entry: FileEntry) {
     if (!selectedHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
-    await deleteRemoteEntry(selectedHost, remoteTarget, entry.is_dir);
-    setStatus(`Deleted remote ${entry.name}`);
+    await deleteRemoteEntry(selectedHost, remoteTarget, entry.is_dir, sshOptions);
+    setStatus(messages.deletedRemote(entry.name));
     setStatusTone("success");
     setFileMenu(null);
     setRemoteRefreshTick((current) => current + 1);
@@ -956,7 +1031,7 @@ export default function App() {
 
     try {
       if (!draft.address.trim()) {
-        throw new Error("Address is required");
+        throw new Error(messages.addressRequired);
       }
 
       const saved = await saveHost({
@@ -966,11 +1041,11 @@ export default function App() {
 
       setDrawerMode("edit");
       setDrawerOpen(true);
-      setStatus(`Saved host ${getHostTitle(saved)}`);
+      setStatus(messages.savedHost(getDisplayHostTitle(saved)));
       setStatusTone("success");
       await refreshHosts(saved.id);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Save failed");
+      setStatus(error instanceof Error ? error.message : messages.saveFailed);
       setStatusTone("error");
     } finally {
       setBusy(false);
@@ -985,14 +1060,14 @@ export default function App() {
 
     try {
       await deleteHost(draft.id);
-      setStatus(`Deleted host ${getHostTitle(draft)}`);
+      setStatus(messages.deletedHost(getDisplayHostTitle(draft)));
       setStatusTone("success");
       setDrawerOpen(false);
       setDrawerMode("new");
       setDraft(blankHost);
       await refreshHosts();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Delete failed");
+      setStatus(error instanceof Error ? error.message : messages.deleteFailed);
       setStatusTone("error");
     } finally {
       setBusy(false);
@@ -1011,11 +1086,11 @@ export default function App() {
         setDraft(blankHost);
         setDrawerMode("new");
       }
-      setStatus(`Removed host ${getHostTitle(targetHost)}`);
+      setStatus(messages.removedHost(getDisplayHostTitle(targetHost)));
       setStatusTone("success");
       await refreshHosts();
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Remove failed");
+      setStatus(error instanceof Error ? error.message : messages.removeFailed);
       setStatusTone("error");
     } finally {
       setBusy(false);
@@ -1030,14 +1105,14 @@ export default function App() {
       const duplicated = await saveHost({
         ...targetHost,
         id: crypto.randomUUID(),
-        label: `${getHostTitle(targetHost)} Copy`
+        label: `${getDisplayHostTitle(targetHost)} ${messages.hostCopySuffix}`
       });
       setContextMenu(null);
-      setStatus(`Duplicated host ${getHostTitle(targetHost)}`);
+      setStatus(messages.duplicatedHost(getDisplayHostTitle(targetHost)));
       setStatusTone("success");
       await refreshHosts(duplicated.id);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Duplicate failed");
+      setStatus(error instanceof Error ? error.message : messages.duplicateFailed);
       setStatusTone("error");
     } finally {
       setBusy(false);
@@ -1050,17 +1125,17 @@ export default function App() {
     try {
       await navigator.clipboard.writeText(sshLink);
       setContextMenu(null);
-      setStatus(`Copied link for ${getHostTitle(targetHost)}`);
+      setStatus(messages.copiedLink(getDisplayHostTitle(targetHost)));
       setStatusTone("success");
     } catch {
-      setStatus("Copy link failed");
+      setStatus(messages.copyLinkFailed);
       setStatusTone("error");
     }
   }
 
   function handlePlaceholderAction(label: string) {
     setContextMenu(null);
-    setStatus(`${label} is not wired yet`);
+    setStatus(messages.notWiredYet(label));
     setStatusTone("neutral");
   }
 
@@ -1070,15 +1145,15 @@ export default function App() {
 
     try {
       if (!draft.address.trim()) {
-        throw new Error("Select or fill a host first");
+        throw new Error(messages.selectOrFillHostFirst);
       }
 
-      setStatus(`Testing ${draft.username}@${draft.address}:${draft.port} ...`);
-      const message = await testConnection(draft);
+      setStatus(messages.testingHost(draft.username, draft.address, draft.port));
+      const message = await testConnection(draft, sshOptions);
       setStatus(message);
       setStatusTone("success");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Connection test failed");
+      setStatus(error instanceof Error ? error.message : messages.connectionTestFailed);
       setStatusTone("error");
     } finally {
       setBusy(false);
@@ -1091,19 +1166,19 @@ export default function App() {
 
     try {
       if (!targetHost.address.trim()) {
-        throw new Error("Select or fill a host first");
+        throw new Error(messages.selectOrFillHostFirst);
       }
       if (targetHost.authType === "password" && !(targetHost.password || "").trim()) {
-        throw new Error("Password auth requires a password");
+        throw new Error(messages.passwordRequired);
       }
       if (targetHost.authType === "key" && !(targetHost.privateKeyPath || "").trim()) {
-        throw new Error("Key auth requires a private key path");
+        throw new Error(messages.keyPathRequired);
       }
 
-      setStatus(`Connecting to ${targetHost.username}@${targetHost.address}:${targetHost.port}...`);
-      const sessionId = await startTerminalSession(targetHost);
+      setStatus(messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port));
+      const sessionId = await startTerminalSession(targetHost, sshOptions);
       const tabId = crypto.randomUUID();
-      const title = getHostTitle(targetHost);
+      const title = getDisplayHostTitle(targetHost);
 
       setTerminalTabs((prev) => [
         ...prev,
@@ -1113,17 +1188,17 @@ export default function App() {
           title,
           host: targetHost,
           state: "connecting",
-          statusText: `Connecting to ${targetHost.username}@${targetHost.address}:${targetHost.port}...`,
+          statusText: messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port),
           buffer: []
         }
       ]);
 
       setActiveTabId(tabId);
       setDrawerOpen(false);
-      setStatus(`Terminal session opened for ${targetHost.username}@${targetHost.address}`);
+      setStatus(messages.terminalSessionOpened(targetHost.username, targetHost.address));
       setStatusTone("success");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Terminal open failed");
+      setStatus(error instanceof Error ? error.message : messages.terminalOpenFailed);
       setStatusTone("error");
     } finally {
       setBusy(false);
@@ -1146,7 +1221,7 @@ export default function App() {
 
     setTerminalTabs(nextTabs);
     setActiveTabId(nextActiveTabId);
-    setStatus(`Closed terminal tab ${targetTab.title}`);
+    setStatus(messages.closedTerminalTab(targetTab.title));
     setStatusTone("neutral");
   }
 
@@ -1194,7 +1269,7 @@ export default function App() {
             onClick={() => setActiveTabId(HOSTS_TAB_ID)}
           >
             <Server size={16} />
-            Hosts
+            {messages.hosts}
           </button>
 
           <button
@@ -1203,7 +1278,7 @@ export default function App() {
             onClick={() => setActiveTabId(SFTP_TAB_ID)}
           >
             <FolderOpen size={16} />
-            SFTP
+            {messages.sftp}
           </button>
 
           {terminalTabs.map((tab) => (
@@ -1238,7 +1313,7 @@ export default function App() {
 
           <button type="button" className="top-tab top-tab--ghost" disabled>
             <Plus size={16} />
-            New Tab
+            {messages.newTab}
           </button>
         </div>
       </header>
@@ -1262,11 +1337,11 @@ export default function App() {
                 type="button"
                 className="side-nav side-nav--update"
                 onClick={handleUpdateClick}
-              >
-                <Download size={18} />
-                Update
-              </button>
-            ) : null}
+            >
+              <Download size={18} />
+              {messages.update}
+            </button>
+          ) : null}
 
             <button
               type="button"
@@ -1274,7 +1349,7 @@ export default function App() {
               onClick={openSettings}
             >
               <Wrench size={18} />
-              Settings
+              {messages.settings}
             </button>
           </div>
         </aside>
@@ -1288,13 +1363,13 @@ export default function App() {
                   <input
                     value={search}
                     onChange={(event) => setSearch(event.target.value)}
-                    placeholder="Find a host or ssh user@hostname..."
+                    placeholder={messages.searchPlaceholder}
                   />
                 </div>
 
                 <button type="button" className="primary-button" onClick={openNewDrawer}>
                   <Plus size={16} />
-                  New
+                  {messages.new}
                 </button>
               </div>
 
@@ -1302,8 +1377,8 @@ export default function App() {
                 <section className="hosts-board">
                   <div className="hosts-board__header">
                     <div>
-                      <h2>Hosts</h2>
-                      <span>{filteredHosts.length} available</span>
+                      <h2>{messages.hosts}</h2>
+                      <span>{messages.hostCount(filteredHosts.length)}</span>
                     </div>
                   </div>
 
@@ -1328,10 +1403,10 @@ export default function App() {
                           }
                         }}
                       >
-                        <div className="host-row__badge">{getHostBadge(host)}</div>
+                        <div className="host-row__badge">{getDisplayHostBadge(host)}</div>
 
                         <div className="host-row__body">
-                          <div className="host-row__title">{getHostTitle(host)}</div>
+                          <div className="host-row__title">{getDisplayHostTitle(host)}</div>
                           <div className="host-row__sub">ssh, {host.username}</div>
                           <div className="host-row__meta">{host.address}:{host.port}</div>
                         </div>
@@ -1345,7 +1420,7 @@ export default function App() {
                               openEditDrawer(host);
                             }}
                           >
-                            Edit
+                            {messages.edit}
                           </button>
                           <button
                             type="button"
@@ -1357,7 +1432,7 @@ export default function App() {
                               void handleOpenTerminal(host);
                             }}
                           >
-                            Connect
+                            {messages.connect}
                           </button>
                         </div>
                       </div>
@@ -1365,11 +1440,11 @@ export default function App() {
 
                     {!filteredHosts.length ? (
                       <div className="empty-state">
-                        <h3>No hosts found</h3>
-                        <p>Try another keyword or create a new host.</p>
+                        <h3>{messages.noHostsFound}</h3>
+                        <p>{messages.noHostsHint}</p>
                         <button type="button" className="primary-button" onClick={openNewDrawer}>
                           <Plus size={16} />
-                          Create Host
+                          {messages.createHost}
                         </button>
                       </div>
                     ) : null}
@@ -1380,8 +1455,8 @@ export default function App() {
                   <aside className="host-drawer">
                     <div className="host-drawer__header">
                       <div>
-                        <div className="drawer-eyebrow">{drawerMode === "new" ? "New Host" : "Edit Host"}</div>
-                        <h3>{drawerMode === "new" ? "Create server profile" : getHostTitle(draft)}</h3>
+                        <div className="drawer-eyebrow">{drawerMode === "new" ? messages.newHost : messages.editHost}</div>
+                        <h3>{drawerMode === "new" ? messages.createServerProfile : getDisplayHostTitle(draft)}</h3>
                       </div>
 
                       <button type="button" className="icon-button" onClick={closeDrawer}>
@@ -1393,17 +1468,17 @@ export default function App() {
 
                     <div className="drawer-form">
                       <label>
-                        <span>Label</span>
+                        <span>{messages.label}</span>
                         <input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} />
                       </label>
 
                       <label>
-                        <span>Address</span>
+                        <span>{messages.address}</span>
                         <input value={draft.address} onChange={(event) => setDraft({ ...draft, address: event.target.value })} />
                       </label>
 
                       <label>
-                        <span>Port</span>
+                        <span>{messages.port}</span>
                         <input
                           value={draft.port}
                           onChange={(event) => setDraft({ ...draft, port: Number(event.target.value || "22") })}
@@ -1411,7 +1486,7 @@ export default function App() {
                       </label>
 
                       <label>
-                        <span>Username</span>
+                        <span>{messages.username}</span>
                         <input
                           value={draft.username}
                           onChange={(event) => setDraft({ ...draft, username: event.target.value })}
@@ -1419,21 +1494,21 @@ export default function App() {
                       </label>
 
                       <label>
-                        <span>Auth Type</span>
+                        <span>{messages.authType}</span>
                         <select
                           value={draft.authType}
                           onChange={(event) =>
                             setDraft({ ...draft, authType: event.target.value as SavedHost["authType"] })
                           }
                         >
-                          <option value="password">password</option>
-                          <option value="key">key</option>
+                          <option value="password">{messages.authPassword}</option>
+                          <option value="key">{messages.authKey}</option>
                         </select>
                       </label>
 
                       {draft.authType === "password" ? (
                         <label>
-                          <span>Password</span>
+                          <span>{messages.password}</span>
                           <input
                             type="password"
                             value={draft.password ?? ""}
@@ -1442,7 +1517,7 @@ export default function App() {
                         </label>
                       ) : (
                         <label>
-                          <span>Private Key Path</span>
+                          <span>{messages.privateKeyPath}</span>
                           <input
                             value={draft.privateKeyPath ?? ""}
                             onChange={(event) => setDraft({ ...draft, privateKeyPath: event.target.value })}
@@ -1454,17 +1529,17 @@ export default function App() {
                     <div className="drawer-actions">
                       <button type="button" className="secondary-button" onClick={handleTest} disabled={busy}>
                         <PlugZap size={16} />
-                        {busy ? "Working..." : "Test SSH"}
+                        {busy ? messages.working : messages.testSsh}
                       </button>
 
                       <button type="button" className="secondary-button" onClick={handleSave} disabled={busy}>
                         <Save size={16} />
-                        {busy ? "Working..." : "Save"}
+                        {busy ? messages.working : messages.save}
                       </button>
 
                       <button type="button" className="primary-button" onClick={() => void handleOpenTerminal()} disabled={busy}>
                         <TerminalSquare size={16} />
-                        {busy ? "Working..." : "Connect"}
+                        {busy ? messages.working : messages.connect}
                       </button>
 
                       <button
@@ -1474,7 +1549,7 @@ export default function App() {
                         disabled={busy || !draft.id}
                       >
                         <Trash2 size={16} />
-                        Delete
+                        {messages.delete}
                       </button>
                     </div>
                   </aside>
@@ -1485,17 +1560,17 @@ export default function App() {
             <section className="sftp-screen">
               <div className="sftp-screen__header">
                 <div>
-                  <h2>SFTP</h2>
-                  <span>Choose a host before browsing remote files.</span>
+                  <h2>{messages.sftp}</h2>
+                  <span>{messages.sftpDescription}</span>
                 </div>
 
                 <label className="sftp-host-select">
-                  <span>Select Host</span>
+                  <span>{messages.selectHost}</span>
                   <select value={selectedId} onChange={(event) => handleSelectSftpHost(event.target.value)}>
-                    <option value="">Select host</option>
+                    <option value="">{messages.selectHostPlaceholder}</option>
                     {hosts.map((host) => (
                       <option key={host.id} value={host.id}>
-                        {getHostTitle(host)}
+                        {getDisplayHostTitle(host)}
                       </option>
                     ))}
                   </select>
@@ -1504,12 +1579,15 @@ export default function App() {
 
               <div className="sftp-browser-grid">
                 <FileBrowserPane
-                  title="Local"
+                  title={messages.local}
+                  refreshLabel={messages.refresh}
+                  upLabel={messages.up}
+                  loadingText={messages.loading}
                   path={localPath}
                   items={localEntries}
                   loading={localLoading}
                   error={localError}
-                  emptyText="No local files"
+                  emptyText={messages.noLocalFiles}
                   onPathChange={setLocalPath}
                   onContextMenu={(event, entry) => {
                     event.preventDefault();
@@ -1522,12 +1600,15 @@ export default function App() {
                 />
 
                 <FileBrowserPane
-                  title="Remote"
+                  title={messages.remote}
+                  refreshLabel={messages.refresh}
+                  upLabel={messages.up}
+                  loadingText={messages.loading}
                   path={remotePath}
                   items={remoteEntries}
                   loading={remoteLoading}
                   error={remoteError}
-                  emptyText={selectedHost ? "No remote files" : "Select a host first"}
+                  emptyText={selectedHost ? messages.noRemoteFiles : messages.selectHostPlaceholder}
                   disabled={!selectedHost}
                   onPathChange={setRemotePath}
                   onContextMenu={(event, entry) => {
@@ -1543,8 +1624,8 @@ export default function App() {
 
               {transferJobs.length ? <div className="transfer-panel">
                 <div className="transfer-panel__header">
-                  <strong>Transfers</strong>
-                  <span>{`${transferJobs.length} item(s)`}</span>
+                  <strong>{messages.transfers}</strong>
+                  <span>{messages.transferCount(transferJobs.length)}</span>
                 </div>
 
                 <div className="transfer-list">
@@ -1553,7 +1634,7 @@ export default function App() {
                       <div className="transfer-item__meta">
                         <strong>{job.name}</strong>
                         <span>
-                          {job.direction === "upload" ? "Upload" : "Download"} · {job.detail}
+                          {job.direction === "upload" ? messages.transferUpload : messages.transferDownload} · {job.detail}
                         </span>
                       </div>
                       <div className={`transfer-progress transfer-progress--${job.status}`}>
@@ -1568,18 +1649,18 @@ export default function App() {
             <section className="settings-screen">
               <div className="settings-screen__header">
                 <div>
-                  <h2>Settings</h2>
-                  <span>Application preferences and connection defaults.</span>
+                  <h2>{messages.settings}</h2>
+                  <span>{messages.settingsDescription}</span>
                 </div>
               </div>
 
               <div className="settings-list">
                 <section className="settings-section">
-                  <h3>General</h3>
+                  <h3>{messages.general}</h3>
                   <div className="settings-item">
                     <div>
-                      <strong>App Theme</strong>
-                      <span>Choose the light or dark app appearance.</span>
+                      <strong>{messages.appTheme}</strong>
+                      <span>{messages.appThemeDescription}</span>
                     </div>
                     <select
                       className="settings-select"
@@ -1595,26 +1676,63 @@ export default function App() {
                   </div>
                   <div className="settings-item">
                     <div>
-                      <strong>Language</strong>
-                      <span>Current interface language for the desktop app.</span>
+                      <strong>{messages.language}</strong>
+                      <span>{messages.languageDescription}</span>
                     </div>
-                    <span className="settings-pill">English</span>
+                    <select
+                      className="settings-select"
+                      value={settings.language}
+                      onChange={(event) => handleSelectLanguage(event.target.value as AppLanguage)}
+                    >
+                      {languageOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                 </section>
 
                 <section className="settings-section">
-                  <h3>Connection</h3>
+                  <h3>{messages.connection}</h3>
                   <div className="settings-item">
                     <div>
-                      <strong>SSH Defaults</strong>
-                      <span>Default connect timeout and keepalive settings.</span>
+                      <strong>{messages.sshConnectTimeout}</strong>
+                      <span>{messages.sshConnectTimeoutDescription}</span>
                     </div>
-                    <span className="settings-pill">5s / 30s</span>
+                    <select
+                      className="settings-select"
+                      value={String(settings.sshConnectTimeoutSeconds)}
+                      onChange={(event) => handleSelectSshDefaults("sshConnectTimeoutSeconds", Number(event.target.value))}
+                    >
+                      {sshConnectTimeoutOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {messages.secondsValue(option)}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div className="settings-item">
                     <div>
-                      <strong>Terminal</strong>
-                      <span>Font size for all terminal sessions.</span>
+                      <strong>{messages.sshKeepaliveInterval}</strong>
+                      <span>{messages.sshKeepaliveIntervalDescription}</span>
+                    </div>
+                    <select
+                      className="settings-select"
+                      value={String(settings.sshServerAliveIntervalSeconds)}
+                      onChange={(event) => handleSelectSshDefaults("sshServerAliveIntervalSeconds", Number(event.target.value))}
+                    >
+                      {sshServerAliveIntervalOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {messages.secondsValue(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="settings-item">
+                    <div>
+                      <strong>{messages.terminal}</strong>
+                      <span>{messages.terminalDescription}</span>
                     </div>
                     <select
                       className="settings-select"
@@ -1631,7 +1749,7 @@ export default function App() {
                 </section>
 
                 <section className="settings-section">
-                  <h3>Terminal Theme</h3>
+                  <h3>{messages.terminalTheme}</h3>
                   <div className="theme-list theme-list--grid">
                     {terminalThemePresets.map((theme) => {
                       const selected = theme.id === settings.terminalThemeId;
@@ -1657,7 +1775,7 @@ export default function App() {
                           </div>
 
                           <span className={`theme-card__check ${selected ? "theme-card__check--active" : ""}`}>
-                            {selected ? "Selected" : "Select"}
+                            {selected ? messages.selected : messages.select}
                           </span>
                         </button>
                       );
@@ -1666,27 +1784,29 @@ export default function App() {
                 </section>
 
                 <section className="settings-section">
-                  <h3>About</h3>
+                  <h3>{messages.about}</h3>
                   <div className="settings-item">
                     <div>
                       <strong>ServerDeck</strong>
-                      <span>Remote server workbench for macOS.</span>
+                      <span>{messages.appDescription}</span>
                     </div>
                     <span className="settings-pill">v{appVersion}</span>
                   </div>
                   <div className="settings-item">
                     <div>
-                      <strong>Software Update</strong>
+                      <strong>{messages.softwareUpdate}</strong>
                       <span>
                         {availableUpdate
-                          ? `Version ${availableUpdate.version} is ready to download.`
+                          ? messages.softwareUpdateAvailable(availableUpdate.version)
                           : updateCheckState === "checking"
-                            ? "Checking GitHub release metadata..."
+                            ? messages.softwareUpdateChecking
                             : updateCheckState === "upToDate"
-                              ? "You are already on the latest version."
+                              ? messages.latestVersion
                               : updateCheckState === "error"
-                                ? updateCheckMessage
-                                : updateCheckMessage || "Check whether a newer desktop build is available."}
+                                ? updateCheckError
+                                : updateCheckState === "unsupported"
+                                  ? messages.updaterDesktopOnly
+                                  : messages.softwareUpdateDefault}
                       </span>
                     </div>
                     <button
@@ -1695,21 +1815,21 @@ export default function App() {
                       onClick={() => void (availableUpdate ? handleUpdateClick() : handleCheckForUpdates())}
                       disabled={updateCheckState === "checking"}
                     >
-                      {availableUpdate ? "View Update" : updateCheckState === "checking" ? "Checking..." : "Check Now"}
+                      {availableUpdate ? messages.viewUpdate : updateCheckState === "checking" ? messages.checkingForUpdates : messages.checkNow}
                     </button>
                   </div>
                 </section>
 
                 <section className="settings-section">
-                  <h3>Danger Zone</h3>
+                  <h3>{messages.dangerZone}</h3>
                   <div className="settings-item settings-item--danger">
                     <div>
-                      <strong>Clear Local Data</strong>
-                      <span>Remove saved hosts and local settings from this Mac.</span>
+                      <strong>{messages.clearLocalData}</strong>
+                      <span>{messages.clearLocalDataDescription}</span>
                     </div>
                     <button type="button" className="danger-button" onClick={() => void handleClearLocalData()} disabled={busy}>
                       <Trash2 size={14} />
-                      {busy ? "Clearing..." : "Clear Data"}
+                      {busy ? messages.clearing : messages.clearData}
                     </button>
                   </div>
                 </section>
@@ -1743,7 +1863,7 @@ export default function App() {
             }}
           >
             <PlugZap size={18} />
-            <span>Quick Connect</span>
+            <span>{messages.quickConnect}</span>
             <span className="context-menu__badge">↩</span>
           </button>
 
@@ -1756,7 +1876,7 @@ export default function App() {
             }}
           >
             <TerminalSquare size={18} />
-            <span>Connect</span>
+            <span>{messages.connect}</span>
             <ChevronRight size={18} className="context-menu__hint" />
           </button>
 
@@ -1769,35 +1889,35 @@ export default function App() {
             }}
           >
             <Pencil size={18} />
-            <span>Edit Host Details</span>
+            <span>{messages.editHostDetails}</span>
             <span className="context-menu__badge">E</span>
           </button>
 
-          <button type="button" className="context-menu__item" onClick={() => handlePlaceholderAction("Collaborate")}>
+          <button type="button" className="context-menu__item" onClick={() => handlePlaceholderAction(messages.collaborate)}>
             <Users size={18} />
-            <span>Collaborate</span>
+            <span>{messages.collaborate}</span>
           </button>
 
-          <button type="button" className="context-menu__item" onClick={() => handlePlaceholderAction("Move to")}>
+          <button type="button" className="context-menu__item" onClick={() => handlePlaceholderAction(messages.moveTo)}>
             <Server size={18} />
-            <span>Move to</span>
+            <span>{messages.moveTo}</span>
             <ChevronRight size={18} className="context-menu__hint" />
           </button>
 
-          <button type="button" className="context-menu__item" onClick={() => handlePlaceholderAction("Copy to")}>
+          <button type="button" className="context-menu__item" onClick={() => handlePlaceholderAction(messages.copyTo)}>
             <Copy size={18} />
-            <span>Copy to</span>
+            <span>{messages.copyTo}</span>
             <ChevronRight size={18} className="context-menu__hint" />
           </button>
 
           <button type="button" className="context-menu__item" onClick={() => void handleDuplicateHost(contextMenu.host)}>
             <Copy size={18} />
-            <span>Duplicate</span>
+            <span>{messages.duplicate}</span>
           </button>
 
           <button type="button" className="context-menu__item" onClick={() => void handleCopyHostLink(contextMenu.host)}>
             <Link2 size={18} />
-            <span>Copy Link</span>
+            <span>{messages.copyLink}</span>
             <Info size={18} className="context-menu__hint" />
           </button>
 
@@ -1807,7 +1927,7 @@ export default function App() {
             onClick={() => void handleDeleteHost(contextMenu.host)}
           >
             <Trash2 size={18} />
-            <span>Remove</span>
+            <span>{messages.remove}</span>
           </button>
         </div>
       ) : null}
@@ -1823,7 +1943,7 @@ export default function App() {
             <>
               <button type="button" className="context-menu__item" onClick={() => void handleUploadEntry(fileMenu.entry)}>
                 <FolderOpen size={18} />
-                <span>Upload</span>
+                <span>{messages.upload}</span>
               </button>
               <button
                 type="button"
@@ -1831,14 +1951,14 @@ export default function App() {
                 onClick={() => void handleDeleteLocalFile(fileMenu.entry)}
               >
                 <Trash2 size={18} />
-                <span>Delete</span>
+                <span>{messages.delete}</span>
               </button>
             </>
           ) : (
             <>
               <button type="button" className="context-menu__item" onClick={() => void handleDownloadEntry(fileMenu.entry)}>
                 <FolderOpen size={18} />
-                <span>Download</span>
+                <span>{messages.download}</span>
               </button>
               <button
                 type="button"
@@ -1846,7 +1966,7 @@ export default function App() {
                 onClick={() => void handleDeleteRemoteFile(fileMenu.entry)}
               >
                 <Trash2 size={18} />
-                <span>Delete</span>
+                <span>{messages.delete}</span>
               </button>
             </>
           )}
@@ -1858,10 +1978,10 @@ export default function App() {
           <section className="update-modal" onMouseDown={(event) => event.stopPropagation()}>
             <div className="update-modal__header">
               <div>
-                <div className="drawer-eyebrow">Update Available</div>
+                <div className="drawer-eyebrow">{messages.updateAvailable}</div>
                 <h3>ServerDeck {availableUpdate.version}</h3>
                 <span>
-                  Current version {availableUpdate.currentVersion} → new version {availableUpdate.version}
+                  {messages.currentVersionToNewVersion(availableUpdate.currentVersion, availableUpdate.version)}
                 </span>
               </div>
 
@@ -1874,25 +1994,25 @@ export default function App() {
               <div className="update-modal__summary">
                 <div className="update-modal__version-pill">v{availableUpdate.version}</div>
                 <p>
-                  Download installs the update quietly in the background. Restart switches the app to the new version.
+                  {messages.updateSummary}
                 </p>
               </div>
 
               <div className="update-modal__notes">
-                <strong>What&apos;s New</strong>
+                <strong>{messages.whatsNew}</strong>
                 <div className="update-modal__notes-content">
-                  {availableUpdate.body?.trim() || "No release notes provided for this version."}
+                  {availableUpdate.body?.trim() || messages.noReleaseNotes}
                 </div>
               </div>
 
               <div className="update-modal__status">
-                <strong>Status</strong>
+                <strong>{messages.status}</strong>
                 <span>
                   {updateStage === "ready"
-                    ? "Update downloaded and installed. Restart to finish."
+                    ? messages.updateInstalledRestart
                     : updateStage === "downloading"
-                      ? "Downloading and installing update..."
-                      : "Ready to download this update."}
+                      ? messages.downloadingAndInstalling
+                      : messages.readyToDownloadUpdate}
                 </span>
 
                 {updateStage === "downloading" ? (
@@ -1904,7 +2024,7 @@ export default function App() {
                       <span>
                         {updateProgressPercent !== null
                           ? `${updateProgressPercent}%`
-                          : "Preparing download..."}
+                          : messages.preparingDownload}
                       </span>
                       <span>
                         {updateContentLength
@@ -1921,7 +2041,7 @@ export default function App() {
 
             <div className="update-modal__actions">
               <button type="button" className="secondary-button" onClick={() => setUpdateModalOpen(false)}>
-                Later
+                {messages.later}
               </button>
               <button
                 type="button"
@@ -1929,7 +2049,7 @@ export default function App() {
                 onClick={() => void handleDownloadUpdate()}
                 disabled={updateStage !== "idle"}
               >
-                {updateStage === "downloading" ? "Downloading..." : updateStage === "ready" ? "Downloaded" : "Download"}
+                {updateStage === "downloading" ? messages.downloading : updateStage === "ready" ? messages.downloadedState : messages.download}
               </button>
               <button
                 type="button"
@@ -1937,7 +2057,7 @@ export default function App() {
                 onClick={() => void handleRestartForUpdate()}
                 disabled={updateStage !== "ready"}
               >
-                Restart
+                {messages.restart}
               </button>
             </div>
           </section>
