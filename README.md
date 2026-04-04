@@ -1,35 +1,73 @@
-# 远程服务器桌面应用
+# ServerDeck
 
-目标：做一个面向 macOS 的远程服务器桌面应用，第一版参考 Termius/Terminus 的高频能力，但不做全量复刻。
+ServerDeck is a macOS desktop app for remote server workflows, built with Tauri, React, TypeScript, and Rust. The product direction is inspired by tools like Termius, with an initial focus on SSH, terminal tabs, and SFTP browsing.
 
-## 当前产出
+## Current Scope
 
-- 产品方向与 MVP 拆解
-- 技术路线与模块边界
-- `ServerDeck/` 项目骨架
-- 可直接继续开发的 Host / SFTP 工作台界面原型
+- Saved host management
+- Multi-tab terminal sessions
+- SFTP browser with local and remote panes
+- File actions for upload, download, and delete
+- Terminal theme and font size settings
+- GitHub Release-based update check and download flow
 
-## 为什么先这样做
+This repository currently targets macOS first.
 
-当前机器环境里：
+## Repository Layout
 
-- `Rust` 可用
-- `Node` 版本是 `v14.15.0`
-- `pnpm` 需要更高版本的 Node
-- `cargo tauri` 尚未安装
+- `ServerDeck/` — application source
+- `ServerDeck/src/` — React UI, theme presets, API wrappers, and styles
+- `ServerDeck/src-tauri/` — Rust backend, Tauri config, icons, and desktop commands
+- `产品方案.md` — product notes and MVP direction
+- `技术方案.md` — architecture and implementation notes
+- `docs/release-process.md` — versioning and GitHub Release flow
 
-所以这一版先手工搭骨架，不依赖在线脚手架，避免环境阻塞。
+## Local Development
 
-## 目录
+Requirements:
 
-- `产品方案.md`：产品定位、MVP、页面结构
-- `技术方案.md`：Tauri 架构、SSH/SFTP 实现建议、安全边界
-- `ServerDeck/`：实际项目代码骨架
+- Node.js `20+`
+- Rust toolchain
 
-## 下一步
+Run locally:
 
-1. 升级本机 Node 到 `18.12+`，建议直接用 `20 LTS`
-2. 安装 `pnpm`
-3. 安装 `cargo-tauri`
-4. 在 `ServerDeck/` 下执行依赖安装和本地运行
-5. 先接通 Host 持久化，再接 SSH 会话，再接 SFTP
+```bash
+cd ServerDeck
+npm install
+npm run tauri dev
+```
+
+Useful commands:
+
+```bash
+npm run build                  # frontend build
+./node_modules/.bin/tsc --noEmit
+cd src-tauri && cargo check
+```
+
+## Packaging
+
+Build macOS artifacts:
+
+```bash
+cd ServerDeck
+npm run tauri build
+```
+
+Configured bundle targets include:
+
+- `.app`
+- `.dmg`
+
+## Release & Updates
+
+Releases are built from GitHub tags using GitHub Actions. The desktop app checks the latest GitHub Release on startup and shows an `Update` button only when a newer version is available.
+
+Release steps are documented in:
+
+- `docs/release-process.md`
+
+## Notes
+
+- Current GitHub-hosted macOS builds may still require proper Apple signing and notarization for smooth installation on other machines.
+- For contributor workflow, see `AGENTS.md`.
