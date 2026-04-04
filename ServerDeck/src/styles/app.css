@@ -1095,6 +1095,18 @@ select {
   color: #2456aa;
 }
 
+.settings-select {
+  width: 132px;
+  min-width: 132px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 10px;
+  border-color: var(--white-line);
+  background: white;
+  color: var(--white-text);
+  font-size: 12px;
+}
+
 .theme-list {
   display: grid;
   gap: 10px;
