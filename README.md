@@ -18,8 +18,7 @@ This repository currently targets macOS first.
 - `ServerDeck/` — application source
 - `ServerDeck/src/` — React UI, theme presets, API wrappers, and styles
 - `ServerDeck/src-tauri/` — Rust backend, Tauri config, icons, and desktop commands
-- `产品方案.md` — product notes and MVP direction
-- `技术方案.md` — architecture and implementation notes
+- Product and technical planning docs are maintained in the knowledge base under `工作/serverdeck/`
 - `docs/release-process.md` — versioning and GitHub Release flow
 
 ## Local Development

@@ -1,7 +1,7 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-- Root docs: `README.md`, `产品方案.md`, and `技术方案.md` describe scope and product direction.
+- Root docs: `README.md` and `docs/` describe repository scope; product and technical planning docs are maintained in the knowledge base under `工作/serverdeck/`.
 - App code lives in `ServerDeck/`.
 - Frontend sources are in `ServerDeck/src/`:
   - `App.tsx` for main UI flow
