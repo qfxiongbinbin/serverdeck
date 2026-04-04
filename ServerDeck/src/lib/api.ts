@@ -162,8 +162,8 @@ export async function checkForUpdate() {
     return tauriInvoke<UpdateInfo>("check_for_update");
   }
   return {
-    currentVersion: "0.1.0",
-    latestVersion: "0.1.0",
+    currentVersion: "0.0.2",
+    latestVersion: "0.0.2",
     hasUpdate: false,
     downloadUrl: null,
     assetName: null,
