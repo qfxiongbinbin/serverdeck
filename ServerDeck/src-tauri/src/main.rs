@@ -158,6 +158,23 @@ fn resolve_binary(name: &str) -> Result<PathBuf, String> {
         .ok_or_else(|| format!("Required executable not found: {}", name))
 }
 
+fn resolve_local_shell() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+
+    if let Some(shell) = env::var_os("SHELL") {
+        candidates.push(PathBuf::from(shell));
+    }
+
+    candidates.push(PathBuf::from("/bin/zsh"));
+    candidates.push(PathBuf::from("/bin/bash"));
+    candidates.push(PathBuf::from("/bin/sh"));
+
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or_else(|| "Local shell not found".to_string())
+}
+
 fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
     let read_dir = fs::read_dir(path).map_err(|error| error.to_string())?;
@@ -344,6 +361,62 @@ fn emit_terminal_output(app: &AppHandle, session_id: &str, data: String, stream:
     if let Err(e) = result {
         eprintln!("[DEBUG] Failed to emit terminal-output: {}", e);
     }
+}
+
+fn spawn_terminal_command(
+    app: AppHandle,
+    state: State<AppState>,
+    session_id: String,
+    cmd: CommandBuilder,
+    opening_message: String,
+) -> Result<String, String> {
+    let pty_system = native_pty_system();
+    eprintln!("[DEBUG] PTY system created");
+
+    let pair = pty_system
+        .openpty(PtySize {
+            rows: 24,
+            cols: 80,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| {
+            eprintln!("[DEBUG] Failed to open PTY: {}", e);
+            e.to_string()
+        })?;
+    eprintln!("[DEBUG] PTY opened successfully");
+
+    eprintln!("[DEBUG] Spawning command...");
+    let child = pair.slave.spawn_command(cmd).map_err(|e| {
+        eprintln!("[DEBUG] Failed to spawn command: {}", e);
+        e.to_string()
+    })?;
+    eprintln!("[DEBUG] Command spawned successfully");
+    drop(pair.slave);
+
+    let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+
+    wire_terminal_pty_stream(app.clone(), session_id.clone(), reader);
+
+    let child = Arc::new(Mutex::new(child));
+    wire_terminal_pty_exit(app.clone(), session_id.clone(), child.clone());
+
+    state
+        .terminal_sessions
+        .lock()
+        .map_err(|_| "Lock poisoned".to_string())?
+        .insert(
+            session_id.clone(),
+            TerminalSession {
+                writer: Arc::new(Mutex::new(writer)),
+                child,
+            },
+        );
+
+    emit_terminal_output(&app, &session_id, opening_message, "system");
+
+    Ok(session_id)
 }
 
 fn wire_terminal_pty_stream<R: Read + Send + 'static>(
@@ -598,22 +671,6 @@ fn start_terminal_session(
     eprintln!("[DEBUG] Host: {}@{}:{}", host.username, host.address, host.port);
     eprintln!("[DEBUG] Auth type: {}", host.auth_type);
 
-    let pty_system = native_pty_system();
-    eprintln!("[DEBUG] PTY system created");
-
-    let pair = pty_system
-        .openpty(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| {
-            eprintln!("[DEBUG] Failed to open PTY: {}", e);
-            e.to_string()
-        })?;
-    eprintln!("[DEBUG] PTY opened successfully");
-
     let destination = format!("{}@{}", host.username, host.address);
     let mut cmd = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != "" {
         eprintln!("[DEBUG] Using sshpass for password auth");
@@ -671,45 +728,33 @@ fn start_terminal_session(
     cmd.arg(&destination);
     eprintln!("[DEBUG] SSH command configured for: {}", destination);
 
-    eprintln!("[DEBUG] Spawning command...");
-    let child = pair.slave.spawn_command(cmd).map_err(|e| {
-        eprintln!("[DEBUG] Failed to spawn command: {}", e);
-        e.to_string()
-    })?;
-    eprintln!("[DEBUG] Command spawned successfully");
-    drop(pair.slave);
-
-    let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
-
-    wire_terminal_pty_stream(app.clone(), session_id.clone(), reader);
-
-    let child = Arc::new(Mutex::new(child));
-    wire_terminal_pty_exit(app.clone(), session_id.clone(), child.clone());
-
-    state
-        .terminal_sessions
-        .lock()
-        .map_err(|_| "Lock poisoned".to_string())?
-        .insert(
-            session_id.clone(),
-            TerminalSession {
-                writer: Arc::new(Mutex::new(writer)),
-                child,
-            },
-        );
-
-    emit_terminal_output(
-        &app,
-        &session_id,
+    spawn_terminal_command(
+        app,
+        state,
+        session_id,
+        cmd,
         format!(
             "\r\n[serverdeck] opening shell for {}@{}:{}\r\n",
             host.username, host.address, host.port
         ),
-        "system",
-    );
+    )
+}
 
-    Ok(session_id)
+#[tauri::command]
+fn start_local_terminal_session(app: AppHandle, state: State<AppState>) -> Result<String, String> {
+    let session_id = Uuid::new_v4().to_string();
+    eprintln!("[DEBUG] Starting local terminal session: {}", session_id);
+
+    let shell = resolve_local_shell()?;
+    let cmd = CommandBuilder::new(shell.to_string_lossy().into_owned());
+
+    spawn_terminal_command(
+        app,
+        state,
+        session_id,
+        cmd,
+        "\r\n[serverdeck] opening local shell\r\n".to_string(),
+    )
 }
 
 #[tauri::command]
@@ -775,6 +820,7 @@ fn main() {
             delete_local_entry,
             delete_remote_entry,
             start_terminal_session,
+            start_local_terminal_session,
             write_terminal_input,
             close_terminal_session
         ])
