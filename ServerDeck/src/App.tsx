@@ -24,9 +24,11 @@ import {
   Pencil,
   Plus,
   PlugZap,
+  ShieldAlert,
   Save,
   Search,
   Server,
+  SwatchBook,
   Wrench,
   TerminalSquare,
   Trash2,
@@ -133,6 +135,7 @@ type AppSettings = {
 
 type UpdateStage = "idle" | "downloading" | "ready";
 type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
+type SettingsSectionId = "general" | "connection" | "terminal" | "about" | "danger";
 
 const terminalFontSizeOptions = [
   { label: "S", value: 12 },
@@ -343,6 +346,7 @@ export default function App() {
   const [updateContentLength, setUpdateContentLength] = useState<number | null>(null);
   const [updateError, setUpdateError] = useState("");
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
+  const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>("general");
   const [localPath, setLocalPath] = useState("~");
   const [remotePath, setRemotePath] = useState(".");
   const [localEntries, setLocalEntries] = useState<FileEntry[]>([]);
@@ -404,6 +408,17 @@ export default function App() {
   const getDisplayHostBadge = useCallback(
     (host: SavedHost) => getHostBadge(host, messages.untitledHost),
     [messages.untitledHost]
+  );
+
+  const settingsNavItems = useMemo(
+    () => [
+      { id: "general" as const, label: messages.general, icon: Wrench },
+      { id: "connection" as const, label: messages.connection, icon: PlugZap },
+      { id: "terminal" as const, label: messages.terminal, icon: TerminalSquare },
+      { id: "about" as const, label: messages.about, icon: Info },
+      { id: "danger" as const, label: messages.dangerZone, icon: ShieldAlert }
+    ],
+    [messages.about, messages.connection, messages.dangerZone, messages.general, messages.terminal]
   );
 
   const filteredHosts = useMemo(() => {
@@ -1647,192 +1662,277 @@ export default function App() {
             </section>
           ) : isSettingsView ? (
             <section className="settings-screen">
-              <div className="settings-screen__header">
-                <div>
-                  <h2>{messages.settings}</h2>
-                  <span>{messages.settingsDescription}</span>
-                </div>
-              </div>
+              <div className="settings-layout">
+                <aside className="settings-sidebar">
+                  <div className="settings-screen__header">
+                    <div>
+                      <h2>{messages.settings}</h2>
+                      <span>{messages.settingsDescription}</span>
+                    </div>
+                  </div>
 
-              <div className="settings-list">
-                <section className="settings-section">
-                  <h3>{messages.general}</h3>
-                  <div className="settings-item">
-                    <div>
-                      <strong>{messages.appTheme}</strong>
-                      <span>{messages.appThemeDescription}</span>
-                    </div>
-                    <select
-                      className="settings-select"
-                      value={settings.appTheme}
-                      onChange={(event) => handleSelectAppTheme(event.target.value as AppSettings["appTheme"])}
-                    >
-                      {appThemeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="settings-item">
-                    <div>
-                      <strong>{messages.language}</strong>
-                      <span>{messages.languageDescription}</span>
-                    </div>
-                    <select
-                      className="settings-select"
-                      value={settings.language}
-                      onChange={(event) => handleSelectLanguage(event.target.value as AppLanguage)}
-                    >
-                      {languageOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </section>
-
-                <section className="settings-section">
-                  <h3>{messages.connection}</h3>
-                  <div className="settings-item">
-                    <div>
-                      <strong>{messages.sshConnectTimeout}</strong>
-                      <span>{messages.sshConnectTimeoutDescription}</span>
-                    </div>
-                    <select
-                      className="settings-select"
-                      value={String(settings.sshConnectTimeoutSeconds)}
-                      onChange={(event) => handleSelectSshDefaults("sshConnectTimeoutSeconds", Number(event.target.value))}
-                    >
-                      {sshConnectTimeoutOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {messages.secondsValue(option)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="settings-item">
-                    <div>
-                      <strong>{messages.sshKeepaliveInterval}</strong>
-                      <span>{messages.sshKeepaliveIntervalDescription}</span>
-                    </div>
-                    <select
-                      className="settings-select"
-                      value={String(settings.sshServerAliveIntervalSeconds)}
-                      onChange={(event) => handleSelectSshDefaults("sshServerAliveIntervalSeconds", Number(event.target.value))}
-                    >
-                      {sshServerAliveIntervalOptions.map((option) => (
-                        <option key={option} value={option}>
-                          {messages.secondsValue(option)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="settings-item">
-                    <div>
-                      <strong>{messages.terminal}</strong>
-                      <span>{messages.terminalDescription}</span>
-                    </div>
-                    <select
-                      className="settings-select"
-                      value={String(settings.terminalFontSize)}
-                      onChange={(event) => handleSelectTerminalFontSize(Number(event.target.value))}
-                    >
-                      {terminalFontSizeOptions.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label} ({option.value}px)
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </section>
-
-                <section className="settings-section">
-                  <h3>{messages.terminalTheme}</h3>
-                  <div className="theme-list theme-list--grid">
-                    {terminalThemePresets.map((theme) => {
-                      const selected = theme.id === settings.terminalThemeId;
+                  <div className="settings-nav">
+                    {settingsNavItems.map((item) => {
+                      const Icon = item.icon;
+                      const active = item.id === activeSettingsSection;
 
                       return (
                         <button
-                          key={theme.id}
+                          key={item.id}
                           type="button"
-                          className={`theme-card theme-card--grid ${selected ? "theme-card--active" : ""}`}
-                          onClick={() => handleSelectTerminalTheme(theme.id)}
+                          className={`settings-nav__item ${active ? "settings-nav__item--active" : ""}`}
+                          onClick={() => setActiveSettingsSection(item.id)}
                         >
-                          <div
-                            className="theme-card__preview"
-                            style={{ background: theme.preview.background, borderColor: theme.preview.border }}
-                          >
-                            <span style={{ background: theme.preview.lines[0] }} />
-                            <span style={{ background: theme.preview.lines[1] }} />
-                            <span style={{ background: theme.preview.lines[2] }} />
-                          </div>
-
-                          <div className="theme-card__body">
-                            <div className="theme-card__title">{theme.name}</div>
-                          </div>
-
-                          <span className={`theme-card__check ${selected ? "theme-card__check--active" : ""}`}>
-                            {selected ? messages.selected : messages.select}
-                          </span>
+                          <Icon size={17} />
+                          <span>{item.label}</span>
                         </button>
                       );
                     })}
                   </div>
-                </section>
+                </aside>
 
-                <section className="settings-section">
-                  <h3>{messages.about}</h3>
-                  <div className="settings-item">
-                    <div>
-                      <strong>ServerDeck</strong>
-                      <span>{messages.appDescription}</span>
-                    </div>
-                    <span className="settings-pill">v{appVersion}</span>
-                  </div>
-                  <div className="settings-item">
-                    <div>
-                      <strong>{messages.softwareUpdate}</strong>
-                      <span>
-                        {availableUpdate
-                          ? messages.softwareUpdateAvailable(availableUpdate.version)
-                          : updateCheckState === "checking"
-                            ? messages.softwareUpdateChecking
-                            : updateCheckState === "upToDate"
-                              ? messages.latestVersion
-                              : updateCheckState === "error"
-                                ? updateCheckError
-                                : updateCheckState === "unsupported"
-                                  ? messages.updaterDesktopOnly
-                                  : messages.softwareUpdateDefault}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      className={availableUpdate ? "primary-button" : "secondary-button"}
-                      onClick={() => void (availableUpdate ? handleUpdateClick() : handleCheckForUpdates())}
-                      disabled={updateCheckState === "checking"}
-                    >
-                      {availableUpdate ? messages.viewUpdate : updateCheckState === "checking" ? messages.checkingForUpdates : messages.checkNow}
-                    </button>
-                  </div>
-                </section>
+                <div className="settings-content">
+                  {activeSettingsSection === "general" ? (
+                    <section className="settings-panel">
+                      <div className="settings-panel__header">
+                        <Wrench size={18} />
+                        <div>
+                          <h3>{messages.general}</h3>
+                          <span>{messages.settingsDescription}</span>
+                        </div>
+                      </div>
 
-                <section className="settings-section">
-                  <h3>{messages.dangerZone}</h3>
-                  <div className="settings-item settings-item--danger">
-                    <div>
-                      <strong>{messages.clearLocalData}</strong>
-                      <span>{messages.clearLocalDataDescription}</span>
-                    </div>
-                    <button type="button" className="danger-button" onClick={() => void handleClearLocalData()} disabled={busy}>
-                      <Trash2 size={14} />
-                      {busy ? messages.clearing : messages.clearData}
-                    </button>
-                  </div>
-                </section>
+                      <div className="settings-card">
+                        <div className="settings-item settings-item--panel">
+                          <div>
+                            <strong>{messages.appTheme}</strong>
+                            <span>{messages.appThemeDescription}</span>
+                          </div>
+                          <select
+                            className="settings-select"
+                            value={settings.appTheme}
+                            onChange={(event) => handleSelectAppTheme(event.target.value as AppSettings["appTheme"])}
+                          >
+                            {appThemeOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="settings-item settings-item--panel">
+                          <div>
+                            <strong>{messages.language}</strong>
+                            <span>{messages.languageDescription}</span>
+                          </div>
+                          <select
+                            className="settings-select"
+                            value={settings.language}
+                            onChange={(event) => handleSelectLanguage(event.target.value as AppLanguage)}
+                          >
+                            {languageOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {activeSettingsSection === "connection" ? (
+                    <section className="settings-panel">
+                      <div className="settings-panel__header">
+                        <PlugZap size={18} />
+                        <div>
+                          <h3>{messages.connection}</h3>
+                          <span>{messages.sshDefaultsDescription}</span>
+                        </div>
+                      </div>
+
+                      <div className="settings-card">
+                        <div className="settings-item settings-item--panel">
+                          <div>
+                            <strong>{messages.sshConnectTimeout}</strong>
+                            <span>{messages.sshConnectTimeoutDescription}</span>
+                          </div>
+                          <select
+                            className="settings-select"
+                            value={String(settings.sshConnectTimeoutSeconds)}
+                            onChange={(event) => handleSelectSshDefaults("sshConnectTimeoutSeconds", Number(event.target.value))}
+                          >
+                            {sshConnectTimeoutOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {messages.secondsValue(option)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="settings-item settings-item--panel">
+                          <div>
+                            <strong>{messages.sshKeepaliveInterval}</strong>
+                            <span>{messages.sshKeepaliveIntervalDescription}</span>
+                          </div>
+                          <select
+                            className="settings-select"
+                            value={String(settings.sshServerAliveIntervalSeconds)}
+                            onChange={(event) => handleSelectSshDefaults("sshServerAliveIntervalSeconds", Number(event.target.value))}
+                          >
+                            {sshServerAliveIntervalOptions.map((option) => (
+                              <option key={option} value={option}>
+                                {messages.secondsValue(option)}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {activeSettingsSection === "terminal" ? (
+                    <section className="settings-panel">
+                      <div className="settings-panel__header">
+                        <SwatchBook size={18} />
+                        <div>
+                          <h3>{messages.terminal}</h3>
+                          <span>{messages.terminalDescription}</span>
+                        </div>
+                      </div>
+
+                      <div className="settings-card">
+                        <div className="settings-item settings-item--panel">
+                          <div>
+                            <strong>{messages.terminal}</strong>
+                            <span>{messages.terminalDescription}</span>
+                          </div>
+                          <select
+                            className="settings-select"
+                            value={String(settings.terminalFontSize)}
+                            onChange={(event) => handleSelectTerminalFontSize(Number(event.target.value))}
+                          >
+                            {terminalFontSizeOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label} ({option.value}px)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div className="settings-panel__subheading">{messages.terminalTheme}</div>
+                      <div className="settings-card settings-card--themes">
+                        <div className="theme-list theme-list--grid">
+                          {terminalThemePresets.map((theme) => {
+                            const selected = theme.id === settings.terminalThemeId;
+
+                            return (
+                              <button
+                                key={theme.id}
+                                type="button"
+                                className={`theme-card theme-card--grid ${selected ? "theme-card--active" : ""}`}
+                                onClick={() => handleSelectTerminalTheme(theme.id)}
+                              >
+                                <div
+                                  className="theme-card__preview"
+                                  style={{ background: theme.preview.background, borderColor: theme.preview.border }}
+                                >
+                                  <span style={{ background: theme.preview.lines[0] }} />
+                                  <span style={{ background: theme.preview.lines[1] }} />
+                                  <span style={{ background: theme.preview.lines[2] }} />
+                                </div>
+
+                                <div className="theme-card__body">
+                                  <div className="theme-card__title">{theme.name}</div>
+                                </div>
+
+                                <span className={`theme-card__check ${selected ? "theme-card__check--active" : ""}`}>
+                                  {selected ? messages.selected : messages.select}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {activeSettingsSection === "about" ? (
+                    <section className="settings-panel">
+                      <div className="settings-panel__header">
+                        <Info size={18} />
+                        <div>
+                          <h3>{messages.about}</h3>
+                          <span>{messages.appDescription}</span>
+                        </div>
+                      </div>
+
+                      <div className="settings-card">
+                        <div className="settings-item settings-item--panel">
+                          <div>
+                            <strong>ServerDeck</strong>
+                            <span>{messages.appDescription}</span>
+                          </div>
+                          <span className="settings-pill">v{appVersion}</span>
+                        </div>
+
+                        <div className="settings-item settings-item--panel">
+                          <div>
+                            <strong>{messages.softwareUpdate}</strong>
+                            <span>
+                              {availableUpdate
+                                ? messages.softwareUpdateAvailable(availableUpdate.version)
+                                : updateCheckState === "checking"
+                                  ? messages.softwareUpdateChecking
+                                  : updateCheckState === "upToDate"
+                                    ? messages.latestVersion
+                                    : updateCheckState === "error"
+                                      ? updateCheckError
+                                      : updateCheckState === "unsupported"
+                                        ? messages.updaterDesktopOnly
+                                        : messages.softwareUpdateDefault}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className={availableUpdate ? "primary-button" : "secondary-button"}
+                            onClick={() => void (availableUpdate ? handleUpdateClick() : handleCheckForUpdates())}
+                            disabled={updateCheckState === "checking"}
+                          >
+                            {availableUpdate ? messages.viewUpdate : updateCheckState === "checking" ? messages.checkingForUpdates : messages.checkNow}
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {activeSettingsSection === "danger" ? (
+                    <section className="settings-panel">
+                      <div className="settings-panel__header settings-panel__header--danger">
+                        <ShieldAlert size={18} />
+                        <div>
+                          <h3>{messages.dangerZone}</h3>
+                          <span>{messages.clearLocalDataDescription}</span>
+                        </div>
+                      </div>
+
+                      <div className="settings-card">
+                        <div className="settings-item settings-item--panel settings-item--danger">
+                          <div>
+                            <strong>{messages.clearLocalData}</strong>
+                            <span>{messages.clearLocalDataDescription}</span>
+                          </div>
+                          <button type="button" className="danger-button" onClick={() => void handleClearLocalData()} disabled={busy}>
+                            <Trash2 size={14} />
+                            {busy ? messages.clearing : messages.clearData}
+                          </button>
+                        </div>
+                      </div>
+                    </section>
+                  ) : null}
+                </div>
               </div>
             </section>
           ) : (
