@@ -115,6 +115,12 @@ type Messages = {
   connection: string;
   sshDefaults: string;
   sshDefaultsDescription: string;
+  sshConnectTimeout: string;
+  sshConnectTimeoutDescription: string;
+  sshKeepaliveInterval: string;
+  sshKeepaliveIntervalDescription: string;
+  secondsValue: (value: number) => string;
+  appliedSshDefaults: (connectTimeout: number, keepaliveInterval: number) => string;
   terminal: string;
   terminalDescription: string;
   terminalTheme: string;
@@ -269,6 +275,12 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     connection: "Connection",
     sshDefaults: "SSH Defaults",
     sshDefaultsDescription: "Default connect timeout and keepalive settings.",
+    sshConnectTimeout: "Connect Timeout",
+    sshConnectTimeoutDescription: "How long to wait before a new SSH connection times out.",
+    sshKeepaliveInterval: "Keepalive Interval",
+    sshKeepaliveIntervalDescription: "How often to send keepalive packets to the remote host.",
+    secondsValue: (value) => `${value}s`,
+    appliedSshDefaults: (connectTimeout, keepaliveInterval) => `Applied SSH defaults ${connectTimeout}s / ${keepaliveInterval}s`,
     terminal: "Terminal",
     terminalDescription: "Font size for all terminal sessions.",
     terminalTheme: "Terminal Theme",
@@ -421,6 +433,12 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     connection: "连接",
     sshDefaults: "SSH 默认值",
     sshDefaultsDescription: "默认连接超时与 keepalive 设置。",
+    sshConnectTimeout: "连接超时",
+    sshConnectTimeoutDescription: "新建 SSH 连接在超时前最多等待多久。",
+    sshKeepaliveInterval: "保活间隔",
+    sshKeepaliveIntervalDescription: "向远端发送 keepalive 包的时间间隔。",
+    secondsValue: (value) => `${value} 秒`,
+    appliedSshDefaults: (connectTimeout, keepaliveInterval) => `已应用 SSH 默认值 ${connectTimeout} 秒 / ${keepaliveInterval} 秒`,
     terminal: "终端",
     terminalDescription: "所有终端会话共用的字号。",
     terminalTheme: "终端主题",
@@ -573,6 +591,12 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     connection: "接続",
     sshDefaults: "SSH デフォルト",
     sshDefaultsDescription: "接続タイムアウトと keepalive のデフォルト設定。",
+    sshConnectTimeout: "接続タイムアウト",
+    sshConnectTimeoutDescription: "新しい SSH 接続がタイムアウトするまでの待機時間です。",
+    sshKeepaliveInterval: "キープアライブ間隔",
+    sshKeepaliveIntervalDescription: "リモートホストへ keepalive パケットを送る間隔です。",
+    secondsValue: (value) => `${value} 秒`,
+    appliedSshDefaults: (connectTimeout, keepaliveInterval) => `SSH デフォルトを ${connectTimeout} 秒 / ${keepaliveInterval} 秒に設定しました`,
     terminal: "ターミナル",
     terminalDescription: "すべてのターミナルセッションで使うフォントサイズ。",
     terminalTheme: "ターミナルテーマ",

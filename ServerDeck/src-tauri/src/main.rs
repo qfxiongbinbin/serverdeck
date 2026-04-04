@@ -26,6 +26,13 @@ struct HostRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SshConnectionOptions {
+    connect_timeout_seconds: u16,
+    server_alive_interval_seconds: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct FileEntry {
     name: String,
     path: String,
@@ -172,14 +179,14 @@ fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
     Ok(entries)
 }
 
-fn append_ssh_options(command: &mut Command, host: &HostRecord) {
+fn append_ssh_options(command: &mut Command, host: &HostRecord, ssh_options: &SshConnectionOptions) {
     command
         .arg("-o")
         .arg("StrictHostKeyChecking=accept-new")
         .arg("-o")
-        .arg("ServerAliveInterval=30")
+        .arg(format!("ServerAliveInterval={}", ssh_options.server_alive_interval_seconds))
         .arg("-o")
-        .arg("ConnectTimeout=5")
+        .arg(format!("ConnectTimeout={}", ssh_options.connect_timeout_seconds))
         .arg("-p")
         .arg(host.port.to_string());
 
@@ -192,7 +199,7 @@ fn append_ssh_options(command: &mut Command, host: &HostRecord) {
     }
 }
 
-fn build_ssh_command(host: &HostRecord) -> Command {
+fn build_ssh_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> Command {
     let destination = format!("{}@{}", host.username, host.address);
     let mut command = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != "" {
         let mut sshpass = Command::new(resolve_binary("sshpass").unwrap_or_else(|_| PathBuf::from("sshpass")));
@@ -203,12 +210,12 @@ fn build_ssh_command(host: &HostRecord) -> Command {
         Command::new(resolve_binary("ssh").unwrap_or_else(|_| PathBuf::from("ssh")))
     };
 
-    append_ssh_options(&mut command, host);
+    append_ssh_options(&mut command, host, ssh_options);
     command.arg(destination);
     command
 }
 
-fn build_sftp_command(host: &HostRecord) -> Command {
+fn build_sftp_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> Command {
     let mut command = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != "" {
         let mut sshpass = Command::new(resolve_binary("sshpass").unwrap_or_else(|_| PathBuf::from("sshpass")));
         sshpass.arg("-p").arg(host.password.clone().unwrap_or_default());
@@ -224,9 +231,9 @@ fn build_sftp_command(host: &HostRecord) -> Command {
         .arg("-o")
         .arg("BatchMode=no")
         .arg("-o")
-        .arg("ServerAliveInterval=30")
+        .arg(format!("ServerAliveInterval={}", ssh_options.server_alive_interval_seconds))
         .arg("-o")
-        .arg("ConnectTimeout=5")
+        .arg(format!("ConnectTimeout={}", ssh_options.connect_timeout_seconds))
         .arg("-P")
         .arg(host.port.to_string());
 
@@ -279,9 +286,13 @@ fn parse_sftp_ls_line(line: &str) -> Option<FileEntry> {
     })
 }
 
-fn run_sftp_batch(host: &HostRecord, batch: &str) -> Result<std::process::Output, String> {
+fn run_sftp_batch(
+    host: &HostRecord,
+    ssh_options: &SshConnectionOptions,
+    batch: &str,
+) -> Result<std::process::Output, String> {
     let destination = format!("{}@{}", host.username, host.address);
-    let mut child = build_sftp_command(host)
+    let mut child = build_sftp_command(host, ssh_options)
         .arg("-b")
         .arg("-")
         .arg(destination)
@@ -441,8 +452,8 @@ fn delete_host(id: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn test_connection(host: HostRecord) -> Result<String, String> {
-    let output = build_ssh_command(&host)
+fn test_connection(host: HostRecord, ssh_options: SshConnectionOptions) -> Result<String, String> {
+    let output = build_ssh_command(&host, &ssh_options)
         .arg("echo serverdeck-connected")
         .output()
         .map_err(|error| error.to_string())?;
@@ -460,14 +471,18 @@ fn list_local_directory(path: String) -> Result<Vec<FileEntry>, String> {
 }
 
 #[tauri::command]
-fn list_remote_directory(host: HostRecord, path: String) -> Result<Vec<FileEntry>, String> {
+fn list_remote_directory(
+    host: HostRecord,
+    path: String,
+    ssh_options: SshConnectionOptions,
+) -> Result<Vec<FileEntry>, String> {
     let remote_path = if path.trim().is_empty() || path.trim() == "~" {
         "."
     } else {
         path.trim()
     };
     let batch = format!("cd {}\nls -la\nbye\n", escape_sftp_path(remote_path));
-    let output = run_sftp_batch(&host, &batch)?;
+    let output = run_sftp_batch(&host, &ssh_options, &batch)?;
 
     ensure_sftp_success(&output, "Remote SFTP command failed")?;
 
@@ -478,7 +493,12 @@ fn list_remote_directory(host: HostRecord, path: String) -> Result<Vec<FileEntry
 }
 
 #[tauri::command]
-fn upload_to_remote(host: HostRecord, local_path: String, remote_dir: String) -> Result<bool, String> {
+fn upload_to_remote(
+    host: HostRecord,
+    local_path: String,
+    remote_dir: String,
+    ssh_options: SshConnectionOptions,
+) -> Result<bool, String> {
     let local_path_buf = expand_path(&local_path);
     let local_path_str = local_path_buf.to_string_lossy().into_owned();
     let is_dir = local_path_buf.is_dir();
@@ -497,7 +517,7 @@ fn upload_to_remote(host: HostRecord, local_path: String, remote_dir: String) ->
         )
     };
 
-    let output = run_sftp_batch(&host, &batch)?;
+    let output = run_sftp_batch(&host, &ssh_options, &batch)?;
     ensure_sftp_success(&output, "Upload failed")?;
     Ok(true)
 }
@@ -508,6 +528,7 @@ fn download_from_remote(
     remote_path: String,
     local_dir: String,
     is_dir: bool,
+    ssh_options: SshConnectionOptions,
 ) -> Result<bool, String> {
     let local_dir_buf = expand_path(&local_dir);
     let local_dir_str = local_dir_buf.to_string_lossy().into_owned();
@@ -525,7 +546,7 @@ fn download_from_remote(
         )
     };
 
-    let output = run_sftp_batch(&host, &batch)?;
+    let output = run_sftp_batch(&host, &ssh_options, &batch)?;
     ensure_sftp_success(&output, "Download failed")?;
     Ok(true)
 }
@@ -542,14 +563,19 @@ fn delete_local_entry(path: String, is_dir: bool) -> Result<bool, String> {
 }
 
 #[tauri::command]
-fn delete_remote_entry(host: HostRecord, remote_path: String, is_dir: bool) -> Result<bool, String> {
+fn delete_remote_entry(
+    host: HostRecord,
+    remote_path: String,
+    is_dir: bool,
+    ssh_options: SshConnectionOptions,
+) -> Result<bool, String> {
     let batch = if is_dir {
         format!("rmdir {}\nbye\n", escape_sftp_path(&remote_path))
     } else {
         format!("rm {}\nbye\n", escape_sftp_path(&remote_path))
     };
 
-    let output = run_sftp_batch(&host, &batch)?;
+    let output = run_sftp_batch(&host, &ssh_options, &batch)?;
     ensure_sftp_success(&output, "Delete failed")?;
     Ok(true)
 }
@@ -559,6 +585,7 @@ fn start_terminal_session(
     app: AppHandle,
     state: State<AppState>,
     host: HostRecord,
+    ssh_options: SshConnectionOptions,
 ) -> Result<String, String> {
     let session_id = Uuid::new_v4().to_string();
     eprintln!("[DEBUG] Starting terminal session: {}", session_id);
@@ -619,9 +646,9 @@ fn start_terminal_session(
     cmd.arg("-o");
     cmd.arg("StrictHostKeyChecking=accept-new");
     cmd.arg("-o");
-    cmd.arg("ServerAliveInterval=30");
+    cmd.arg(format!("ServerAliveInterval={}", ssh_options.server_alive_interval_seconds));
     cmd.arg("-o");
-    cmd.arg("ConnectTimeout=5");
+    cmd.arg(format!("ConnectTimeout={}", ssh_options.connect_timeout_seconds));
     cmd.arg("-p");
     cmd.arg(host.port.to_string());
 

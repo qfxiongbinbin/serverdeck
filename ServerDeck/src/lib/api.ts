@@ -25,6 +25,11 @@ export type TerminalEventPayload = {
   stream?: "stdout" | "stderr" | "system";
 };
 
+export type SshConnectionOptions = {
+  connectTimeoutSeconds: number;
+  serverAliveIntervalSeconds: number;
+};
+
 declare global {
   interface Window {
     __TAURI_INTERNALS__?: unknown;
@@ -99,9 +104,9 @@ export async function deleteHost(id: string) {
   return true;
 }
 
-export async function testConnection(host: SavedHost) {
+export async function testConnection(host: SavedHost, sshOptions: SshConnectionOptions) {
   if (hasTauri()) {
-    return tauriInvoke<string>("test_connection", { host });
+    return tauriInvoke<string>("test_connection", { host, sshOptions });
   }
   return `Mock connection ok: ${host.username}@${host.address}:${host.port}`;
 }
@@ -113,23 +118,29 @@ export async function listLocalDirectory(path: string) {
   return [];
 }
 
-export async function listRemoteDirectory(host: SavedHost, path: string) {
+export async function listRemoteDirectory(host: SavedHost, path: string, sshOptions: SshConnectionOptions) {
   if (hasTauri()) {
-    return tauriInvoke<FileEntry[]>("list_remote_directory", { host, path });
+    return tauriInvoke<FileEntry[]>("list_remote_directory", { host, path, sshOptions });
   }
   return [];
 }
 
-export async function uploadToRemote(host: SavedHost, localPath: string, remoteDir: string) {
+export async function uploadToRemote(host: SavedHost, localPath: string, remoteDir: string, sshOptions: SshConnectionOptions) {
   if (hasTauri()) {
-    return tauriInvoke<boolean>("upload_to_remote", { host, localPath, remoteDir });
+    return tauriInvoke<boolean>("upload_to_remote", { host, localPath, remoteDir, sshOptions });
   }
   return true;
 }
 
-export async function downloadFromRemote(host: SavedHost, remotePath: string, localDir: string, isDir: boolean) {
+export async function downloadFromRemote(
+  host: SavedHost,
+  remotePath: string,
+  localDir: string,
+  isDir: boolean,
+  sshOptions: SshConnectionOptions
+) {
   if (hasTauri()) {
-    return tauriInvoke<boolean>("download_from_remote", { host, remotePath, localDir, isDir });
+    return tauriInvoke<boolean>("download_from_remote", { host, remotePath, localDir, isDir, sshOptions });
   }
   return true;
 }
@@ -141,9 +152,9 @@ export async function deleteLocalEntry(path: string, isDir: boolean) {
   return true;
 }
 
-export async function deleteRemoteEntry(host: SavedHost, remotePath: string, isDir: boolean) {
+export async function deleteRemoteEntry(host: SavedHost, remotePath: string, isDir: boolean, sshOptions: SshConnectionOptions) {
   if (hasTauri()) {
-    return tauriInvoke<boolean>("delete_remote_entry", { host, remotePath, isDir });
+    return tauriInvoke<boolean>("delete_remote_entry", { host, remotePath, isDir, sshOptions });
   }
   return true;
 }
@@ -156,9 +167,9 @@ export async function clearAppData() {
   return true;
 }
 
-export async function startTerminalSession(host: SavedHost) {
+export async function startTerminalSession(host: SavedHost, sshOptions: SshConnectionOptions) {
   if (hasTauri()) {
-    return tauriInvoke<string>("start_terminal_session", { host });
+    return tauriInvoke<string>("start_terminal_session", { host, sshOptions });
   }
   return crypto.randomUUID();
 }

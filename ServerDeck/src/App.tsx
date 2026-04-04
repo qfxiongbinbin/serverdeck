@@ -50,6 +50,7 @@ import {
   writeTerminalInput,
   type FileEntry,
   type SavedHost,
+  type SshConnectionOptions,
   type TerminalEventPayload
 } from "./lib/api";
 import {
@@ -71,6 +72,8 @@ const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 const DEFAULT_APP_SETTINGS: AppSettings = {
   appTheme: "dark",
   language: "en",
+  sshConnectTimeoutSeconds: 5,
+  sshServerAliveIntervalSeconds: 30,
   terminalThemeId: defaultTerminalThemeId,
   terminalFontSize: 14
 };
@@ -122,6 +125,8 @@ type TransferJob = {
 type AppSettings = {
   appTheme: "light" | "dark";
   language: AppLanguage;
+  sshConnectTimeoutSeconds: number;
+  sshServerAliveIntervalSeconds: number;
   terminalThemeId: string;
   terminalFontSize: number;
 };
@@ -134,6 +139,9 @@ const terminalFontSizeOptions = [
   { label: "M", value: 14 },
   { label: "L", value: 16 }
 ] as const;
+
+const sshConnectTimeoutOptions = [5, 10, 15, 30] as const;
+const sshServerAliveIntervalOptions = [15, 30, 60, 120] as const;
 
 function getHostTitle(host: SavedHost, fallback = "Untitled Host") {
   return host.label.trim() || host.address.trim() || fallback;
@@ -372,6 +380,13 @@ export default function App() {
   );
 
   const messages = useMemo(() => messagesByLanguage[settings.language], [settings.language]);
+  const sshOptions = useMemo<SshConnectionOptions>(
+    () => ({
+      connectTimeoutSeconds: settings.sshConnectTimeoutSeconds,
+      serverAliveIntervalSeconds: settings.sshServerAliveIntervalSeconds
+    }),
+    [settings.sshConnectTimeoutSeconds, settings.sshServerAliveIntervalSeconds]
+  );
 
   const appThemeOptions = useMemo(
     () => [
@@ -520,6 +535,18 @@ export default function App() {
       setSettings({
           appTheme: parsed.appTheme === "light" ? "light" : DEFAULT_APP_SETTINGS.appTheme,
           language: languageOptions.find((item) => item.value === parsed.language)?.value ?? DEFAULT_APP_SETTINGS.language,
+          sshConnectTimeoutSeconds:
+            typeof parsed.sshConnectTimeoutSeconds === "number" &&
+            sshConnectTimeoutOptions.includes(parsed.sshConnectTimeoutSeconds as (typeof sshConnectTimeoutOptions)[number])
+              ? parsed.sshConnectTimeoutSeconds
+              : DEFAULT_APP_SETTINGS.sshConnectTimeoutSeconds,
+          sshServerAliveIntervalSeconds:
+            typeof parsed.sshServerAliveIntervalSeconds === "number" &&
+            sshServerAliveIntervalOptions.includes(
+              parsed.sshServerAliveIntervalSeconds as (typeof sshServerAliveIntervalOptions)[number]
+            )
+              ? parsed.sshServerAliveIntervalSeconds
+              : DEFAULT_APP_SETTINGS.sshServerAliveIntervalSeconds,
           terminalThemeId:
             terminalThemePresets.find((item) => item.id === parsed.terminalThemeId)?.id ?? defaultTerminalThemeId,
           terminalFontSize:
@@ -621,7 +648,7 @@ export default function App() {
     let cancelled = false;
     setRemoteLoading(true);
     setRemoteError("");
-    void listRemoteDirectory(selectedHost, remotePath)
+    void listRemoteDirectory(selectedHost, remotePath, sshOptions)
       .then((items) => {
         if (!cancelled) setRemoteEntries(items);
       })
@@ -638,7 +665,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, selectedHost, remotePath, remoteRefreshTick]);
+  }, [isSftpView, selectedHost, remotePath, remoteRefreshTick, sshOptions]);
 
   useEffect(() => {
     if (!activeTerminalTab || !terminalEl.current) {
@@ -897,6 +924,18 @@ export default function App() {
     setStatusTone("success");
   }
 
+  function handleSelectSshDefaults(field: "sshConnectTimeoutSeconds" | "sshServerAliveIntervalSeconds", value: number) {
+    const nextSettings = {
+      ...settings,
+      [field]: value
+    };
+    setSettings(nextSettings);
+    setStatus(
+      messages.appliedSshDefaults(nextSettings.sshConnectTimeoutSeconds, nextSettings.sshServerAliveIntervalSeconds)
+    );
+    setStatusTone("success");
+  }
+
   function handleSelectTerminalFontSize(fontSize: number) {
     setSettings((current) => ({ ...current, terminalFontSize: fontSize }));
     setStatus(messages.appliedTerminalFontSize(fontSize));
@@ -928,7 +967,7 @@ export default function App() {
     if (!selectedHost) return;
     const jobId = startTransferJob(entry.name, "upload", messages.uploadingTo(remotePath));
     try {
-      await uploadToRemote(selectedHost, entry.path, remotePath);
+      await uploadToRemote(selectedHost, entry.path, remotePath, sshOptions);
       setStatus(messages.uploaded(entry.name));
       setStatusTone("success");
       finishTransferJob(jobId, "success", messages.uploadedTo(remotePath));
@@ -947,7 +986,7 @@ export default function App() {
     const remoteTarget = joinChildPath(remotePath, entry.name);
     const jobId = startTransferJob(entry.name, "download", messages.downloadingTo(localPath));
     try {
-      await downloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir);
+      await downloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir, sshOptions);
       setStatus(messages.downloaded(entry.name));
       setStatusTone("success");
       finishTransferJob(jobId, "success", messages.downloadedTo(localPath));
@@ -972,7 +1011,7 @@ export default function App() {
   async function handleDeleteRemoteFile(entry: FileEntry) {
     if (!selectedHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
-    await deleteRemoteEntry(selectedHost, remoteTarget, entry.is_dir);
+    await deleteRemoteEntry(selectedHost, remoteTarget, entry.is_dir, sshOptions);
     setStatus(messages.deletedRemote(entry.name));
     setStatusTone("success");
     setFileMenu(null);
@@ -1110,7 +1149,7 @@ export default function App() {
       }
 
       setStatus(messages.testingHost(draft.username, draft.address, draft.port));
-      const message = await testConnection(draft);
+      const message = await testConnection(draft, sshOptions);
       setStatus(message);
       setStatusTone("success");
     } catch (error) {
@@ -1137,7 +1176,7 @@ export default function App() {
       }
 
       setStatus(messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port));
-      const sessionId = await startTerminalSession(targetHost);
+      const sessionId = await startTerminalSession(targetHost, sshOptions);
       const tabId = crypto.randomUUID();
       const title = getDisplayHostTitle(targetHost);
 
@@ -1658,10 +1697,37 @@ export default function App() {
                   <h3>{messages.connection}</h3>
                   <div className="settings-item">
                     <div>
-                      <strong>{messages.sshDefaults}</strong>
-                      <span>{messages.sshDefaultsDescription}</span>
+                      <strong>{messages.sshConnectTimeout}</strong>
+                      <span>{messages.sshConnectTimeoutDescription}</span>
                     </div>
-                    <span className="settings-pill">5s / 30s</span>
+                    <select
+                      className="settings-select"
+                      value={String(settings.sshConnectTimeoutSeconds)}
+                      onChange={(event) => handleSelectSshDefaults("sshConnectTimeoutSeconds", Number(event.target.value))}
+                    >
+                      {sshConnectTimeoutOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {messages.secondsValue(option)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="settings-item">
+                    <div>
+                      <strong>{messages.sshKeepaliveInterval}</strong>
+                      <span>{messages.sshKeepaliveIntervalDescription}</span>
+                    </div>
+                    <select
+                      className="settings-select"
+                      value={String(settings.sshServerAliveIntervalSeconds)}
+                      onChange={(event) => handleSelectSshDefaults("sshServerAliveIntervalSeconds", Number(event.target.value))}
+                    >
+                      {sshServerAliveIntervalOptions.map((option) => (
+                        <option key={option} value={option}>
+                          {messages.secondsValue(option)}
+                        </option>
+                      ))}
+                    </select>
                   </div>
                   <div className="settings-item">
                     <div>
