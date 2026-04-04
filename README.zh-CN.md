@@ -1,6 +1,19 @@
-# ServerDeck
+<div align="center">
 
-语言： [English](README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md)
+  <img src="ServerDeck/src-tauri/icons/icon.png" alt="ServerDeck logo" width="128" height="128" />
+
+  # ServerDeck — 远程服务器工作台
+
+  面向 macOS 的桌面应用，聚焦 SSH、终端多标签页、SFTP 与应用内更新。
+
+  [![Release](https://img.shields.io/github/v/release/qfxiongbinbin/serverdeck?display_name=tag&style=for-the-badge)](https://github.com/qfxiongbinbin/serverdeck/releases)
+  [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
+  [![Platform](https://img.shields.io/badge/platform-macOS-black?style=for-the-badge)](#)
+  [![Stack](https://img.shields.io/badge/stack-Tauri%20%7C%20React%20%7C%20Rust-5b5bd6?style=for-the-badge)](#)
+
+  语言： [English](README.md) · [中文](README.zh-CN.md) · [日本語](README.ja.md)
+
+</div>
 
 ServerDeck 是一个面向 macOS 的远程服务器工作流桌面应用，基于 Tauri、React、TypeScript 和 Rust 构建。产品方向参考了 Termius 这类工具，当前优先聚焦于 SSH、终端多标签页和 SFTP 浏览。
 
