@@ -72,3 +72,7 @@ Release steps are documented in:
 
 - Current GitHub-hosted macOS builds may still require proper Apple signing and notarization for smooth installation on other machines.
 - For contributor workflow, see `AGENTS.md`.
+
+## License
+
+This project is licensed under the Apache License 2.0. See `LICENSE`.

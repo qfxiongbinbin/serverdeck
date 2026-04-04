@@ -72,3 +72,7 @@ npm run tauri build
 
 - 当前通过 GitHub 分发的 macOS 构建，在其他机器上顺畅安装仍可能需要完善 Apple 签名与公证。
 - 贡献协作流程请参考 `AGENTS.md`。
+
+## 开源协议
+
+本项目采用 Apache License 2.0 开源，详见 `LICENSE`。
