@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { relaunch } from "@tauri-apps/plugin-process";
+import { check, type DownloadEvent, type Update as AppUpdate } from "@tauri-apps/plugin-updater";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -31,12 +33,10 @@ import {
 } from "lucide-react";
 import {
   clearAppData,
-  checkForUpdate,
   closeTerminalSession,
   deleteLocalEntry,
   deleteHost,
   deleteRemoteEntry,
-  downloadAndOpenUpdate,
   downloadFromRemote,
   listLocalDirectory,
   listRemoteDirectory,
@@ -48,8 +48,7 @@ import {
   writeTerminalInput,
   type FileEntry,
   type SavedHost,
-  type TerminalEventPayload,
-  type UpdateInfo
+  type TerminalEventPayload
 } from "./lib/api";
 import {
   defaultTerminalThemeId,
@@ -117,6 +116,8 @@ type AppSettings = {
   terminalFontSize: number;
 };
 
+type UpdateStage = "idle" | "downloading" | "ready";
+
 const appThemeOptions = [
   { label: "Light", value: "light" },
   { label: "Dark", value: "dark" }
@@ -134,6 +135,10 @@ function getHostTitle(host: SavedHost) {
 
 function getHostBadge(host: SavedHost) {
   return getHostTitle(host).slice(0, 1).toUpperCase();
+}
+
+function hasTauriRuntime() {
+  return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
 function formatFileSize(size: number) {
@@ -306,8 +311,12 @@ export default function App() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
   const [transferJobs, setTransferJobs] = useState<TransferJob[]>([]);
-  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
-  const [updateBusy, setUpdateBusy] = useState(false);
+  const [availableUpdate, setAvailableUpdate] = useState<AppUpdate | null>(null);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateStage, setUpdateStage] = useState<UpdateStage>("idle");
+  const [updateDownloadedBytes, setUpdateDownloadedBytes] = useState(0);
+  const [updateContentLength, setUpdateContentLength] = useState<number | null>(null);
+  const [updateError, setUpdateError] = useState("");
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [localPath, setLocalPath] = useState("~");
   const [remotePath, setRemotePath] = useState(".");
@@ -355,6 +364,14 @@ export default function App() {
     });
   }, [hosts, search]);
 
+  const updateProgressPercent = useMemo(() => {
+    if (!updateContentLength || updateContentLength <= 0) {
+      return null;
+    }
+
+    return Math.min(100, Math.round((updateDownloadedBytes / updateContentLength) * 100));
+  }, [updateContentLength, updateDownloadedBytes]);
+
   async function refreshHosts(nextSelectedId?: string) {
     const items = await listHosts();
     setHosts(items);
@@ -369,14 +386,39 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    void checkForUpdate()
-      .then((info) => {
-        setUpdateInfo(info);
+    if (!hasTauriRuntime()) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void check()
+      .then((update) => {
+        if (cancelled) {
+          void update?.close().catch(() => {});
+          return;
+        }
+
+        setAvailableUpdate(update);
       })
       .catch(() => {
-        setUpdateInfo(null);
+        if (!cancelled) {
+          setAvailableUpdate(null);
+        }
       });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (availableUpdate) {
+        void availableUpdate.close().catch(() => {});
+      }
+    };
+  }, [availableUpdate]);
 
   useEffect(() => {
     const savedSettings = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
@@ -648,26 +690,62 @@ export default function App() {
   }
 
   function handleUpdateClick() {
-    if (!updateInfo?.hasUpdate || !updateInfo.downloadUrl || !updateInfo.assetName) {
+    if (!availableUpdate) {
       return;
     }
 
-    setUpdateBusy(true);
-    setStatusTone("neutral");
-    setStatus(`Downloading update ${updateInfo.latestVersion}...`);
+    setUpdateModalOpen(true);
+  }
 
-    void downloadAndOpenUpdate(updateInfo.downloadUrl, updateInfo.assetName)
-      .then((savedPath) => {
-        setStatus(`Update downloaded to ${savedPath}`);
-        setStatusTone("success");
-      })
-      .catch((error) => {
-        setStatus(getErrorMessage(error, "Update download failed"));
-        setStatusTone("error");
-      })
-      .finally(() => {
-        setUpdateBusy(false);
+  async function handleDownloadUpdate() {
+    if (!availableUpdate || updateStage !== "idle") {
+      return;
+    }
+
+    setUpdateError("");
+    setUpdateDownloadedBytes(0);
+    setUpdateContentLength(null);
+    setUpdateStage("downloading");
+    setStatusTone("neutral");
+    setStatus(`Downloading update ${availableUpdate.version}...`);
+
+    try {
+      await availableUpdate.downloadAndInstall((event: DownloadEvent) => {
+        if (event.event === "Started") {
+          setUpdateContentLength(event.data.contentLength ?? null);
+          setUpdateDownloadedBytes(0);
+        }
+
+        if (event.event === "Progress") {
+          setUpdateDownloadedBytes((current) => current + event.data.chunkLength);
+        }
       });
+
+      setUpdateStage("ready");
+      setStatus(`Update ${availableUpdate.version} is ready to restart`);
+      setStatusTone("success");
+    } catch (error) {
+      setUpdateStage("idle");
+      setUpdateError(getErrorMessage(error, "Update download failed"));
+      setStatus(getErrorMessage(error, "Update download failed"));
+      setStatusTone("error");
+    }
+  }
+
+  async function handleRestartForUpdate() {
+    if (updateStage !== "ready") {
+      return;
+    }
+
+    setStatus("Restarting to apply update...");
+    setStatusTone("neutral");
+
+    try {
+      await relaunch();
+    } catch (error) {
+      setStatus(getErrorMessage(error, "Restart failed"));
+      setStatusTone("error");
+    }
   }
 
   async function handleClearLocalData() {
@@ -1110,10 +1188,10 @@ export default function App() {
           </div>
 
           <div className="sidebar__bottom">
-            {updateInfo?.hasUpdate ? (
-              <button type="button" className="side-nav side-nav--update" onClick={handleUpdateClick} disabled={updateBusy}>
+            {availableUpdate ? (
+              <button type="button" className="side-nav side-nav--update" onClick={handleUpdateClick}>
                 <Download size={18} />
-                {updateBusy ? "Updating" : "Update"}
+                Update
               </button>
             ) : null}
 
@@ -1677,6 +1755,97 @@ export default function App() {
               </button>
             </>
           )}
+        </div>
+      ) : null}
+
+      {updateModalOpen && availableUpdate ? (
+        <div className="update-modal-backdrop" onMouseDown={() => setUpdateModalOpen(false)}>
+          <section className="update-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="update-modal__header">
+              <div>
+                <div className="drawer-eyebrow">Update Available</div>
+                <h3>ServerDeck {availableUpdate.version}</h3>
+                <span>
+                  Current version {availableUpdate.currentVersion} → new version {availableUpdate.version}
+                </span>
+              </div>
+
+              <button type="button" className="icon-button" onClick={() => setUpdateModalOpen(false)}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="update-modal__body">
+              <div className="update-modal__summary">
+                <div className="update-modal__version-pill">v{availableUpdate.version}</div>
+                <p>
+                  Download installs the update quietly in the background. Restart switches the app to the new version.
+                </p>
+              </div>
+
+              <div className="update-modal__notes">
+                <strong>What&apos;s New</strong>
+                <div className="update-modal__notes-content">
+                  {availableUpdate.body?.trim() || "No release notes provided for this version."}
+                </div>
+              </div>
+
+              <div className="update-modal__status">
+                <strong>Status</strong>
+                <span>
+                  {updateStage === "ready"
+                    ? "Update downloaded and installed. Restart to finish."
+                    : updateStage === "downloading"
+                      ? "Downloading and installing update..."
+                      : "Ready to download this update."}
+                </span>
+
+                {updateStage === "downloading" ? (
+                  <>
+                    <div className="update-progress">
+                      <span style={{ width: `${updateProgressPercent ?? 18}%` }} />
+                    </div>
+                    <div className="update-progress__meta">
+                      <span>
+                        {updateProgressPercent !== null
+                          ? `${updateProgressPercent}%`
+                          : "Preparing download..."}
+                      </span>
+                      <span>
+                        {updateContentLength
+                          ? `${Math.round(updateDownloadedBytes / 1024 / 1024)} / ${Math.round(updateContentLength / 1024 / 1024)} MB`
+                          : `${Math.round(updateDownloadedBytes / 1024 / 1024)} MB`}
+                      </span>
+                    </div>
+                  </>
+                ) : null}
+
+                {updateError ? <div className="update-modal__error">{updateError}</div> : null}
+              </div>
+            </div>
+
+            <div className="update-modal__actions">
+              <button type="button" className="secondary-button" onClick={() => setUpdateModalOpen(false)}>
+                Later
+              </button>
+              <button
+                type="button"
+                className="secondary-button"
+                onClick={() => void handleDownloadUpdate()}
+                disabled={updateStage !== "idle"}
+              >
+                {updateStage === "downloading" ? "Downloading..." : updateStage === "ready" ? "Downloaded" : "Download"}
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                onClick={() => void handleRestartForUpdate()}
+                disabled={updateStage !== "ready"}
+              >
+                Restart
+              </button>
+            </div>
+          </section>
         </div>
       ) : null}
     </div>
