@@ -1,5 +1,7 @@
 # ServerDeck
 
+Languages: [English](README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md)
+
 ServerDeck is a macOS desktop app for remote server workflows, built with Tauri, React, TypeScript, and Rust. The product direction is inspired by tools like Termius, with an initial focus on SSH, terminal tabs, and SFTP browsing.
 
 ## Current Scope
@@ -70,3 +72,7 @@ Release steps are documented in:
 
 - Current GitHub-hosted macOS builds may still require proper Apple signing and notarization for smooth installation on other machines.
 - For contributor workflow, see `AGENTS.md`.
+
+## License
+
+This project is licensed under the Apache License 2.0. See `LICENSE`.
