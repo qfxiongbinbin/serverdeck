@@ -1,6 +1,19 @@
-# ServerDeck
+<div align="center">
 
-Languages: [English](README.md) | [中文](README.zh-CN.md) | [日本語](README.ja.md)
+  <img src="ServerDeck/src-tauri/icons/icon.png" alt="ServerDeck logo" width="128" height="128" />
+
+  # ServerDeck — Remote Server Workbench
+
+  macOS desktop app for SSH, terminal tabs, SFTP, and in-app updates.
+
+  [![Release](https://img.shields.io/github/v/release/qfxiongbinbin/serverdeck?display_name=tag&style=for-the-badge)](https://github.com/qfxiongbinbin/serverdeck/releases)
+  [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
+  [![Platform](https://img.shields.io/badge/platform-macOS-black?style=for-the-badge)](#)
+  [![Stack](https://img.shields.io/badge/stack-Tauri%20%7C%20React%20%7C%20Rust-5b5bd6?style=for-the-badge)](#)
+
+  Languages: [English](README.md) · [中文](README.zh-CN.md) · [日本語](README.ja.md)
+
+</div>
 
 ServerDeck is a macOS desktop app for remote server workflows, built with Tauri, React, TypeScript, and Rust. The product direction is inspired by tools like Termius, with an initial focus on SSH, terminal tabs, and SFTP browsing.
 
