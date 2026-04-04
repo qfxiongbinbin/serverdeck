@@ -8,6 +8,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
+  ArrowLeft,
   ChevronRight,
   Copy,
   Download,
@@ -38,6 +39,7 @@ import {
 import {
   clearAppData,
   closeTerminalSession,
+  DEFAULT_PROJECT_ID,
   deleteLocalEntry,
   deleteHost,
   deleteRemoteEntry,
@@ -74,6 +76,7 @@ const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 const DEFAULT_APP_SETTINGS: AppSettings = {
   appTheme: "dark",
   language: "en",
+  projects: [],
   sshConnectTimeoutSeconds: 5,
   sshServerAliveIntervalSeconds: 30,
   terminalThemeId: defaultTerminalThemeId,
@@ -83,6 +86,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
 const blankHost: SavedHost = {
   id: "",
   label: "",
+  projectId: DEFAULT_PROJECT_ID,
   address: "",
   port: 22,
   username: "root",
@@ -124,9 +128,17 @@ type TransferJob = {
   detail: string;
 };
 
+type ManagedProject = {
+  id: string;
+  name: string;
+  namespace: string;
+  path: string;
+};
+
 type AppSettings = {
   appTheme: "light" | "dark";
   language: AppLanguage;
+  projects: ManagedProject[];
   sshConnectTimeoutSeconds: number;
   sshServerAliveIntervalSeconds: number;
   terminalThemeId: string;
@@ -135,7 +147,8 @@ type AppSettings = {
 
 type UpdateStage = "idle" | "downloading" | "ready";
 type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
-type SettingsSectionId = "general" | "connection" | "terminal" | "about" | "danger";
+type SettingsSectionId = "general" | "projects" | "connection" | "terminal" | "about" | "danger";
+type ProjectEditorMode = "new" | "edit";
 
 const terminalFontSizeOptions = [
   { label: "S", value: 12 },
@@ -145,6 +158,13 @@ const terminalFontSizeOptions = [
 
 const sshConnectTimeoutOptions = [5, 10, 15, 30] as const;
 const sshServerAliveIntervalOptions = [15, 30, 60, 120] as const;
+
+const blankProject: ManagedProject = {
+  id: "",
+  name: "",
+  namespace: "",
+  path: ""
+};
 
 function getHostTitle(host: SavedHost, fallback = "Untitled Host") {
   return host.label.trim() || host.address.trim() || fallback;
@@ -416,6 +436,10 @@ export default function App() {
   const [updateError, setUpdateError] = useState("");
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>("general");
+  const [projectEditorOpen, setProjectEditorOpen] = useState(false);
+  const [projectEditorMode, setProjectEditorMode] = useState<ProjectEditorMode>("new");
+  const [projectDraft, setProjectDraft] = useState<ManagedProject>(blankProject);
+  const [activeHostProjectId, setActiveHostProjectId] = useState<string | null>(null);
   const [localPath, setLocalPath] = useState("~");
   const [remotePath, setRemotePath] = useState(".");
   const [localEntries, setLocalEntries] = useState<FileEntry[]>([]);
@@ -479,15 +503,32 @@ export default function App() {
     [messages.untitledHost]
   );
 
+  const projectOptions = useMemo(
+    () => [
+      { id: DEFAULT_PROJECT_ID, name: messages.defaultProject },
+      ...settings.projects.map((project) => ({ id: project.id, name: project.name }))
+    ],
+    [messages.defaultProject, settings.projects]
+  );
+
+  const projectNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    projectOptions.forEach((project) => {
+      map.set(project.id, project.name);
+    });
+    return map;
+  }, [projectOptions]);
+
   const settingsNavItems = useMemo(
     () => [
       { id: "general" as const, label: messages.general, icon: Wrench },
+      { id: "projects" as const, label: messages.projects, icon: FolderOpen },
       { id: "connection" as const, label: messages.connection, icon: PlugZap },
       { id: "terminal" as const, label: messages.terminal, icon: TerminalSquare },
       { id: "about" as const, label: messages.about, icon: Info },
       { id: "danger" as const, label: messages.dangerZone, icon: ShieldAlert }
     ],
-    [messages.about, messages.connection, messages.dangerZone, messages.general, messages.terminal]
+    [messages.about, messages.connection, messages.dangerZone, messages.general, messages.projects, messages.terminal]
   );
 
   const filteredHosts = useMemo(() => {
@@ -495,10 +536,47 @@ export default function App() {
     if (!keyword) return hosts;
 
     return hosts.filter((host) => {
-      const haystack = [host.label, host.address, host.username, String(host.port)].join(" ").toLowerCase();
+      const haystack = [
+        host.label,
+        host.address,
+        host.username,
+        String(host.port),
+        projectNameById.get(host.projectId) ?? messages.defaultProject
+      ]
+        .join(" ")
+        .toLowerCase();
       return haystack.includes(keyword);
     });
-  }, [hosts, search]);
+  }, [hosts, messages.defaultProject, projectNameById, search]);
+
+  const groupedHosts = useMemo(() => {
+    const groups = new Map<string, SavedHost[]>();
+    const keyword = search.trim().toLowerCase();
+
+    projectOptions.forEach((project) => {
+      groups.set(project.id, []);
+    });
+
+    filteredHosts.forEach((host) => {
+      const projectId = projectNameById.has(host.projectId) ? host.projectId : DEFAULT_PROJECT_ID;
+      const items = groups.get(projectId) ?? [];
+      items.push({ ...host, projectId });
+      groups.set(projectId, items);
+    });
+
+    return projectOptions
+      .map((project) => ({
+        id: project.id,
+        name: project.name,
+        hosts: groups.get(project.id) ?? []
+      }))
+      .filter((group) => !keyword || group.hosts.length > 0 || group.name.toLowerCase().includes(keyword));
+  }, [filteredHosts, projectNameById, projectOptions, search]);
+
+  const activeHostGroup = useMemo(
+    () => groupedHosts.find((group) => group.id === activeHostProjectId) ?? null,
+    [activeHostProjectId, groupedHosts]
+  );
 
   const updateProgressPercent = useMemo(() => {
     if (!updateContentLength || updateContentLength <= 0) {
@@ -509,7 +587,10 @@ export default function App() {
   }, [updateContentLength, updateDownloadedBytes]);
 
   async function refreshHosts(nextSelectedId?: string) {
-    const items = await listHosts();
+    const items = (await listHosts()).map((item) => ({
+      ...item,
+      projectId: item.projectId || DEFAULT_PROJECT_ID
+    }));
     setHosts(items);
 
     const preferredId = nextSelectedId !== undefined ? nextSelectedId : selectedId;
@@ -620,6 +701,17 @@ export default function App() {
       setSettings({
           appTheme: parsed.appTheme === "light" ? "light" : DEFAULT_APP_SETTINGS.appTheme,
           language: languageOptions.find((item) => item.value === parsed.language)?.value ?? DEFAULT_APP_SETTINGS.language,
+          projects:
+            Array.isArray(parsed.projects)
+              ? parsed.projects
+                  .map((project) => ({
+                    id: typeof project?.id === "string" && project.id.trim() ? project.id : crypto.randomUUID(),
+                    name: typeof project?.name === "string" ? project.name : "",
+                    namespace: typeof project?.namespace === "string" ? project.namespace : "",
+                    path: typeof project?.path === "string" ? project.path : ""
+                  }))
+                  .filter((project) => project.name.trim())
+              : DEFAULT_APP_SETTINGS.projects,
           sshConnectTimeoutSeconds:
             typeof parsed.sshConnectTimeoutSeconds === "number" &&
             sshConnectTimeoutOptions.includes(parsed.sshConnectTimeoutSeconds as (typeof sshConnectTimeoutOptions)[number])
@@ -868,7 +960,18 @@ export default function App() {
     setDrawerMode("new");
     setDrawerOpen(true);
     setSelectedId("");
-    setDraft(blankHost);
+    setDraft({ ...blankHost, projectId: activeHostProjectId ?? DEFAULT_PROJECT_ID });
+    setStatus(messages.ready);
+    setStatusTone("neutral");
+  }
+
+  function openNewDrawerForProject(projectId: string) {
+    setActiveHostProjectId(projectId);
+    setActiveTabId(HOSTS_TAB_ID);
+    setDrawerMode("new");
+    setDrawerOpen(true);
+    setSelectedId("");
+    setDraft({ ...blankHost, projectId });
     setStatus(messages.ready);
     setStatusTone("neutral");
   }
@@ -1009,6 +1112,69 @@ export default function App() {
     setSettings((current) => ({ ...current, language }));
     setStatus(messagesByLanguage[language].appliedLanguage(label));
     setStatusTone("success");
+  }
+
+  function openNewProjectEditor() {
+    setProjectEditorMode("new");
+    setProjectDraft(blankProject);
+    setProjectEditorOpen(true);
+  }
+
+  function openEditProjectEditor(project: ManagedProject) {
+    setProjectEditorMode("edit");
+    setProjectDraft(project);
+    setProjectEditorOpen(true);
+  }
+
+  function closeProjectEditor() {
+    setProjectEditorOpen(false);
+    setProjectDraft(blankProject);
+    setProjectEditorMode("new");
+  }
+
+  function handleSaveProject() {
+    const name = projectDraft.name.trim();
+    if (!name) {
+      setStatus(messages.projectNameRequired);
+      setStatusTone("error");
+      return;
+    }
+
+    const nextProject: ManagedProject = {
+      ...projectDraft,
+      id: projectDraft.id || crypto.randomUUID(),
+      name,
+      namespace: projectDraft.namespace.trim(),
+      path: projectDraft.path.trim()
+    };
+
+    setSettings((current) => ({
+      ...current,
+      projects: projectEditorMode === "edit"
+        ? current.projects.map((project) => (project.id === nextProject.id ? nextProject : project))
+        : [nextProject, ...current.projects]
+    }));
+
+    setStatus(projectEditorMode === "edit" ? messages.projectUpdated(nextProject.name) : messages.projectAdded(nextProject.name));
+    setStatusTone("success");
+    closeProjectEditor();
+  }
+
+  function handleDeleteProject(projectId: string) {
+    const project = settings.projects.find((item) => item.id === projectId);
+    setSettings((current) => ({
+      ...current,
+      projects: current.projects.filter((item) => item.id !== projectId)
+    }));
+
+    if (project) {
+      setStatus(messages.projectRemoved(project.name));
+      setStatusTone("success");
+    }
+
+    if (projectDraft.id === projectId) {
+      closeProjectEditor();
+    }
   }
 
   function handleSelectSshDefaults(field: "sshConnectTimeoutSeconds" | "sshServerAliveIntervalSeconds", value: number) {
@@ -1454,9 +1620,13 @@ export default function App() {
                   />
                 </div>
 
-                <button type="button" className="primary-button" onClick={openNewDrawer}>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => (activeHostGroup ? openNewDrawerForProject(activeHostGroup.id) : openNewDrawer())}
+                >
                   <Plus size={16} />
-                  {messages.new}
+                  {activeHostGroup ? messages.addHost : messages.new}
                 </button>
               </div>
 
@@ -1464,66 +1634,137 @@ export default function App() {
                 <section className="hosts-board">
                   <div className="hosts-board__header">
                     <div>
-                      <h2>{messages.hosts}</h2>
-                      <span>{messages.hostCount(filteredHosts.length)}</span>
+                      <h2>{activeHostGroup ? activeHostGroup.name : messages.projects}</h2>
+                      <span>{messages.hostCount(activeHostGroup ? activeHostGroup.hosts.length : groupedHosts.length)}</span>
                     </div>
+
+                    {activeHostGroup ? (
+                      <button type="button" className="row-button" onClick={() => setActiveHostProjectId(null)}>
+                        <ArrowLeft size={14} />
+                        {messages.backToProjects}
+                      </button>
+                    ) : null}
                   </div>
 
                   <div className="host-rows">
-                    {filteredHosts.map((host) => (
-                      <div
-                        key={host.id}
-                        className={`host-row ${selectedId === host.id ? "host-row--active" : ""}`}
-                        onClick={() => openEditDrawer(host)}
-                        onContextMenuCapture={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setSelectedId(host.id);
-                          setContextMenu({ host, x: event.clientX, y: event.clientY });
-                        }}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            openEditDrawer(host);
-                          }
-                        }}
-                      >
-                        <div className="host-row__badge">{getDisplayHostBadge(host)}</div>
-
-                        <div className="host-row__body">
-                          <div className="host-row__title">{getDisplayHostTitle(host)}</div>
-                          <div className="host-row__sub">ssh, {host.username}</div>
-                          <div className="host-row__meta">{host.address}:{host.port}</div>
-                        </div>
-
-                        <div className="host-row__actions">
+                    {activeHostGroup ? (
+                      <section className="host-group host-group--detail">
+                        <div className="host-group__header">
+                          <div className="host-group__header-main">
+                            <strong>{activeHostGroup.name}</strong>
+                            <span>{messages.hostCount(activeHostGroup.hosts.length)}</span>
+                          </div>
                           <button
                             type="button"
                             className="row-button"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              openEditDrawer(host);
-                            }}
+                            onClick={() => openNewDrawerForProject(activeHostGroup.id)}
                           >
-                            {messages.edit}
-                          </button>
-                          <button
-                            type="button"
-                            className="row-button row-button--primary"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setSelectedId(host.id);
-                              setDraft(host);
-                              void handleOpenTerminal(host);
-                            }}
-                          >
-                            {messages.connect}
+                            <Plus size={14} />
+                            {messages.addHost}
                           </button>
                         </div>
+
+                        {activeHostGroup.hosts.length ? (
+                          activeHostGroup.hosts.map((host) => (
+                            <div
+                              key={host.id}
+                              className={`host-row ${selectedId === host.id ? "host-row--active" : ""}`}
+                              onClick={() => openEditDrawer(host)}
+                              onContextMenuCapture={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setSelectedId(host.id);
+                                setContextMenu({ host, x: event.clientX, y: event.clientY });
+                              }}
+                              role="button"
+                              tabIndex={0}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  openEditDrawer(host);
+                                }
+                              }}
+                            >
+                              <div className="host-row__badge">{getDisplayHostBadge(host)}</div>
+
+                              <div className="host-row__body">
+                                <div className="host-row__title">{getDisplayHostTitle(host)}</div>
+                                <div className="host-row__sub">ssh, {host.username}</div>
+                                <div className="host-row__meta">{host.address}:{host.port}</div>
+                              </div>
+
+                              <div className="host-row__actions">
+                                <button
+                                  type="button"
+                                  className="row-button"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    openEditDrawer(host);
+                                  }}
+                                >
+                                  {messages.edit}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="row-button row-button--primary"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setSelectedId(host.id);
+                                    setDraft(host);
+                                    void handleOpenTerminal(host);
+                                  }}
+                                >
+                                  {messages.connect}
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="host-group__empty">
+                            <strong>{messages.noHostsInProject}</strong>
+                            <span>{messages.noHostsInProjectDescription}</span>
+                            <button type="button" className="secondary-button" onClick={() => openNewDrawerForProject(activeHostGroup.id)}>
+                              <Plus size={14} />
+                              {messages.addHost}
+                            </button>
+                          </div>
+                        )}
+                      </section>
+                    ) : (
+                      <div className="project-card-grid">
+                        {groupedHosts.map((group) => (
+                          <div
+                            key={group.id}
+                            className="project-host-card"
+                          >
+                            <button
+                              type="button"
+                              className="project-host-card__main"
+                              onClick={() => setActiveHostProjectId(group.id)}
+                            >
+                              <div className="project-host-card__icon">
+                                <FolderOpen size={20} />
+                              </div>
+                              <div className="project-host-card__body">
+                                <strong>{group.name}</strong>
+                                <span>{messages.hostCount(group.hosts.length)}</span>
+                              </div>
+                              <ChevronRight size={18} className="project-host-card__arrow" />
+                            </button>
+
+                            <div className="project-host-card__actions">
+                              <button type="button" className="row-button" onClick={() => setActiveHostProjectId(group.id)}>
+                                {messages.openProject}
+                              </button>
+                              <button type="button" className="row-button row-button--primary" onClick={() => openNewDrawerForProject(group.id)}>
+                                <Plus size={14} />
+                                {messages.addHost}
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    ))}
+                    )}
 
                     {!filteredHosts.length ? (
                       <div className="empty-state">
@@ -1557,6 +1798,20 @@ export default function App() {
                       <label>
                         <span>{messages.label}</span>
                         <input value={draft.label} onChange={(event) => setDraft({ ...draft, label: event.target.value })} />
+                      </label>
+
+                      <label>
+                        <span>{messages.projects}</span>
+                        <select
+                          value={draft.projectId}
+                          onChange={(event) => setDraft({ ...draft, projectId: event.target.value })}
+                        >
+                          {projectOptions.map((project) => (
+                            <option key={project.id} value={project.id}>
+                              {project.name}
+                            </option>
+                          ))}
+                        </select>
                       </label>
 
                       <label>
@@ -1810,6 +2065,119 @@ export default function App() {
                             ))}
                           </select>
                         </div>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {activeSettingsSection === "projects" ? (
+                    <section className="settings-panel">
+                      <div className="settings-panel__header">
+                        <FolderOpen size={18} />
+                        <div>
+                          <h3>{messages.projects}</h3>
+                          <span>{messages.projectsDescription}</span>
+                        </div>
+                      </div>
+
+                      <div className="settings-panel__toolbar">
+                        <span className="settings-panel__toolbar-label">{messages.projects}</span>
+                        <button type="button" className="secondary-button" onClick={openNewProjectEditor}>
+                          <Plus size={14} />
+                          {messages.addProject}
+                        </button>
+                      </div>
+
+                      {projectEditorOpen ? (
+                        <div className="settings-card settings-card--form">
+                          <div className="settings-item settings-item--form">
+                            <div>
+                              <strong>{projectEditorMode === "edit" ? messages.editProject : messages.newProject}</strong>
+                              <span>{messages.projectsDescription}</span>
+                            </div>
+                          </div>
+
+                          <div className="project-form">
+                            <label>
+                              <span>{messages.projectName}</span>
+                              <small>{messages.projectNameDescription}</small>
+                              <input
+                                value={projectDraft.name}
+                                onChange={(event) => setProjectDraft((current) => ({ ...current, name: event.target.value }))}
+                              />
+                            </label>
+
+                            <label>
+                              <span>{messages.projectNamespace}</span>
+                              <small>{messages.projectNamespaceDescription}</small>
+                              <input
+                                value={projectDraft.namespace}
+                                onChange={(event) => setProjectDraft((current) => ({ ...current, namespace: event.target.value }))}
+                              />
+                            </label>
+
+                            <label>
+                              <span>{messages.projectPath}</span>
+                              <small>{messages.projectPathDescription}</small>
+                              <input
+                                value={projectDraft.path}
+                                onChange={(event) => setProjectDraft((current) => ({ ...current, path: event.target.value }))}
+                              />
+                            </label>
+                          </div>
+
+                          <div className="project-form__actions">
+                            <button type="button" className="secondary-button" onClick={closeProjectEditor}>
+                              {messages.cancel}
+                            </button>
+                            <button type="button" className="primary-button" onClick={handleSaveProject}>
+                              {messages.saveProject}
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="settings-card settings-card--projects">
+                        {settings.projects.length ? (
+                          settings.projects.map((project) => (
+                            <div key={project.id} className="project-row">
+                              <div className="project-row__icon">
+                                <FolderOpen size={18} />
+                              </div>
+
+                              <div className="project-row__body">
+                                <div className="project-row__titleline">
+                                  <strong>{project.name}</strong>
+                                  {project.namespace ? <span>{project.namespace}</span> : null}
+                                </div>
+                                {project.path ? <div className="project-row__path">{project.path}</div> : null}
+                              </div>
+
+                              <div className="project-row__actions">
+                                <button type="button" className="row-button" onClick={() => openEditProjectEditor(project)}>
+                                  <Pencil size={14} />
+                                  {messages.edit}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="danger-button"
+                                  onClick={() => handleDeleteProject(project.id)}
+                                >
+                                  <Trash2 size={14} />
+                                  {messages.delete}
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="project-empty-state">
+                            <strong>{messages.noProjects}</strong>
+                            <span>{messages.noProjectsDescription}</span>
+                            <button type="button" className="secondary-button" onClick={openNewProjectEditor}>
+                              <Plus size={14} />
+                              {messages.addProject}
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </section>
                   ) : null}

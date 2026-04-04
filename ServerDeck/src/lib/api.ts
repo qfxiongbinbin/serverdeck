@@ -3,6 +3,7 @@ import { hosts as mockHosts } from "../data/mock";
 export type SavedHost = {
   id: string;
   label: string;
+  projectId: string;
   address: string;
   port: number;
   username: string;
@@ -37,6 +38,21 @@ declare global {
 }
 
 const STORAGE_KEY = "serverdeck.hosts";
+export const DEFAULT_PROJECT_ID = "default";
+
+function normalizeHost(host: Partial<SavedHost> & Pick<SavedHost, "id" | "address" | "port" | "username" | "authType">): SavedHost {
+  return {
+    id: host.id,
+    label: host.label ?? "",
+    projectId: typeof host.projectId === "string" && host.projectId.trim() ? host.projectId : DEFAULT_PROJECT_ID,
+    address: host.address,
+    port: host.port,
+    username: host.username,
+    authType: host.authType,
+    password: host.password,
+    privateKeyPath: host.privateKeyPath
+  };
+}
 
 async function tauriInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   const mod = await import("@tauri-apps/api/core");
@@ -50,12 +66,13 @@ function hasTauri() {
 function loadBrowserHosts(): SavedHost[] {
   const saved = window.localStorage.getItem(STORAGE_KEY);
   if (saved) {
-    return JSON.parse(saved) as SavedHost[];
+    return (JSON.parse(saved) as Array<Partial<SavedHost> & Pick<SavedHost, "id" | "address" | "port" | "username" | "authType">>).map(normalizeHost);
   }
 
   const initial: SavedHost[] = mockHosts.map((item) => ({
     id: item.id,
     label: item.label,
+    projectId: DEFAULT_PROJECT_ID,
     address: item.address,
     port: item.port,
     username: item.username,
@@ -82,13 +99,14 @@ export async function saveHost(host: SavedHost) {
     return tauriInvoke<SavedHost>("save_host", { host });
   }
   const items = loadBrowserHosts();
-  const existingIndex = items.findIndex((item) => item.id === host.id);
+  const normalizedHost = normalizeHost(host);
+  const existingIndex = items.findIndex((item) => item.id === normalizedHost.id);
   const next = [...items];
 
   if (existingIndex >= 0) {
-    next[existingIndex] = host;
+    next[existingIndex] = normalizedHost;
   } else {
-    next.push({ ...host, id: host.id || crypto.randomUUID() });
+    next.push({ ...normalizedHost, id: normalizedHost.id || crypto.randomUUID() });
   }
 
   saveBrowserHosts(next);

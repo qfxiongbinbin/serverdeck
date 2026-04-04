@@ -17,12 +17,18 @@ use uuid::Uuid;
 struct HostRecord {
     id: String,
     label: String,
+    #[serde(default = "default_project_id")]
+    project_id: String,
     address: String,
     port: u16,
     username: String,
     auth_type: String,
     password: Option<String>,
     private_key_path: Option<String>,
+}
+
+fn default_project_id() -> String {
+    "default".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
