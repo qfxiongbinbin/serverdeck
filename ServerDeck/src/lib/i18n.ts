@@ -69,6 +69,9 @@ type Messages = {
   hosts: string;
   sftp: string;
   newTab: string;
+  localTerminal: string;
+  openingLocalTerminal: string;
+  localTerminalOpened: string;
   update: string;
   settings: string;
   searchPlaceholder: string;
@@ -254,6 +257,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     hosts: "Hosts",
     sftp: "SFTP",
     newTab: "New Tab",
+    localTerminal: "Local Terminal",
+    openingLocalTerminal: "Opening local terminal...",
+    localTerminalOpened: "Local terminal opened",
     update: "Update",
     settings: "Settings",
     searchPlaceholder: "Find a host or ssh user@hostname...",
@@ -437,6 +443,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     hosts: "主机",
     sftp: "SFTP",
     newTab: "新标签页",
+    localTerminal: "本地终端",
+    openingLocalTerminal: "正在打开本地终端...",
+    localTerminalOpened: "已打开本地终端",
     update: "更新",
     settings: "设置",
     searchPlaceholder: "搜索主机或输入 ssh user@hostname...",
@@ -620,6 +629,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     hosts: "ホスト",
     sftp: "SFTP",
     newTab: "新しいタブ",
+    localTerminal: "ローカルターミナル",
+    openingLocalTerminal: "ローカルターミナルを開いています...",
+    localTerminalOpened: "ローカルターミナルを開きました",
     update: "更新",
     settings: "設定",
     searchPlaceholder: "ホストを検索、または ssh user@hostname... を入力",

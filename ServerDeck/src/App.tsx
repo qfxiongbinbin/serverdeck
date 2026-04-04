@@ -48,6 +48,7 @@ import {
   listRemoteDirectory,
   listHosts,
   saveHost,
+  startLocalTerminalSession,
   startTerminalSession,
   testConnection,
   uploadToRemote,
@@ -101,7 +102,8 @@ type TerminalTab = {
   id: string;
   sessionId: string;
   title: string;
-  host: SavedHost;
+  kind: "remote" | "local";
+  host: SavedHost | null;
   state: TerminalState;
   statusText: string;
   buffer: string[];
@@ -1439,6 +1441,7 @@ export default function App() {
           id: tabId,
           sessionId,
           title,
+          kind: "remote",
           host: targetHost,
           state: "connecting",
           statusText: messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port),
@@ -1449,6 +1452,42 @@ export default function App() {
       setActiveTabId(tabId);
       setDrawerOpen(false);
       setStatus(messages.terminalSessionOpened(targetHost.username, targetHost.address));
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : messages.terminalOpenFailed);
+      setStatusTone("error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleOpenLocalTerminal() {
+    setBusy(true);
+    setStatusTone("neutral");
+
+    try {
+      setStatus(messages.openingLocalTerminal);
+      const sessionId = await startLocalTerminalSession();
+      const localTabCount = terminalTabsRef.current.filter((tab) => tab.kind === "local").length;
+      const title = localTabCount > 0 ? `${messages.localTerminal} ${localTabCount + 1}` : messages.localTerminal;
+      const tabId = crypto.randomUUID();
+
+      setTerminalTabs((prev) => [
+        ...prev,
+        {
+          id: tabId,
+          sessionId,
+          title,
+          kind: "local",
+          host: null,
+          state: "connecting",
+          statusText: messages.openingLocalTerminal,
+          buffer: []
+        }
+      ]);
+
+      setActiveTabId(tabId);
+      setStatus(messages.localTerminalOpened);
       setStatusTone("success");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : messages.terminalOpenFailed);
@@ -1564,9 +1603,9 @@ export default function App() {
             </div>
           ))}
 
-          <button type="button" className="top-tab top-tab--ghost" disabled>
+          <button type="button" className="top-tab top-tab--ghost" onClick={() => void handleOpenLocalTerminal()}>
             <Plus size={16} />
-            {messages.newTab}
+            {messages.localTerminal}
           </button>
         </div>
       </header>
