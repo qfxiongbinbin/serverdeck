@@ -30,6 +30,7 @@ import {
   X
 } from "lucide-react";
 import {
+  clearAppData,
   checkForUpdate,
   closeTerminalSession,
   deleteLocalEntry,
@@ -60,6 +61,10 @@ const HOSTS_TAB_ID = "hosts";
 const SFTP_TAB_ID = "sftp";
 const SETTINGS_TAB_ID = "settings";
 const SETTINGS_STORAGE_KEY = "serverdeck.settings";
+const DEFAULT_APP_SETTINGS: AppSettings = {
+  terminalThemeId: defaultTerminalThemeId,
+  terminalFontSize: 14
+};
 
 const blankHost: SavedHost = {
   id: "",
@@ -296,10 +301,7 @@ export default function App() {
   const [transferJobs, setTransferJobs] = useState<TransferJob[]>([]);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateBusy, setUpdateBusy] = useState(false);
-  const [settings, setSettings] = useState<AppSettings>({
-    terminalThemeId: defaultTerminalThemeId,
-    terminalFontSize: 14
-  });
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [localPath, setLocalPath] = useState("~");
   const [remotePath, setRemotePath] = useState(".");
   const [localEntries, setLocalEntries] = useState<FileEntry[]>([]);
@@ -378,12 +380,12 @@ export default function App() {
     try {
       const parsed = JSON.parse(savedSettings) as Partial<AppSettings>;
       setSettings({
-        terminalThemeId:
-          terminalThemePresets.find((item) => item.id === parsed.terminalThemeId)?.id ?? defaultTerminalThemeId,
-        terminalFontSize:
-          typeof parsed.terminalFontSize === "number" && parsed.terminalFontSize >= 10 && parsed.terminalFontSize <= 24
+          terminalThemeId:
+            terminalThemePresets.find((item) => item.id === parsed.terminalThemeId)?.id ?? defaultTerminalThemeId,
+          terminalFontSize:
+            typeof parsed.terminalFontSize === "number" && parsed.terminalFontSize >= 10 && parsed.terminalFontSize <= 24
             ? parsed.terminalFontSize
-            : 14
+            : DEFAULT_APP_SETTINGS.terminalFontSize
       });
     } catch {
       window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
@@ -653,6 +655,37 @@ export default function App() {
       .finally(() => {
         setUpdateBusy(false);
       });
+  }
+
+  async function handleClearLocalData() {
+    setBusy(true);
+    setStatusTone("neutral");
+
+    try {
+      await clearAppData();
+      window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
+      setHosts([]);
+      setSelectedId("");
+      setDraft(blankHost);
+      setSearch("");
+      setDrawerOpen(false);
+      setDrawerMode("new");
+      setLocalEntries([]);
+      setRemoteEntries([]);
+      setLocalError("");
+      setRemoteError("");
+      setTransferJobs([]);
+      setSettings(DEFAULT_APP_SETTINGS);
+      setLocalPath("~");
+      setRemotePath(".");
+      setStatus("Cleared local app data");
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, "Failed to clear local data"));
+      setStatusTone("error");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function handleSelectTerminalTheme(themeId: string) {
@@ -1461,6 +1494,20 @@ export default function App() {
                       <span>Remote server workbench for macOS.</span>
                     </div>
                     <span className="settings-pill">v0.1.0</span>
+                  </div>
+                </section>
+
+                <section className="settings-section">
+                  <h3>Danger Zone</h3>
+                  <div className="settings-item settings-item--danger">
+                    <div>
+                      <strong>Clear Local Data</strong>
+                      <span>Remove saved hosts and local settings from this Mac.</span>
+                    </div>
+                    <button type="button" className="danger-button" onClick={() => void handleClearLocalData()} disabled={busy}>
+                      <Trash2 size={14} />
+                      {busy ? "Clearing..." : "Clear Data"}
+                    </button>
                   </div>
                 </section>
               </div>
