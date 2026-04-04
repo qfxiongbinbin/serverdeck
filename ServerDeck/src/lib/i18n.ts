@@ -78,6 +78,12 @@ type Messages = {
   connect: string;
   noHostsFound: string;
   noHostsHint: string;
+  defaultProject: string;
+  backToProjects: string;
+  openProject: string;
+  addHost: string;
+  noHostsInProject: string;
+  noHostsInProjectDescription: string;
   createHost: string;
   newHost: string;
   editHost: string;
@@ -108,6 +114,25 @@ type Messages = {
   transferDownload: string;
   settingsDescription: string;
   general: string;
+  projects: string;
+  projectsDescription: string;
+  addProject: string;
+  noProjects: string;
+  noProjectsDescription: string;
+  projectName: string;
+  projectNameDescription: string;
+  projectNamespace: string;
+  projectNamespaceDescription: string;
+  projectPath: string;
+  projectPathDescription: string;
+  newProject: string;
+  editProject: string;
+  saveProject: string;
+  projectNameRequired: string;
+  projectAdded: (name: string) => string;
+  projectUpdated: (name: string) => string;
+  projectRemoved: (name: string) => string;
+  cancel: string;
   appTheme: string;
   appThemeDescription: string;
   language: string;
@@ -238,6 +263,12 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     connect: "Connect",
     noHostsFound: "No hosts found",
     noHostsHint: "Try another keyword or create a new host.",
+    defaultProject: "Default Project",
+    backToProjects: "Back to Projects",
+    openProject: "Open Project",
+    addHost: "Add Host",
+    noHostsInProject: "No hosts in this project",
+    noHostsInProjectDescription: "Create a host in this project to start managing servers here.",
     createHost: "Create Host",
     newHost: "New Host",
     editHost: "Edit Host",
@@ -268,6 +299,25 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     transferDownload: "Download",
     settingsDescription: "Application preferences and connection defaults.",
     general: "General",
+    projects: "Projects",
+    projectsDescription: "Manage reusable project entries and local workspace paths.",
+    addProject: "Add Project",
+    noProjects: "No projects yet",
+    noProjectsDescription: "Create a project entry to keep its name, namespace, and local path handy.",
+    projectName: "Project Name",
+    projectNameDescription: "Primary display name for this project.",
+    projectNamespace: "Namespace / Owner",
+    projectNamespaceDescription: "Optional owner, org, or workspace grouping.",
+    projectPath: "Local Path",
+    projectPathDescription: "Optional local workspace path for this project.",
+    newProject: "New Project",
+    editProject: "Edit Project",
+    saveProject: "Save Project",
+    projectNameRequired: "Project name is required",
+    projectAdded: (name) => `Added project ${name}`,
+    projectUpdated: (name) => `Updated project ${name}`,
+    projectRemoved: (name) => `Removed project ${name}`,
+    cancel: "Cancel",
     appTheme: "App Theme",
     appThemeDescription: "Choose the light or dark app appearance.",
     language: "Language",
@@ -396,6 +446,12 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     connect: "连接",
     noHostsFound: "未找到主机",
     noHostsHint: "试试其他关键词，或新建一个主机。",
+    defaultProject: "默认项目",
+    backToProjects: "返回项目",
+    openProject: "打开项目",
+    addHost: "新增主机",
+    noHostsInProject: "这个项目里还没有主机",
+    noHostsInProjectDescription: "先在这个项目下创建一台主机，后续就可以在这里集中管理。",
     createHost: "新建主机",
     newHost: "新建主机",
     editHost: "编辑主机",
@@ -426,6 +482,25 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     transferDownload: "下载",
     settingsDescription: "应用偏好与连接默认配置。",
     general: "通用",
+    projects: "项目",
+    projectsDescription: "管理可复用的项目条目和本地工作区路径。",
+    addProject: "添加项目",
+    noProjects: "还没有项目",
+    noProjectsDescription: "创建一个项目条目，保存名称、命名空间和本地路径。",
+    projectName: "项目名称",
+    projectNameDescription: "这个项目的主要显示名称。",
+    projectNamespace: "命名空间 / 归属",
+    projectNamespaceDescription: "可选的 owner、组织或工作区分组。",
+    projectPath: "本地路径",
+    projectPathDescription: "该项目对应的本地工作区路径（可选）。",
+    newProject: "新建项目",
+    editProject: "编辑项目",
+    saveProject: "保存项目",
+    projectNameRequired: "项目名称不能为空",
+    projectAdded: (name) => `已添加项目 ${name}`,
+    projectUpdated: (name) => `已更新项目 ${name}`,
+    projectRemoved: (name) => `已删除项目 ${name}`,
+    cancel: "取消",
     appTheme: "应用主题",
     appThemeDescription: "选择浅色或深色外观。",
     language: "语言",
@@ -554,6 +629,12 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     connect: "接続",
     noHostsFound: "ホストが見つかりません",
     noHostsHint: "別のキーワードを試すか、新しいホストを作成してください。",
+    defaultProject: "デフォルトプロジェクト",
+    backToProjects: "プロジェクト一覧へ戻る",
+    openProject: "プロジェクトを開く",
+    addHost: "ホストを追加",
+    noHostsInProject: "このプロジェクトにはまだホストがありません",
+    noHostsInProjectDescription: "このプロジェクト用のホストを作成すると、ここでまとめて管理できます。",
     createHost: "ホストを作成",
     newHost: "新規ホスト",
     editHost: "ホストを編集",
@@ -584,6 +665,25 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     transferDownload: "ダウンロード",
     settingsDescription: "アプリ設定と接続のデフォルト値。",
     general: "一般",
+    projects: "プロジェクト",
+    projectsDescription: "再利用できるプロジェクト項目とローカルワークスペースのパスを管理します。",
+    addProject: "プロジェクトを追加",
+    noProjects: "まだプロジェクトがありません",
+    noProjectsDescription: "プロジェクト名、名前空間、ローカルパスを保存する項目を作成します。",
+    projectName: "プロジェクト名",
+    projectNameDescription: "このプロジェクトの表示名です。",
+    projectNamespace: "名前空間 / オーナー",
+    projectNamespaceDescription: "任意の owner、組織、またはワークスペースの分類です。",
+    projectPath: "ローカルパス",
+    projectPathDescription: "このプロジェクトに対応するローカルワークスペースのパス（任意）。",
+    newProject: "新規プロジェクト",
+    editProject: "プロジェクトを編集",
+    saveProject: "プロジェクトを保存",
+    projectNameRequired: "プロジェクト名は必須です",
+    projectAdded: (name) => `プロジェクト ${name} を追加しました`,
+    projectUpdated: (name) => `プロジェクト ${name} を更新しました`,
+    projectRemoved: (name) => `プロジェクト ${name} を削除しました`,
+    cancel: "キャンセル",
     appTheme: "アプリテーマ",
     appThemeDescription: "ライトまたはダークの外観を選択します。",
     language: "言語",
