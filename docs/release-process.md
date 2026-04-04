@@ -39,6 +39,8 @@ It will:
 - upload macOS assets, including `.dmg`
 - upload signed updater artifacts such as `latest.json`
 
+For updater metadata to be generated, keep `"bundle.createUpdaterArtifacts": true` in `ServerDeck/src-tauri/tauri.conf.json`.
+
 Before the updater can work, configure these GitHub repository secrets:
 
 - `TAURI_SIGNING_PRIVATE_KEY`
