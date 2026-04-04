@@ -1523,7 +1523,7 @@ export default function App() {
                       <strong>ServerDeck</strong>
                       <span>Remote server workbench for macOS.</span>
                     </div>
-                    <span className="settings-pill">v0.0.2</span>
+                    <span className="settings-pill">v0.0.3</span>
                   </div>
                 </section>
 
