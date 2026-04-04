@@ -1,6 +1,6 @@
 # Release Process
 
-This repository publishes macOS release assets through GitHub Releases. The app checks the latest release on startup and shows the left-sidebar `Update` button only when a newer version is available.
+This repository publishes macOS release assets through GitHub Releases. The app checks for signed updater metadata on startup and shows the left-sidebar `Update` button only when a newer version is available.
 
 ## 1. Prepare the version
 
@@ -37,7 +37,15 @@ It will:
 - run the Tauri build in `ServerDeck/`
 - create or update the GitHub Release
 - upload macOS assets, including `.dmg`
+- upload signed updater artifacts such as `latest.json`
+
+Before the updater can work, configure these GitHub repository secrets:
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (optional if the key has no password)
+
+The matching updater public key is embedded in `ServerDeck/src-tauri/tauri.conf.json`.
 
 ## 5. Client update behavior
 
-The desktop app calls GitHub’s latest-release API on startup. If the release version is newer than the current app version and a `.dmg` or `.app.tar.gz` asset exists, the `Update` button appears. Clicking it downloads the installer to the user’s `Downloads` folder and opens it.
+The desktop app uses Tauri updater metadata on startup. If a signed newer release is available, the `Update` button appears. Clicking it opens an in-app update dialog where the user can download the update in the background and then restart the app to switch to the new version.

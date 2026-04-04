@@ -24,6 +24,14 @@
       "csp": null
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/qfxiongbinbin/serverdeck/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlGQjA2QzMxMTIzRTAxNTAKUldSUUFUNFNNV3l3bjNMa214bE03c1dIdGE2eks1bU9KNkhZa0xZU3BBR0MwRVJFUEJPTWhrZjAK"
+    }
+  },
   "bundle": {
     "active": true,
     "icon": [
