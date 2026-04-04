@@ -178,6 +178,14 @@ export async function downloadAndOpenUpdate(downloadUrl: string, assetName: stri
   return "";
 }
 
+export async function clearAppData() {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("clear_app_data");
+  }
+  window.localStorage.removeItem(STORAGE_KEY);
+  return true;
+}
+
 export async function startTerminalSession(host: SavedHost) {
   if (hasTauri()) {
     return tauriInvoke<string>("start_terminal_session", { host });

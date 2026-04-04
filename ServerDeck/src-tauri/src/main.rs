@@ -94,6 +94,15 @@ fn hosts_file() -> Result<PathBuf, String> {
     Ok(storage_dir()?.join("hosts.json"))
 }
 
+#[tauri::command]
+fn clear_app_data() -> Result<bool, String> {
+    let dir = storage_dir()?;
+    if dir.exists() {
+        fs::remove_dir_all(&dir).map_err(|error| error.to_string())?;
+    }
+    Ok(true)
+}
+
 fn now_millis() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -842,6 +851,7 @@ fn main() {
             terminal_sessions: Mutex::new(HashMap::new()),
         })
         .invoke_handler(tauri::generate_handler![
+            clear_app_data,
             list_hosts,
             check_for_update,
             download_and_open_update,

@@ -997,6 +997,10 @@ select {
   border-bottom: 1px solid #edf1f6;
 }
 
+.settings-item--danger strong {
+  color: #b44444;
+}
+
 .settings-item > div {
   display: grid;
   gap: 4px;
