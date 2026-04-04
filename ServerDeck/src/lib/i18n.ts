@@ -66,6 +66,38 @@ type Messages = {
   terminalSessionOpened: (username: string, address: string) => string;
   terminalOpenFailed: string;
   closedTerminalTab: (title: string) => string;
+  monitor: string;
+  monitorDescription: string;
+  monitorLoading: string;
+  monitorLoadingDescription: string;
+  monitorLoadFailed: string;
+  openingMonitor: (name: string) => string;
+  refreshingMonitor: (name: string) => string;
+  monitorLoaded: (name: string) => string;
+  closedMonitorTab: (title: string) => string;
+  monitorHostname: string;
+  monitorOperatingSystem: string;
+  monitorUptime: string;
+  monitorLoad: string;
+  monitorCpuCores: string;
+  monitorCpuUsage: string;
+  monitorMemory: string;
+  monitorMemoryPercent: string;
+  monitorDisk: string;
+  monitorDiskPercent: string;
+  monitorNetwork: string;
+  monitorTopProcesses: string;
+  monitorNoProcesses: string;
+  monitorPid: string;
+  topFive: string;
+  topTen: string;
+  monitorUpdatedAt: string;
+  refreshing: string;
+  autoRefresh: string;
+  serverInfo: string;
+  monitorInfoCopied: string;
+  copied: string;
+  copyServerInfo: string;
   hosts: string;
   sftp: string;
   newTab: string;
@@ -258,6 +290,38 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalSessionOpened: (username, address) => `Terminal session opened for ${username}@${address}`,
     terminalOpenFailed: "Terminal open failed",
     closedTerminalTab: (title) => `Closed terminal tab ${title}`,
+    monitor: "Monitor",
+    monitorDescription: "Observe key server status and refresh it on demand.",
+    monitorLoading: "Loading server observation",
+    monitorLoadingDescription: "Collecting a quick status snapshot from the remote server.",
+    monitorLoadFailed: "Server observation failed",
+    openingMonitor: (name) => `Opening monitor for ${name}`,
+    refreshingMonitor: (name) => `Refreshing monitor for ${name}`,
+    monitorLoaded: (name) => `Loaded monitor for ${name}`,
+    closedMonitorTab: (title) => `Closed monitor tab ${title}`,
+    monitorHostname: "Hostname",
+    monitorOperatingSystem: "Operating System",
+    monitorUptime: "Uptime",
+    monitorLoad: "Load Average",
+    monitorCpuCores: "CPU Cores",
+    monitorCpuUsage: "CPU Usage",
+    monitorMemory: "Memory Usage",
+    monitorMemoryPercent: "Memory Percent",
+    monitorDisk: "Disk Usage",
+    monitorDiskPercent: "Disk Percent",
+    monitorNetwork: "Network",
+    monitorTopProcesses: "Top Processes",
+    monitorNoProcesses: "No process snapshot available",
+    monitorPid: "PID",
+    topFive: "Top 5",
+    topTen: "Top 10",
+    monitorUpdatedAt: "Updated At",
+    refreshing: "Refreshing...",
+    autoRefresh: "Auto refresh: 15s",
+    serverInfo: "Server Info",
+    monitorInfoCopied: "Server info copied",
+    copied: "Copied",
+    copyServerInfo: "Copy Server Info",
     hosts: "Hosts",
     sftp: "SFTP",
     newTab: "New Tab",
@@ -448,6 +512,38 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalSessionOpened: (username, address) => `已为 ${username}@${address} 打开终端会话`,
     terminalOpenFailed: "打开终端失败",
     closedTerminalTab: (title) => `已关闭终端标签 ${title}`,
+    monitor: "监控",
+    monitorDescription: "观测服务器关键状态，并支持手动刷新。",
+    monitorLoading: "正在加载服务器观测数据",
+    monitorLoadingDescription: "正在从远程服务器采集一份快速状态快照。",
+    monitorLoadFailed: "服务器观测失败",
+    openingMonitor: (name) => `正在打开 ${name} 的监控`,
+    refreshingMonitor: (name) => `正在刷新 ${name} 的监控`,
+    monitorLoaded: (name) => `已加载 ${name} 的监控`,
+    closedMonitorTab: (title) => `已关闭监控标签 ${title}`,
+    monitorHostname: "主机名",
+    monitorOperatingSystem: "操作系统",
+    monitorUptime: "运行时长",
+    monitorLoad: "负载均值",
+    monitorCpuCores: "CPU 核心数",
+    monitorCpuUsage: "CPU 使用率",
+    monitorMemory: "内存使用",
+    monitorMemoryPercent: "内存占用率",
+    monitorDisk: "磁盘使用",
+    monitorDiskPercent: "磁盘占用率",
+    monitorNetwork: "网络",
+    monitorTopProcesses: "高占用进程",
+    monitorNoProcesses: "暂无进程快照",
+    monitorPid: "PID",
+    topFive: "前 5",
+    topTen: "前 10",
+    monitorUpdatedAt: "更新时间",
+    refreshing: "刷新中...",
+    autoRefresh: "自动刷新：15 秒",
+    serverInfo: "服务器信息",
+    monitorInfoCopied: "已复制服务器信息",
+    copied: "已复制",
+    copyServerInfo: "一键复制配置信息",
     hosts: "主机",
     sftp: "SFTP",
     newTab: "新标签页",
@@ -638,6 +734,38 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalSessionOpened: (username, address) => `${username}@${address} のターミナルセッションを開きました`,
     terminalOpenFailed: "ターミナルを開けませんでした",
     closedTerminalTab: (title) => `ターミナルタブ ${title} を閉じました`,
+    monitor: "監視",
+    monitorDescription: "サーバーの主要な状態を確認し、必要に応じて手動更新します。",
+    monitorLoading: "サーバー監視情報を読み込み中",
+    monitorLoadingDescription: "リモートサーバーから簡易ステータスを収集中です。",
+    monitorLoadFailed: "サーバー監視の取得に失敗しました",
+    openingMonitor: (name) => `${name} の監視を開いています`,
+    refreshingMonitor: (name) => `${name} の監視を更新しています`,
+    monitorLoaded: (name) => `${name} の監視を読み込みました`,
+    closedMonitorTab: (title) => `監視タブ ${title} を閉じました`,
+    monitorHostname: "ホスト名",
+    monitorOperatingSystem: "OS",
+    monitorUptime: "稼働時間",
+    monitorLoad: "ロードアベレージ",
+    monitorCpuCores: "CPU コア数",
+    monitorCpuUsage: "CPU 使用率",
+    monitorMemory: "メモリ使用量",
+    monitorMemoryPercent: "メモリ使用率",
+    monitorDisk: "ディスク使用量",
+    monitorDiskPercent: "ディスク使用率",
+    monitorNetwork: "ネットワーク",
+    monitorTopProcesses: "上位プロセス",
+    monitorNoProcesses: "プロセススナップショットはありません",
+    monitorPid: "PID",
+    topFive: "上位5件",
+    topTen: "上位10件",
+    monitorUpdatedAt: "更新時刻",
+    refreshing: "更新中...",
+    autoRefresh: "自動更新: 15秒",
+    serverInfo: "サーバー情報",
+    monitorInfoCopied: "サーバー情報をコピーしました",
+    copied: "コピー済み",
+    copyServerInfo: "設定情報をコピー",
     hosts: "ホスト",
     sftp: "SFTP",
     newTab: "新しいタブ",

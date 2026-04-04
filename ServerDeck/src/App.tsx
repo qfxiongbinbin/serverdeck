@@ -4,10 +4,12 @@ import { listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update as AppUpdate } from "@tauri-apps/plugin-updater";
 import packageJson from "../package.json";
+import ReactECharts from "echarts-for-react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
+  Activity,
   ArrowLeft,
   ChevronRight,
   Copy,
@@ -47,6 +49,7 @@ import {
   listLocalDirectory,
   listRemoteDirectory,
   listHosts,
+  observeServer,
   saveHost,
   startLocalTerminalSession,
   startTerminalSession,
@@ -55,6 +58,7 @@ import {
   writeTerminalInput,
   type FileEntry,
   type SavedHost,
+  type ServerObservation,
   type SshConnectionOptions,
   type TerminalEventPayload
 } from "./lib/api";
@@ -108,6 +112,21 @@ type TerminalTab = {
   state: TerminalState;
   statusText: string;
   buffer: string[];
+};
+
+type MonitorTab = {
+  id: string;
+  host: SavedHost;
+  title: string;
+  observation: ServerObservation | null;
+  history: Array<{
+    capturedAt: string;
+    cpu: number | null;
+    memory: number | null;
+    disk: number | null;
+  }>;
+  loading: boolean;
+  error: string;
 };
 
 type ContextMenuState = {
@@ -301,6 +320,271 @@ function getExpandedErrorMessage(error: unknown, fallback: string) {
   return uniqueParts.length ? uniqueParts.join(" | ") : fallback;
 }
 
+function formatObservationCapturedAt(value: string) {
+  if (!value) return "-";
+  const numeric = Number(value);
+  const date = Number.isNaN(numeric) ? new Date(value) : new Date(numeric);
+  return Number.isNaN(date.valueOf()) ? value : date.toLocaleString();
+}
+
+function parsePercentValue(value: string) {
+  const match = value.match(/([0-9]+(?:\.[0-9]+)?)/);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(100, parsed)) : null;
+}
+
+function buildMonitorHistoryPoint(observation: ServerObservation) {
+  return {
+    capturedAt: observation.capturedAt,
+    cpu: parsePercentValue(observation.cpuUsage),
+    memory: parsePercentValue(observation.memoryPercent),
+    disk: parsePercentValue(observation.diskPercent)
+  };
+}
+
+function appendMonitorHistory(
+  history: MonitorTab["history"],
+  observation: ServerObservation
+) {
+  const next = [...history, buildMonitorHistoryPoint(observation)];
+  return next.slice(-20);
+}
+
+function MetricChartCard({
+  label,
+  value,
+  detail,
+  history,
+  accent = "var(--blue)"
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  history: Array<number | null>;
+  accent?: string;
+}) {
+  const percent = parsePercentValue(value);
+  const settingsTextColor =
+    typeof window !== "undefined"
+      ? getComputedStyle(document.documentElement).getPropertyValue("--settings-text").trim() || "#1f2f4a"
+      : "#1f2f4a";
+  const option = {
+    animation: true,
+    backgroundColor: "transparent",
+    series: [
+      {
+        type: "gauge",
+        center: ["50%", "60%"],
+        radius: "84%",
+        startAngle: 220,
+        endAngle: -40,
+        min: 0,
+        max: 100,
+        splitNumber: 10,
+        axisLine: {
+          lineStyle: {
+            width: 14,
+            color: [
+              [0.35, "#57e0df"],
+              [0.75, "#2f8de1"],
+              [1, "#ff6a6a"]
+            ]
+          }
+        },
+        progress: {
+          show: false
+        },
+        axisTick: {
+          distance: -18,
+          splitNumber: 4,
+          length: 7,
+          lineStyle: { color: "rgba(255,255,255,0.78)", width: 1.4 }
+        },
+        splitLine: {
+          distance: -20,
+          length: 16,
+          lineStyle: { color: "rgba(255,255,255,0.95)", width: 2.5 }
+        },
+        axisLabel: {
+          distance: -28,
+          color: "#59a9e8",
+          fontSize: 12,
+          fontWeight: 600
+        },
+        pointer: {
+          show: true,
+          icon: "path://M2 0 L-6 0 L0 -58 L6 0 Z",
+          length: "62%",
+          width: 10,
+          offsetCenter: [0, "6%"],
+          itemStyle: { color: accent, shadowBlur: 8, shadowColor: `${accent}55` }
+        },
+        anchor: {
+          show: true,
+          size: 14,
+          itemStyle: { color: "#182033", borderColor: `${accent}`, borderWidth: 3 }
+        },
+        title: { show: false },
+        detail: {
+          valueAnimation: true,
+          offsetCenter: [0, "54%"],
+          formatter: (val: number) => `${Math.round(val)}%`,
+          color: settingsTextColor,
+          fontSize: 26,
+          fontWeight: 800,
+          textBorderWidth: 0
+        },
+        data: [{ value: percent ?? 0 }]
+      }
+    ]
+  };
+
+  return (
+    <div className="gauge-card">
+      <div className="gauge-card__header">
+        <strong>{label}</strong>
+        <div className="gauge-card__value-badge">{percent !== null ? `${Math.round(percent)}%` : "--"}</div>
+      </div>
+
+      <ReactECharts option={option} className="gauge-card__echart" notMerge lazyUpdate />
+      <div className="gauge-card__detail">{detail}</div>
+    </div>
+  );
+}
+
+function ProcessBarChart({
+  processes,
+  cpuLabel,
+  memoryLabel,
+  emptyLabel,
+  pidLabel,
+  topFiveLabel,
+  topTenLabel
+}: {
+  processes: ServerObservation["topProcesses"];
+  cpuLabel: string;
+  memoryLabel: string;
+  emptyLabel: string;
+  pidLabel: string;
+  topFiveLabel: string;
+  topTenLabel: string;
+}) {
+  const [metric, setMetric] = useState<"cpu" | "memory">("cpu");
+  const [limit, setLimit] = useState<5 | 10>(5);
+
+  const sorted = [...processes]
+    .sort((left, right) =>
+      metric === "cpu" ? right.cpuPercent - left.cpuPercent : right.memoryPercent - left.memoryPercent
+    )
+    .slice(0, limit);
+
+  if (!sorted.length) {
+    return <span>{emptyLabel}</span>;
+  }
+
+  const option = {
+    animation: true,
+    backgroundColor: "transparent",
+    grid: {
+      left: 110,
+      right: 16,
+      top: 12,
+      bottom: 16
+    },
+    xAxis: {
+      type: "value",
+      axisLabel: { color: "#7f91aa" },
+      splitLine: { lineStyle: { color: "rgba(125,177,255,0.10)" } }
+    },
+    yAxis: {
+      type: "category",
+      data: sorted.map((item) => item.command),
+      axisLabel: { color: "#7f91aa" },
+      axisTick: { show: false },
+      axisLine: { show: false }
+    },
+    series: [
+      {
+        type: "bar",
+        data: sorted.map((item) => ({
+          value: metric === "cpu" ? item.cpuPercent : item.memoryPercent,
+          pid: item.pid,
+          command: item.command,
+          cpuPercent: item.cpuPercent,
+          memoryPercent: item.memoryPercent
+        })),
+        barWidth: 16,
+        itemStyle: {
+          borderRadius: 999,
+          color: (params: { value: number }) => {
+            const current = params.value;
+            if (current >= 80) return "#ff5a6f";
+            if (current >= 55) return "#ffb020";
+            return metric === "cpu" ? "#4da3ff" : "#7d5cff";
+          }
+        },
+        label: {
+          show: true,
+          position: "right",
+          color: "#cbd7e9",
+          formatter: (params: { value: number; data: { pid: string } }) => `${params.value}% · ${pidLabel} ${params.data.pid}`
+        }
+      }
+    ],
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "shadow" },
+      formatter: (items: Array<{ data: { command: string; pid: string; cpuPercent: number; memoryPercent: number } }>) => {
+        const item = items[0]?.data;
+        if (!item) return "";
+        return [
+          `<strong>${item.command}</strong>`,
+          `${pidLabel}: ${item.pid}`,
+          `${cpuLabel}: ${item.cpuPercent}%`,
+          `${memoryLabel}: ${item.memoryPercent}%`
+        ].join("<br/>");
+      }
+    }
+  };
+
+  return (
+    <div className="process-chart">
+      <div className="process-chart__tabs">
+        <button
+          type="button"
+          className={`settings-chip ${metric === "cpu" ? "settings-chip--active" : ""}`}
+          onClick={() => setMetric("cpu")}
+        >
+          {cpuLabel}
+        </button>
+        <button
+          type="button"
+          className={`settings-chip ${metric === "memory" ? "settings-chip--active" : ""}`}
+          onClick={() => setMetric("memory")}
+        >
+          {memoryLabel}
+        </button>
+        <button
+          type="button"
+          className={`settings-chip ${limit === 5 ? "settings-chip--active" : ""}`}
+          onClick={() => setLimit(5)}
+        >
+          {topFiveLabel}
+        </button>
+        <button
+          type="button"
+          className={`settings-chip ${limit === 10 ? "settings-chip--active" : ""}`}
+          onClick={() => setLimit(10)}
+        >
+          {topTenLabel}
+        </button>
+      </div>
+      <ReactECharts option={option} className="process-chart__echart" notMerge lazyUpdate />
+    </div>
+  );
+}
+
 function getFileIcon(entry: FileEntry) {
   if (entry.is_dir) {
     return { icon: Folder, className: "browser-row__icon--dir" };
@@ -415,6 +699,7 @@ function FileBrowserPane({
 export default function App() {
   const [activeTabId, setActiveTabId] = useState(HOSTS_TAB_ID);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
+  const [monitorTabs, setMonitorTabs] = useState<MonitorTab[]>([]);
   const [hosts, setHosts] = useState<SavedHost[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [draft, setDraft] = useState<SavedHost>(blankHost);
@@ -444,6 +729,8 @@ export default function App() {
   const [projectEditorMode, setProjectEditorMode] = useState<ProjectEditorMode>("new");
   const [projectDraft, setProjectDraft] = useState<ManagedProject>(blankProject);
   const [activeHostProjectId, setActiveHostProjectId] = useState<string | null>(null);
+  const [monitorInfoOpen, setMonitorInfoOpen] = useState(false);
+  const [monitorInfoCopied, setMonitorInfoCopied] = useState(false);
   const [localPath, setLocalPath] = useState("~");
   const [remotePath, setRemotePath] = useState(".");
   const [localEntries, setLocalEntries] = useState<FileEntry[]>([]);
@@ -460,6 +747,7 @@ export default function App() {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const activeTabIdRef = useRef(HOSTS_TAB_ID);
   const terminalTabsRef = useRef<TerminalTab[]>([]);
+  const monitorTabsRef = useRef<MonitorTab[]>([]);
 
   const isHostsView = activeTabId === HOSTS_TAB_ID;
   const isSftpView = activeTabId === SFTP_TAB_ID;
@@ -473,6 +761,11 @@ export default function App() {
   const activeTerminalTab = useMemo(
     () => terminalTabs.find((tab) => tab.id === activeTabId) ?? null,
     [activeTabId, terminalTabs]
+  );
+
+  const activeMonitorTab = useMemo(
+    () => monitorTabs.find((tab) => tab.id === activeTabId) ?? null,
+    [activeTabId, monitorTabs]
   );
 
   const activeTerminalTheme = useMemo<TerminalThemePreset>(
@@ -761,6 +1054,10 @@ export default function App() {
   useEffect(() => {
     terminalTabsRef.current = terminalTabs;
   }, [terminalTabs]);
+
+  useEffect(() => {
+    monitorTabsRef.current = monitorTabs;
+  }, [monitorTabs]);
 
   useEffect(() => {
     if (drawerMode === "edit") {
@@ -1527,6 +1824,141 @@ export default function App() {
     setStatusTone("neutral");
   }
 
+  async function loadServerObservation(host: SavedHost) {
+    return observeServer(host, sshOptions);
+  }
+
+  async function handleOpenMonitor(host: SavedHost) {
+    const existingTab = monitorTabsRef.current.find((tab) => tab.host.id === host.id);
+    if (existingTab) {
+      setActiveTabId(existingTab.id);
+      if (!existingTab.observation && !existingTab.loading) {
+        void handleRefreshMonitor(existingTab.id);
+      }
+      return;
+    }
+
+    const tabId = crypto.randomUUID();
+    const title = `${getDisplayHostTitle(host)} · ${messages.monitor}`;
+
+    setMonitorTabs((prev) => [
+      ...prev,
+      {
+        id: tabId,
+        host,
+        title,
+        observation: null,
+        history: [],
+        loading: true,
+        error: ""
+      }
+    ]);
+    setActiveTabId(tabId);
+    setStatus(messages.openingMonitor(getDisplayHostTitle(host)));
+    setStatusTone("neutral");
+
+    try {
+      const observation = await loadServerObservation(host);
+      setMonitorTabs((prev) => prev.map((tab) => (tab.id === tabId ? {
+        ...tab,
+        observation,
+        history: appendMonitorHistory(tab.history, observation),
+        loading: false
+      } : tab)));
+      setStatus(messages.monitorLoaded(getDisplayHostTitle(host)));
+      setStatusTone("success");
+    } catch (error) {
+      const message = getErrorMessage(error, messages.monitorLoadFailed);
+      setMonitorTabs((prev) => prev.map((tab) => (tab.id === tabId ? { ...tab, loading: false, error: message } : tab)));
+      setStatus(message);
+      setStatusTone("error");
+    }
+  }
+
+  async function handleRefreshMonitor(tabId: string, options?: { silent?: boolean }) {
+    const targetTab = monitorTabsRef.current.find((tab) => tab.id === tabId);
+    if (!targetTab) return;
+
+    setMonitorTabs((prev) => prev.map((tab) => (tab.id === tabId ? { ...tab, loading: true, error: "" } : tab)));
+    if (!options?.silent) {
+      setStatus(messages.refreshingMonitor(getDisplayHostTitle(targetTab.host)));
+      setStatusTone("neutral");
+    }
+
+    try {
+      const observation = await loadServerObservation(targetTab.host);
+      setMonitorTabs((prev) => prev.map((tab) => (tab.id === tabId ? {
+        ...tab,
+        observation,
+        history: appendMonitorHistory(tab.history, observation),
+        loading: false,
+        error: ""
+      } : tab)));
+      if (!options?.silent) {
+        setStatus(messages.monitorLoaded(getDisplayHostTitle(targetTab.host)));
+        setStatusTone("success");
+      }
+    } catch (error) {
+      const message = getErrorMessage(error, messages.monitorLoadFailed);
+      setMonitorTabs((prev) => prev.map((tab) => (tab.id === tabId ? { ...tab, loading: false, error: message } : tab)));
+      setStatus(message);
+      setStatusTone("error");
+    }
+  }
+
+  function handleCloseMonitorTab(tabId: string) {
+    const currentTabs = monitorTabsRef.current;
+    const targetIndex = currentTabs.findIndex((tab) => tab.id === tabId);
+    if (targetIndex < 0) return;
+
+    const targetTab = currentTabs[targetIndex];
+    const nextTabs = currentTabs.filter((tab) => tab.id !== tabId);
+    const nextActiveTabId = activeTabIdRef.current === tabId ? HOSTS_TAB_ID : activeTabIdRef.current;
+
+    setMonitorTabs(nextTabs);
+    setActiveTabId(nextActiveTabId);
+    setStatus(messages.closedMonitorTab(targetTab.title));
+    setStatusTone("neutral");
+  }
+
+  async function handleCopyMonitorInfo(observation: ServerObservation) {
+    const content = [
+      `${messages.monitorHostname}: ${observation.hostname}`,
+      `${messages.monitorOperatingSystem}: ${observation.operatingSystem}`,
+      `${messages.monitorCpuCores}: ${observation.cpuCores}`,
+      `${messages.monitorMemory}: ${observation.memoryUsage}`,
+      `${messages.monitorDisk}: ${observation.diskUsage}`,
+      `${messages.monitorUptime}: ${observation.uptime}`
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(content);
+      setMonitorInfoCopied(true);
+      window.setTimeout(() => setMonitorInfoCopied(false), 1400);
+      setStatus(messages.monitorInfoCopied);
+      setStatusTone("success");
+    } catch {
+      setStatus(messages.copyLinkFailed);
+      setStatusTone("error");
+    }
+  }
+
+  useEffect(() => {
+    if (!activeMonitorTab) {
+      setMonitorInfoOpen(false);
+      setMonitorInfoCopied(false);
+      return;
+    }
+
+    const timer = window.setInterval(() => {
+      void handleRefreshMonitor(activeMonitorTab.id, { silent: true });
+    }, 15000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeMonitorTab?.id]);
+
   const contextMenuPosition = useMemo(() => {
     if (!contextMenu || typeof window === "undefined") {
       return { left: 0, top: 0 };
@@ -1606,6 +2038,36 @@ export default function App() {
                 onClick={(event) => {
                   event.stopPropagation();
                   void handleCloseTerminalTab(tab.id);
+                }}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+
+          {monitorTabs.map((tab) => (
+            <div
+              key={tab.id}
+              className={`top-tab ${activeTabId === tab.id ? "top-tab--active" : ""}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveTabId(tab.id)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  setActiveTabId(tab.id);
+                }
+              }}
+            >
+              <Activity size={16} />
+              <span className={`top-tab__dot ${tab.loading ? "top-tab__dot--connecting" : tab.error ? "top-tab__dot--error" : "top-tab__dot--connected"}`} />
+              <span className="top-tab__label">{tab.title}</span>
+              <button
+                type="button"
+                className="top-tab__close"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleCloseMonitorTab(tab.id);
                 }}
               >
                 <X size={14} />
@@ -1743,13 +2205,24 @@ export default function App() {
                               </div>
 
                               <div className="host-row__actions">
-                                <button
-                                  type="button"
-                                  className="row-button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    openEditDrawer(host);
-                                  }}
+                              <button
+                                type="button"
+                                className="row-button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  void handleOpenMonitor(host);
+                                }}
+                              >
+                                <Activity size={14} />
+                                {messages.monitor}
+                              </button>
+                              <button
+                                type="button"
+                                className="row-button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  openEditDrawer(host);
+                                }}
                                 >
                                   {messages.edit}
                                 </button>
@@ -2438,6 +2911,120 @@ export default function App() {
                       </div>
                     </section>
                   ) : null}
+                </div>
+              </div>
+            </section>
+          ) : activeMonitorTab ? (
+            <section className="settings-screen">
+              <div className="settings-layout">
+                <div className="settings-content settings-content--wide">
+                  <section className="settings-panel">
+                    <div className="settings-panel__header">
+                      <Activity size={18} />
+                      <div className="monitor-header__titlewrap">
+                        <div className="monitor-header__titleline">
+                          <h3>{activeMonitorTab.host.label || activeMonitorTab.host.address}</h3>
+                          {activeMonitorTab.observation ? (
+                            <button
+                              type="button"
+                              className="monitor-info-button"
+                              onClick={() => setMonitorInfoOpen((open) => !open)}
+                            >
+                              <Info size={14} />
+                            </button>
+                          ) : null}
+                        </div>
+                        <span>{messages.monitorDescription}</span>
+
+                        {monitorInfoOpen && activeMonitorTab.observation ? (
+                          <div className="monitor-info-popover">
+                            <div className="monitor-info-popover__header">
+                              <strong>{messages.serverInfo}</strong>
+                              <button
+                                type="button"
+                                className="row-button"
+                                onClick={() => void handleCopyMonitorInfo(activeMonitorTab.observation!)}
+                              >
+                                <Copy size={14} />
+                                {monitorInfoCopied ? messages.copied : messages.copyServerInfo}
+                              </button>
+                            </div>
+                            <div className="monitor-info-popover__body">
+                              <div><strong>{messages.monitorHostname}</strong><span>{activeMonitorTab.observation.hostname}</span></div>
+                              <div><strong>{messages.monitorOperatingSystem}</strong><span>{activeMonitorTab.observation.operatingSystem}</span></div>
+                              <div><strong>{messages.monitorCpuCores}</strong><span>{activeMonitorTab.observation.cpuCores}</span></div>
+                              <div><strong>{messages.monitorMemory}</strong><span>{activeMonitorTab.observation.memoryUsage}</span></div>
+                              <div><strong>{messages.monitorDisk}</strong><span>{activeMonitorTab.observation.diskUsage}</span></div>
+                              <div><strong>{messages.monitorUptime}</strong><span>{activeMonitorTab.observation.uptime}</span></div>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="settings-panel__toolbar">
+                      <span className="settings-panel__toolbar-label">{activeMonitorTab.host.username}@{activeMonitorTab.host.address}:{activeMonitorTab.host.port}</span>
+                      <div className="monitor-toolbar__actions">
+                        <span className="settings-pill">{messages.autoRefresh}</span>
+                        <button type="button" className="secondary-button" onClick={() => void handleRefreshMonitor(activeMonitorTab.id)}>
+                          {activeMonitorTab.loading ? messages.refreshing : messages.refresh}
+                        </button>
+                      </div>
+                    </div>
+
+                    {activeMonitorTab.error ? <div className="notice notice--error">{activeMonitorTab.error}</div> : null}
+
+                    {activeMonitorTab.observation ? (
+                      <>
+                        <div className="monitor-gauges">
+                          <MetricChartCard
+                            label={messages.monitorCpuUsage}
+                            value={activeMonitorTab.observation.cpuUsage}
+                            detail={`${messages.monitorCpuCores}: ${activeMonitorTab.observation.cpuCores}`}
+                            history={activeMonitorTab.history.map((point) => point.cpu)}
+                            accent="#ffb020"
+                          />
+                          <MetricChartCard
+                            label={messages.monitorMemoryPercent}
+                            value={activeMonitorTab.observation.memoryPercent}
+                            detail={activeMonitorTab.observation.memoryUsage}
+                            history={activeMonitorTab.history.map((point) => point.memory)}
+                            accent="#4da3ff"
+                          />
+                          <MetricChartCard
+                            label={messages.monitorDiskPercent}
+                            value={activeMonitorTab.observation.diskPercent}
+                            detail={activeMonitorTab.observation.diskUsage}
+                            history={activeMonitorTab.history.map((point) => point.disk)}
+                            accent="#7d5cff"
+                          />
+                        </div>
+
+                        <div className="monitor-grid">
+                        <div className="monitor-card"><strong>{messages.monitorHostname}</strong><span>{activeMonitorTab.observation.hostname}</span></div>
+                        <div className="monitor-card"><strong>{messages.monitorOperatingSystem}</strong><span>{activeMonitorTab.observation.operatingSystem}</span></div>
+                        <div className="monitor-card"><strong>{messages.monitorUptime}</strong><span>{activeMonitorTab.observation.uptime}</span></div>
+                        <div className="monitor-card"><strong>{messages.monitorLoad}</strong><span>{activeMonitorTab.observation.loadAverage}</span></div>
+                        <div className="monitor-card"><strong>{messages.monitorNetwork}</strong><span>{activeMonitorTab.observation.networkUsage}</span></div>
+                        <div className="monitor-card monitor-card--wide">
+                          <strong>{messages.monitorTopProcesses}</strong>
+                          <ProcessBarChart
+                            processes={activeMonitorTab.observation.topProcesses}
+                            cpuLabel={messages.monitorCpuUsage}
+                            memoryLabel={messages.monitorMemoryPercent}
+                            emptyLabel={messages.monitorNoProcesses}
+                            pidLabel={messages.monitorPid}
+                            topFiveLabel={messages.topFive}
+                            topTenLabel={messages.topTen}
+                          />
+                        </div>
+                        <div className="monitor-card monitor-card--wide"><strong>{messages.monitorUpdatedAt}</strong><span>{formatObservationCapturedAt(activeMonitorTab.observation.capturedAt)}</span></div>
+                        </div>
+                      </>
+                    ) : activeMonitorTab.loading ? (
+                      <div className="empty-state"><h3>{messages.monitorLoading}</h3><p>{messages.monitorLoadingDescription}</p></div>
+                    ) : null}
+                  </section>
                 </div>
               </div>
             </section>
