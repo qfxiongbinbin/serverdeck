@@ -208,6 +208,75 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function getExpandedErrorMessage(error: unknown, fallback: string) {
+  const parts: string[] = [];
+
+  function appendValue(value: unknown) {
+    if (value === null || value === undefined) {
+      return;
+    }
+
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        parts.push(trimmed);
+      }
+      return;
+    }
+
+    if (value instanceof Error) {
+      appendValue(value.message);
+
+      const cause = (value as Error & { cause?: unknown }).cause;
+      if (cause) {
+        appendValue(cause);
+      }
+      return;
+    }
+
+    if (typeof value === "object") {
+      const record = value as Record<string, unknown>;
+      const preferredKeys = [
+        "message",
+        "error",
+        "code",
+        "type",
+        "kind",
+        "url",
+        "status",
+        "statusText",
+        "details",
+        "cause"
+      ];
+
+      preferredKeys.forEach((key) => {
+        if (key in record) {
+          const keyValue = record[key];
+          if (typeof keyValue === "string" || keyValue instanceof Error || typeof keyValue === "object") {
+            appendValue(keyValue);
+          } else if (typeof keyValue === "number" || typeof keyValue === "boolean") {
+            parts.push(`${key}: ${String(keyValue)}`);
+          }
+        }
+      });
+
+      try {
+        const serialized = JSON.stringify(value);
+        if (serialized && serialized !== "{}") {
+          parts.push(serialized);
+        }
+      } catch {
+        return;
+      }
+    }
+  }
+
+  appendValue(error);
+
+  const uniqueParts = parts.filter((part, index) => parts.indexOf(part) === index);
+  return uniqueParts.length ? uniqueParts.join(" | ") : fallback;
+}
+
 function getFileIcon(entry: FileEntry) {
   if (entry.is_dir) {
     return { icon: Folder, className: "browser-row__icon--dir" };
@@ -491,7 +560,8 @@ export default function App() {
 
       return null;
     } catch (error) {
-      const message = getErrorMessage(error, messages.updateCheckFailed);
+      const message = getExpandedErrorMessage(error, messages.updateCheckFailed);
+      console.error("[serverdeck] update check failed", error);
       setAvailableUpdate(null);
       setUpdateCheckState("error");
       setUpdateCheckError(message);
@@ -866,8 +936,10 @@ export default function App() {
       setStatusTone("success");
     } catch (error) {
       setUpdateStage("idle");
-      setUpdateError(getErrorMessage(error, messages.updateDownloadFailed));
-      setStatus(getErrorMessage(error, messages.updateDownloadFailed));
+      const message = getExpandedErrorMessage(error, messages.updateDownloadFailed);
+      console.error("[serverdeck] update download failed", error);
+      setUpdateError(message);
+      setStatus(message);
       setStatusTone("error");
     }
   }
