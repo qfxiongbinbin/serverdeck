@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update as AppUpdate } from "@tauri-apps/plugin-updater";
+import packageJson from "../package.json";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
@@ -117,6 +119,7 @@ type AppSettings = {
 };
 
 type UpdateStage = "idle" | "downloading" | "ready";
+type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
 
 const appThemeOptions = [
   { label: "Light", value: "light" },
@@ -312,6 +315,11 @@ export default function App() {
   const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
   const [transferJobs, setTransferJobs] = useState<TransferJob[]>([]);
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdate | null>(null);
+  const [appVersion, setAppVersion] = useState(packageJson.version);
+  const [updateCheckState, setUpdateCheckState] = useState<UpdateCheckState>(
+    hasTauriRuntime() ? "idle" : "unsupported"
+  );
+  const [updateCheckMessage, setUpdateCheckMessage] = useState("");
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
   const [updateStage, setUpdateStage] = useState<UpdateStage>("idle");
   const [updateDownloadedBytes, setUpdateDownloadedBytes] = useState(0);
@@ -385,6 +393,61 @@ export default function App() {
     void refreshHosts();
   }, []);
 
+  const checkForUpdates = useCallback(async (options?: { silent?: boolean }) => {
+    if (!hasTauriRuntime()) {
+      setUpdateCheckState("unsupported");
+      setUpdateCheckMessage("Updater is only available in the desktop app.");
+      return null;
+    }
+
+    setUpdateCheckState("checking");
+    setUpdateCheckMessage("");
+
+    if (!options?.silent) {
+      setStatus("Checking for updates...");
+      setStatusTone("neutral");
+    }
+
+    try {
+      const update = await check();
+      setAvailableUpdate(update);
+
+      if (update) {
+        setUpdateCheckState("available");
+        setUpdateCheckMessage(`Version ${update.version} is available.`);
+
+        if (!options?.silent) {
+          setStatus(`Update ${update.version} is available`);
+          setStatusTone("success");
+        }
+
+        return update;
+      }
+
+      setUpdateCheckState("upToDate");
+      setUpdateCheckMessage("You are already on the latest version.");
+
+      if (!options?.silent) {
+        setStatus("You are already on the latest version");
+        setStatusTone("success");
+      }
+
+      return null;
+    } catch (error) {
+      const message = getErrorMessage(error, "Update check failed");
+      setAvailableUpdate(null);
+      setUpdateCheckState("error");
+      setUpdateCheckMessage(message);
+
+      if (!options?.silent) {
+        setStatus(message);
+        setStatusTone("error");
+      }
+
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     if (!hasTauriRuntime()) {
       return;
@@ -392,25 +455,24 @@ export default function App() {
 
     let cancelled = false;
 
-    void check()
-      .then((update) => {
-        if (cancelled) {
-          void update?.close().catch(() => {});
-          return;
-        }
-
-        setAvailableUpdate(update);
-      })
-      .catch(() => {
+    void getVersion()
+      .then((version) => {
         if (!cancelled) {
-          setAvailableUpdate(null);
+          setAppVersion(version);
         }
-      });
+      })
+      .catch(() => {});
+
+    void checkForUpdates({ silent: true }).then((update) => {
+      if (cancelled) {
+        void update?.close().catch(() => {});
+      }
+    });
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [checkForUpdates]);
 
   useEffect(() => {
     return () => {
@@ -695,6 +757,13 @@ export default function App() {
     }
 
     setUpdateModalOpen(true);
+  }
+
+  async function handleCheckForUpdates() {
+    const update = await checkForUpdates();
+    if (update) {
+      setUpdateModalOpen(true);
+    }
   }
 
   async function handleDownloadUpdate() {
@@ -1189,7 +1258,11 @@ export default function App() {
 
           <div className="sidebar__bottom">
             {availableUpdate ? (
-              <button type="button" className="side-nav side-nav--update" onClick={handleUpdateClick}>
+              <button
+                type="button"
+                className="side-nav side-nav--update"
+                onClick={handleUpdateClick}
+              >
                 <Download size={18} />
                 Update
               </button>
@@ -1599,7 +1672,31 @@ export default function App() {
                       <strong>ServerDeck</strong>
                       <span>Remote server workbench for macOS.</span>
                     </div>
-                    <span className="settings-pill">v0.0.4</span>
+                    <span className="settings-pill">v{appVersion}</span>
+                  </div>
+                  <div className="settings-item">
+                    <div>
+                      <strong>Software Update</strong>
+                      <span>
+                        {availableUpdate
+                          ? `Version ${availableUpdate.version} is ready to download.`
+                          : updateCheckState === "checking"
+                            ? "Checking GitHub release metadata..."
+                            : updateCheckState === "upToDate"
+                              ? "You are already on the latest version."
+                              : updateCheckState === "error"
+                                ? updateCheckMessage
+                                : updateCheckMessage || "Check whether a newer desktop build is available."}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      className={availableUpdate ? "primary-button" : "secondary-button"}
+                      onClick={() => void (availableUpdate ? handleUpdateClick() : handleCheckForUpdates())}
+                      disabled={updateCheckState === "checking"}
+                    >
+                      {availableUpdate ? "View Update" : updateCheckState === "checking" ? "Checking..." : "Check Now"}
+                    </button>
                   </div>
                 </section>
 
