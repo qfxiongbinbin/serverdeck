@@ -43,6 +43,7 @@ import {
   downloadFromRemote,
   getTerminalSessionCwd,
   listLocalDirectory,
+  pickLocalDirectory,
   readLocalFilePreview,
   listRemoteDirectory,
   listHosts,
@@ -1509,6 +1510,22 @@ export default function App() {
     closeProjectEditor();
   }
 
+  // author: BrianXiong
+  // time: 2026/04/05/17:12:08
+  async function handlePickProjectPath() {
+    try {
+      const path = await pickLocalDirectory();
+      if (!path) {
+        return;
+      }
+
+      setProjectDraft((current) => ({ ...current, path }));
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.projectPathPickFailed));
+      setStatusTone("error");
+    }
+  }
+
   function handleDeleteProject(projectId: string) {
     const project = settings.projects.find((item) => item.id === projectId);
     setSettings((current) => ({
@@ -2711,55 +2728,6 @@ export default function App() {
                         </button>
                       </div>
 
-                      {projectEditorOpen ? (
-                        <div className="settings-card settings-card--form">
-                          <div className="settings-item settings-item--form">
-                            <div>
-                              <strong>{projectEditorMode === "edit" ? messages.editProject : messages.newProject}</strong>
-                              <span>{messages.projectsDescription}</span>
-                            </div>
-                          </div>
-
-                          <div className="project-form">
-                            <label>
-                              <span>{messages.projectName}</span>
-                              <small>{messages.projectNameDescription}</small>
-                              <input
-                                value={projectDraft.name}
-                                onChange={(event) => setProjectDraft((current) => ({ ...current, name: event.target.value }))}
-                              />
-                            </label>
-
-                            <label>
-                              <span>{messages.projectNamespace}</span>
-                              <small>{messages.projectNamespaceDescription}</small>
-                              <input
-                                value={projectDraft.namespace}
-                                onChange={(event) => setProjectDraft((current) => ({ ...current, namespace: event.target.value }))}
-                              />
-                            </label>
-
-                            <label>
-                              <span>{messages.projectPath}</span>
-                              <small>{messages.projectPathDescription}</small>
-                              <input
-                                value={projectDraft.path}
-                                onChange={(event) => setProjectDraft((current) => ({ ...current, path: event.target.value }))}
-                              />
-                            </label>
-                          </div>
-
-                          <div className="project-form__actions">
-                            <button type="button" className="secondary-button" onClick={closeProjectEditor}>
-                              {messages.cancel}
-                            </button>
-                            <button type="button" className="primary-button" onClick={handleSaveProject}>
-                              {messages.saveProject}
-                            </button>
-                          </div>
-                        </div>
-                      ) : null}
-
                       <div className="settings-card settings-card--projects">
                         {settings.projects.length ? (
                           settings.projects.map((project) => (
@@ -2796,10 +2764,6 @@ export default function App() {
                           <div className="project-empty-state">
                             <strong>{messages.noProjects}</strong>
                             <span>{messages.noProjectsDescription}</span>
-                            <button type="button" className="secondary-button" onClick={openNewProjectEditor}>
-                              <Plus size={14} />
-                              {messages.addProject}
-                            </button>
                           </div>
                         )}
                       </div>
@@ -3435,6 +3399,68 @@ export default function App() {
                 disabled={updateStage !== "ready"}
               >
                 {messages.restart}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
+
+      {projectEditorOpen ? (
+        <div className="update-modal-backdrop" onMouseDown={closeProjectEditor}>
+          <section className="update-modal update-modal--project" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="update-modal__header">
+              <div>
+                <div className="drawer-eyebrow">{messages.projects}</div>
+                <h3>{projectEditorMode === "edit" ? messages.editProject : messages.newProject}</h3>
+                <span>{messages.projectsDescription}</span>
+              </div>
+
+              <button type="button" className="icon-button" onClick={closeProjectEditor}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="project-form project-form--modal">
+              <label>
+                <span>{messages.projectName}</span>
+                <small>{messages.projectNameDescription}</small>
+                <input
+                  value={projectDraft.name}
+                  onChange={(event) => setProjectDraft((current) => ({ ...current, name: event.target.value }))}
+                />
+              </label>
+
+              <label>
+                <span>{messages.projectNamespace}</span>
+                <small>{messages.projectNamespaceDescription}</small>
+                <input
+                  value={projectDraft.namespace}
+                  onChange={(event) => setProjectDraft((current) => ({ ...current, namespace: event.target.value }))}
+                />
+              </label>
+
+              <label>
+                <span>{messages.projectPath}</span>
+                <small>{messages.projectPathDescription}</small>
+                <div className="project-path-field">
+                  <input
+                    value={projectDraft.path}
+                    onChange={(event) => setProjectDraft((current) => ({ ...current, path: event.target.value }))}
+                  />
+                  <button type="button" className="secondary-button secondary-button--compact" onClick={() => void handlePickProjectPath()}>
+                    <FolderOpen size={14} />
+                    {messages.chooseDirectory}
+                  </button>
+                </div>
+              </label>
+            </div>
+
+            <div className="project-form__actions project-form__actions--modal">
+              <button type="button" className="secondary-button" onClick={closeProjectEditor}>
+                {messages.cancel}
+              </button>
+              <button type="button" className="primary-button" onClick={handleSaveProject}>
+                {messages.saveProject}
               </button>
             </div>
           </section>

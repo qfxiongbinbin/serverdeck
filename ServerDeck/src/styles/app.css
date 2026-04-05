@@ -2307,7 +2307,11 @@ select {
 .project-form {
   display: grid;
   gap: 14px;
-  padding: 0 22px 18px;
+  padding: 10px 22px 18px;
+}
+
+.project-form--modal {
+  padding: 8px 0 0;
 }
 
 .project-form label {
@@ -2335,11 +2339,27 @@ select {
   color: var(--settings-control-text);
 }
 
+.project-path-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.secondary-button--compact {
+  height: 42px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
 .project-form__actions {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
   padding: 0 22px 22px;
+}
+
+.project-form__actions--modal {
+  padding: 0;
 }
 
 .project-row {
@@ -2681,6 +2701,10 @@ select {
   background: var(--white-panel);
   color: var(--white-text);
   box-shadow: 0 24px 60px rgba(17, 34, 68, 0.22);
+}
+
+.update-modal--project {
+  width: min(760px, 100%);
 }
 
 .update-modal__header,

@@ -1189,6 +1189,36 @@ fn start_local_terminal_session(
 
 #[tauri::command]
 // author: BrianXiong
+// time: 2026/04/05/17:12:08
+fn pick_local_directory() -> Result<Option<String>, String> {
+    let output = Command::new("osascript")
+        .arg("-e")
+        .arg("POSIX path of (choose folder with prompt \"Select a local project directory\")")
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if output.status.success() {
+        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if path.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some(path.trim_end_matches('/').to_string()));
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.contains("User canceled") || stderr.contains("(-128)") {
+        return Ok(None);
+    }
+
+    Err(if stderr.is_empty() {
+        "Failed to choose local directory".to_string()
+    } else {
+        stderr
+    })
+}
+
+#[tauri::command]
+// author: BrianXiong
 // time: 2026/04/05/16:20:45
 fn get_terminal_session_cwd(state: State<AppState>, session_id: String) -> Result<String, String> {
     let sessions = state
@@ -1298,6 +1328,7 @@ fn main() {
             delete_remote_entry,
             start_terminal_session,
             start_local_terminal_session,
+            pick_local_directory,
             get_terminal_session_cwd,
             write_terminal_input,
             close_terminal_session

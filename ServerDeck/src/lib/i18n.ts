@@ -128,6 +128,8 @@ type Messages = {
   folderKind: string;
   fileKindFallback: string;
   homeDirectory: string;
+  chooseDirectory: string;
+  projectPathPickFailed: string;
   update: string;
   settings: string;
   searchPlaceholder: string;
@@ -376,6 +378,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     folderKind: "Folder",
     fileKindFallback: "File",
     homeDirectory: "Home",
+    chooseDirectory: "Choose Folder",
+    projectPathPickFailed: "Failed to choose project directory",
     update: "Update",
     settings: "Settings",
     searchPlaceholder: "Find a host or ssh user@hostname...",
@@ -622,6 +626,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     folderKind: "文件夹",
     fileKindFallback: "文件",
     homeDirectory: "家目录",
+    chooseDirectory: "选择目录",
+    projectPathPickFailed: "选择项目目录失败",
     update: "更新",
     settings: "设置",
     searchPlaceholder: "搜索主机或输入 ssh user@hostname...",
@@ -868,6 +874,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     folderKind: "フォルダ",
     fileKindFallback: "ファイル",
     homeDirectory: "ホーム",
+    chooseDirectory: "フォルダを選択",
+    projectPathPickFailed: "プロジェクトディレクトリの選択に失敗しました",
     update: "更新",
     settings: "設定",
     searchPlaceholder: "ホストを検索、または ssh user@hostname... を入力",
