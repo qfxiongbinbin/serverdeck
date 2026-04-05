@@ -14,13 +14,6 @@ import {
   ChevronRight,
   Copy,
   Download,
-  File,
-  FileArchive,
-  FileCode2,
-  FileImage,
-  FileSpreadsheet,
-  FileText,
-  Folder,
   FolderOpen,
   Info,
   Link2,
@@ -47,6 +40,7 @@ import {
   deleteRemoteEntry,
   downloadFromRemote,
   listLocalDirectory,
+  readLocalFilePreview,
   listRemoteDirectory,
   listHosts,
   observeServer,
@@ -57,17 +51,21 @@ import {
   uploadToRemote,
   writeTerminalInput,
   type FileEntry,
+  type LocalFilePreview,
   type SavedHost,
   type ServerObservation,
   type SshConnectionOptions,
   type TerminalEventPayload
 } from "./lib/api";
+import { FileBrowserPane } from "./components/files/FileBrowserPane";
+import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
 import {
   getDocumentLanguageTag,
   languageOptions,
   messagesByLanguage,
   type AppLanguage
 } from "./lib/i18n";
+import { getParentPath, joinChildPath } from "./lib/fileBrowser";
 import {
   defaultTerminalThemeId,
   terminalThemePresets,
@@ -249,50 +247,6 @@ function getHostBadge(host: SavedHost, fallback = "Untitled Host") {
 
 function hasTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
-}
-
-function formatFileSize(size: number) {
-  if (size <= 0) return "-";
-  const units = ["B", "KB", "MB", "GB", "TB"];
-  let value = size;
-  let unitIndex = 0;
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-  return `${value >= 10 || unitIndex === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unitIndex]}`;
-}
-
-function formatModified(value: string) {
-  if (!value) return "-";
-  const numeric = Number(value);
-  const date = Number.isNaN(numeric) ? new Date(value) : new Date(numeric * 1000);
-  return Number.isNaN(date.valueOf()) ? value : date.toLocaleDateString();
-}
-
-function getParentPath(path: string) {
-  const trimmed = path.trim();
-  if (!trimmed || trimmed === ".") {
-    return ".";
-  }
-  if (trimmed === "~" || trimmed === "/") {
-    return trimmed;
-  }
-  const normalized = trimmed.endsWith("/") ? trimmed.slice(0, -1) : trimmed;
-  const parts = normalized.split("/").filter(Boolean);
-  if (normalized.startsWith("~")) {
-    if (parts.length <= 1) return "~";
-    return `~/${parts.slice(1, -1).join("/")}`;
-  }
-  if (parts.length <= 1) return "/";
-  return `/${parts.slice(0, -1).join("/")}`;
-}
-
-function joinChildPath(basePath: string, name: string) {
-  if (basePath === ".") return `./${name}`;
-  if (basePath === "~") return `~/${name}`;
-  if (basePath === "/") return `/${name}`;
-  return `${basePath.replace(/\/$/, "")}/${name}`;
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -635,121 +589,6 @@ function ProcessBarChart({
   );
 }
 
-function getFileIcon(entry: FileEntry) {
-  if (entry.is_dir) {
-    return { icon: Folder, className: "browser-row__icon--dir" };
-  }
-
-  const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
-
-  if (["txt", "md", "log", "rtf"].includes(ext)) {
-    return { icon: FileText, className: "browser-row__icon--text" };
-  }
-  if (["xls", "xlsx", "csv", "numbers"].includes(ext)) {
-    return { icon: FileSpreadsheet, className: "browser-row__icon--sheet" };
-  }
-  if (["doc", "docx", "pages", "pdf"].includes(ext)) {
-    return { icon: FileText, className: "browser-row__icon--doc" };
-  }
-  if (["js", "ts", "tsx", "jsx", "json", "py", "sh", "rs", "go", "java", "c", "cpp", "yml", "yaml"].includes(ext)) {
-    return { icon: FileCode2, className: "browser-row__icon--code" };
-  }
-  if (["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].includes(ext)) {
-    return { icon: FileImage, className: "browser-row__icon--image" };
-  }
-  if (["zip", "tar", "gz", "tgz", "rar", "7z"].includes(ext)) {
-    return { icon: FileArchive, className: "browser-row__icon--archive" };
-  }
-
-  return { icon: File, className: "browser-row__icon--file" };
-}
-
-// author: BrianXiong
-// time: 2026/04/05/11:55:59
-function FileBrowserPane({
-  title,
-  refreshLabel,
-  upLabel,
-  loadingText,
-  path,
-  items,
-  loading,
-  error,
-  emptyText,
-  disabled,
-  onContextMenu,
-  onPathChange,
-  onRefresh,
-  onOpenDir,
-  onGoUp
-}: {
-  title: string;
-  refreshLabel: string;
-  upLabel: string;
-  loadingText: string;
-  path: string;
-  items: FileEntry[];
-  loading: boolean;
-  error?: string;
-  emptyText: string;
-  disabled?: boolean;
-  onContextMenu?: (event: React.MouseEvent<HTMLButtonElement>, entry: FileEntry) => void;
-  onPathChange: (path: string) => void;
-  onRefresh: () => void;
-  onOpenDir: (entry: FileEntry) => void;
-  onGoUp: () => void;
-}) {
-  return (
-    <section className={`browser-pane ${disabled ? "browser-pane--disabled" : ""}`}>
-      <div className="browser-pane__header">
-        <strong>{title}</strong>
-        <button type="button" className="row-button" onClick={onRefresh} disabled={disabled}>
-          {refreshLabel}
-        </button>
-      </div>
-
-      <div className="browser-pathbar">
-        <button type="button" className="row-button" onClick={onGoUp} disabled={disabled}>
-          {upLabel}
-        </button>
-        <input value={path} onChange={(event) => onPathChange(event.target.value)} disabled={disabled} />
-      </div>
-
-      <div className="browser-list">
-        {loading ? <div className="browser-empty">{loadingText}</div> : null}
-        {!loading && error ? <div className="browser-error">{error}</div> : null}
-        {!loading && !error && items.length === 0 ? <div className="browser-empty">{emptyText}</div> : null}
-        {!loading && !error &&
-          items.map((entry) => {
-            const { icon: FileIcon, className } = getFileIcon(entry);
-            const isNavigable = entry.is_dir;
-
-            return (
-              <button
-                key={entry.path}
-                type="button"
-                className={`browser-row ${isNavigable ? "" : "browser-row--file"}`.trim()}
-                onClick={() => isNavigable && onOpenDir(entry)}
-                onContextMenu={(event) => onContextMenu?.(event, entry)}
-                disabled={disabled}
-                aria-disabled={!isNavigable}
-              >
-                <div className="browser-row__name">
-                  <span className={`browser-row__icon ${className}`}>
-                    <FileIcon size={14} />
-                  </span>
-                  <span>{entry.name}</span>
-                </div>
-                <span>{formatModified(entry.modified)}</span>
-                <span>{entry.is_dir ? "-" : formatFileSize(entry.size)}</span>
-              </button>
-            );
-          })}
-      </div>
-    </section>
-  );
-}
-
 // author: BrianXiong
 // time: 2026/04/05/11:21:34
 export default function App() {
@@ -797,6 +636,12 @@ export default function App() {
   const [remoteError, setRemoteError] = useState("");
   const [localRefreshTick, setLocalRefreshTick] = useState(0);
   const [remoteRefreshTick, setRemoteRefreshTick] = useState(0);
+  const [localPreviewOpen, setLocalPreviewOpen] = useState(false);
+  const [localBrowserSelectedPath, setLocalBrowserSelectedPath] = useState("");
+  const [localPreviewPath, setLocalPreviewPath] = useState("");
+  const [localPreview, setLocalPreview] = useState<LocalFilePreview | null>(null);
+  const [localPreviewLoading, setLocalPreviewLoading] = useState(false);
+  const [localPreviewError, setLocalPreviewError] = useState("");
 
   const terminalEl = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -818,6 +663,11 @@ export default function App() {
   const activeTerminalTab = useMemo(
     () => terminalTabs.find((tab) => tab.id === activeTabId) ?? null,
     [activeTabId, terminalTabs]
+  );
+  const isLocalTerminalView = activeTerminalTab?.kind === "local";
+  const selectedLocalBrowserEntry = useMemo(
+    () => localEntries.find((entry) => entry.path === localBrowserSelectedPath) ?? null,
+    [localBrowserSelectedPath, localEntries]
   );
 
   const activeMonitorTab = useMemo(
@@ -1187,7 +1037,7 @@ export default function App() {
   }, [contextMenu, fileMenu]);
 
   useEffect(() => {
-    if (!isSftpView) {
+    if (!isSftpView && !(isLocalTerminalView && localPreviewOpen)) {
       return;
     }
 
@@ -1211,7 +1061,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, localPath, localRefreshTick]);
+  }, [isLocalTerminalView, isSftpView, localPath, localPreviewOpen, localRefreshTick, messages.failedLoadLocalDirectory]);
 
   useEffect(() => {
     if (!isSftpView || !selectedHost) {
@@ -1241,6 +1091,69 @@ export default function App() {
       cancelled = true;
     };
   }, [isSftpView, selectedHost, remotePath, remoteRefreshTick, sshOptions]);
+
+  useEffect(() => {
+    setLocalPreview(null);
+    setLocalBrowserSelectedPath("");
+    setLocalPreviewPath("");
+    setLocalPreviewError("");
+    setLocalPreviewLoading(false);
+  }, [localPath]);
+
+  useEffect(() => {
+    if (!isLocalTerminalView || !localPreviewOpen || localLoading || localEntries.length === 0) {
+      return;
+    }
+
+    const selectedExists = localEntries.some((entry) => entry.path === localBrowserSelectedPath);
+    if (!selectedExists) {
+      setLocalBrowserSelectedPath(localEntries[0].path);
+    }
+  }, [isLocalTerminalView, localBrowserSelectedPath, localEntries, localLoading, localPreviewOpen]);
+
+  useEffect(() => {
+    if (!isLocalTerminalView || !localPreviewOpen) {
+      return;
+    }
+
+    if (!selectedLocalBrowserEntry || selectedLocalBrowserEntry.is_dir) {
+      setLocalPreview(null);
+      setLocalPreviewPath("");
+      setLocalPreviewError("");
+      setLocalPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      setLocalPreviewPath(selectedLocalBrowserEntry.path);
+      setLocalPreviewLoading(true);
+      setLocalPreviewError("");
+
+      void readLocalFilePreview(selectedLocalBrowserEntry.path)
+        .then((preview) => {
+          if (!cancelled) {
+            setLocalPreview(preview);
+          }
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setLocalPreview(null);
+            setLocalPreviewError(getErrorMessage(error, messages.failedLoadLocalPreview));
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setLocalPreviewLoading(false);
+          }
+        });
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [isLocalTerminalView, localPreviewOpen, messages.failedLoadLocalPreview, selectedLocalBrowserEntry]);
 
   useEffect(() => {
     if (!activeTerminalTab || !terminalEl.current) {
@@ -1292,7 +1205,7 @@ export default function App() {
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [activeTerminalTab?.id, activeTerminalTheme, sendActiveTerminalInput, settings.terminalFontSize]);
+  }, [activeTerminalTab?.id, activeTerminalTheme, isLocalTerminalView, localPreviewOpen, sendActiveTerminalInput, settings.terminalFontSize]);
 
   useEffect(() => {
     if (!terminalRef.current) {
@@ -1905,6 +1818,9 @@ export default function App() {
       ]);
 
       setActiveTabId(tabId);
+      if (settings.localTerminalDefaultPath.trim()) {
+        setLocalPath(settings.localTerminalDefaultPath.trim());
+      }
       setStatus(messages.localTerminalOpened);
       setStatusTone("success");
     } catch (error) {
@@ -1913,6 +1829,34 @@ export default function App() {
     } finally {
       setBusy(false);
     }
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/05/12:19:04
+  function handleToggleLocalPreview() {
+    setLocalPreviewOpen((current) => {
+      const next = !current;
+
+      if (next && settings.localTerminalDefaultPath.trim() && localPath === "~") {
+        setLocalPath(settings.localTerminalDefaultPath.trim());
+      }
+
+      if (!next) {
+        setLocalBrowserSelectedPath("");
+        setLocalPreview(null);
+        setLocalPreviewPath("");
+        setLocalPreviewError("");
+        setLocalPreviewLoading(false);
+      }
+
+      return next;
+    });
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/05/12:19:04
+  function handleSelectLocalPreview(entry: FileEntry | null) {
+    setLocalBrowserSelectedPath(entry?.path ?? "");
   }
 
   // author: BrianXiong
@@ -3159,6 +3103,61 @@ export default function App() {
                   </section>
                 </div>
               </div>
+            </section>
+          ) : isLocalTerminalView && localPreviewOpen ? (
+            <LocalTerminalWorkspace
+              onTerminalMount={(element) => {
+                terminalEl.current = element;
+              }}
+              terminalBackground={activeTerminalTheme.theme.background}
+              previewOpen={localPreviewOpen}
+              browserTitle={messages.localFiles}
+              previewTitle={messages.preview}
+              refreshLabel={messages.refresh}
+              upLabel={messages.up}
+              browserLoadingLabel={messages.loading}
+              previewLoadingLabel={messages.previewLoading}
+              emptyFilesLabel={messages.noLocalFiles}
+              emptyPreviewLabel={messages.previewEmpty}
+              unsupportedPreviewLabel={messages.previewUnsupported}
+              truncatedPreviewLabel={messages.previewTruncated}
+              archiveEntriesLabel={messages.archiveEntries}
+              formatCodeLabel={messages.formatCode}
+              showRawLabel={messages.showRaw}
+              previewSwitchLabel={messages.preview}
+              localPath={localPath}
+              localEntries={localEntries}
+              localLoading={localLoading}
+              localError={localError}
+              previewLoading={localPreviewLoading}
+              previewError={localPreviewError}
+              preview={localPreview}
+              selectedBrowserPath={localBrowserSelectedPath}
+              onTogglePreview={handleToggleLocalPreview}
+              onPathChange={setLocalPath}
+              onRefresh={() => setLocalRefreshTick((current) => current + 1)}
+              onOpenDir={(entry) => setLocalPath((current) => joinChildPath(current, entry.name))}
+              onGoUp={() => setLocalPath((current) => getParentPath(current))}
+              onSelectEntry={handleSelectLocalPreview}
+              onFocusTerminal={() => terminalRef.current?.focus()}
+            />
+          ) : isLocalTerminalView ? (
+            <section className="terminal-screen terminal-screen--local" style={{ background: activeTerminalTheme.theme.background }}>
+              <div className="terminal-screen__toolbar terminal-screen__toolbar--floating">
+                <label className="preview-switch">
+                  <input type="checkbox" checked={localPreviewOpen} onChange={handleToggleLocalPreview} />
+                  <span className="preview-switch__track">
+                    <span className="preview-switch__thumb" />
+                  </span>
+                  <span className="preview-switch__label">{messages.preview}</span>
+                </label>
+              </div>
+              <div
+                className="terminal-frame"
+                ref={terminalEl}
+                onMouseDown={() => terminalRef.current?.focus()}
+                style={{ background: activeTerminalTheme.theme.background }}
+              />
             </section>
           ) : (
             <section className="terminal-screen" style={{ background: activeTerminalTheme.theme.background }}>

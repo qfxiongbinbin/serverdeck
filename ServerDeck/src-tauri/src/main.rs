@@ -76,6 +76,21 @@ struct FileEntry {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct LocalFilePreviewPayload {
+    path: String,
+    name: String,
+    kind: String,
+    size: u64,
+    mime_type: Option<String>,
+    text: Option<String>,
+    bytes: Option<Vec<u8>>,
+    archive_entries: Option<Vec<String>>,
+    truncated: bool,
+    detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct TerminalOutputPayload {
     session_id: String,
     data: Option<String>,
@@ -228,6 +243,138 @@ fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
 
     entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(entries)
+}
+
+// author: BrianXiong
+// time: 2026/04/05/12:19:04
+fn preview_kind_and_mime(path: &Path) -> (String, Option<String>) {
+    let lower_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    if [
+        "txt", "md", "log", "json", "js", "jsx", "ts", "tsx", "py", "rs", "go", "java", "c", "cpp", "css", "html", "yml", "yaml", "sh", "zsh", "toml", "xml", "env", "sql",
+    ]
+    .contains(&ext.as_str())
+    {
+        return ("text".to_string(), Some("text/plain; charset=utf-8".to_string()));
+    }
+
+    if ["png", "jpg", "jpeg", "gif", "svg", "webp", "bmp", "ico"].contains(&ext.as_str()) {
+        let mime = match ext.as_str() {
+            "png" => "image/png",
+            "jpg" | "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "svg" => "image/svg+xml",
+            "webp" => "image/webp",
+            "bmp" => "image/bmp",
+            "ico" => "image/x-icon",
+            _ => "application/octet-stream",
+        };
+        return ("image".to_string(), Some(mime.to_string()));
+    }
+
+    if ext == "pdf" {
+        return ("pdf".to_string(), Some("application/pdf".to_string()));
+    }
+
+    if ext == "zip"
+        || ext == "tar"
+        || ext == "tgz"
+        || lower_name.ends_with(".tar.gz")
+        || lower_name.ends_with(".tar.bz2")
+    {
+        return ("archive".to_string(), Some("application/x-archive".to_string()));
+    }
+
+    ("unsupported".to_string(), None)
+}
+
+// author: BrianXiong
+// time: 2026/04/05/12:19:04
+fn read_text_preview(path: &Path, size: u64) -> Result<(String, bool), String> {
+    const MAX_TEXT_PREVIEW_BYTES: usize = 256 * 1024;
+    let mut file = fs::File::open(path).map_err(|error| error.to_string())?;
+    let mut buffer = vec![0_u8; size.min(MAX_TEXT_PREVIEW_BYTES as u64) as usize];
+    file.read_exact(&mut buffer).map_err(|error| error.to_string())?;
+    let truncated = size > MAX_TEXT_PREVIEW_BYTES as u64;
+    Ok((String::from_utf8_lossy(&buffer).into_owned(), truncated))
+}
+
+// author: BrianXiong
+// time: 2026/04/05/12:19:04
+fn read_binary_preview(path: &Path, size: u64) -> Result<Vec<u8>, String> {
+    const MAX_BINARY_PREVIEW_BYTES: u64 = 10 * 1024 * 1024;
+    if size > MAX_BINARY_PREVIEW_BYTES {
+        return Err(format!(
+            "Preview is limited to files under {} MB",
+            MAX_BINARY_PREVIEW_BYTES / 1024 / 1024
+        ));
+    }
+
+    fs::read(path).map_err(|error| error.to_string())
+}
+
+// author: BrianXiong
+// time: 2026/04/05/12:19:04
+fn list_archive_entries(path: &Path) -> Result<Vec<String>, String> {
+    let lower_name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let ext = path
+        .extension()
+        .map(|value| value.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let output = if ext == "zip" {
+        Command::new("unzip")
+            .arg("-Z1")
+            .arg(path)
+            .output()
+            .map_err(|error| error.to_string())?
+    } else if ext == "tar" {
+        Command::new("tar")
+            .arg("-tf")
+            .arg(path)
+            .output()
+            .map_err(|error| error.to_string())?
+    } else if ext == "tgz" || lower_name.ends_with(".tar.gz") {
+        Command::new("tar")
+            .arg("-tzf")
+            .arg(path)
+            .output()
+            .map_err(|error| error.to_string())?
+    } else if lower_name.ends_with(".tar.bz2") {
+        Command::new("tar")
+            .arg("-tjf")
+            .arg(path)
+            .output()
+            .map_err(|error| error.to_string())?
+    } else {
+        return Err("Archive preview currently supports zip/tar/tgz files".to_string());
+    };
+
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if error.is_empty() {
+            "Failed to read archive entries".to_string()
+        } else {
+            error
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| line.to_string())
+        .collect())
 }
 
 fn append_ssh_options(command: &mut Command, host: &HostRecord, ssh_options: &SshConnectionOptions) {
@@ -704,6 +851,85 @@ fn list_local_directory(path: String) -> Result<Vec<FileEntry>, String> {
 }
 
 #[tauri::command]
+// author: BrianXiong
+// time: 2026/04/05/12:19:04
+fn read_local_file_preview(path: String) -> Result<LocalFilePreviewPayload, String> {
+    let expanded = expand_path(&path);
+    let metadata = fs::metadata(&expanded).map_err(|error| error.to_string())?;
+
+    if metadata.is_dir() {
+        return Err(format!("Preview expects a file, got directory: {}", expanded.display()));
+    }
+
+    let name = expanded
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| expanded.display().to_string());
+    let size = metadata.len();
+    let (kind, mime_type) = preview_kind_and_mime(&expanded);
+
+    match kind.as_str() {
+        "text" => {
+            let (text, truncated) = read_text_preview(&expanded, size)?;
+            Ok(LocalFilePreviewPayload {
+                path: expanded.display().to_string(),
+                name,
+                kind,
+                size,
+                mime_type,
+                text: Some(text),
+                bytes: None,
+                archive_entries: None,
+                truncated,
+                detail: None,
+            })
+        }
+        "image" | "pdf" => {
+            let bytes = read_binary_preview(&expanded, size)?;
+            Ok(LocalFilePreviewPayload {
+                path: expanded.display().to_string(),
+                name,
+                kind,
+                size,
+                mime_type,
+                text: None,
+                bytes: Some(bytes),
+                archive_entries: None,
+                truncated: false,
+                detail: None,
+            })
+        }
+        "archive" => {
+            let archive_entries = list_archive_entries(&expanded)?;
+            Ok(LocalFilePreviewPayload {
+                path: expanded.display().to_string(),
+                name,
+                kind,
+                size,
+                mime_type,
+                text: None,
+                bytes: None,
+                archive_entries: Some(archive_entries),
+                truncated: false,
+                detail: None,
+            })
+        }
+        _ => Ok(LocalFilePreviewPayload {
+            path: expanded.display().to_string(),
+            name,
+            kind: "unsupported".to_string(),
+            size,
+            mime_type,
+            text: None,
+            bytes: None,
+            archive_entries: None,
+            truncated: false,
+            detail: Some("Preview is not yet supported for this file type".to_string()),
+        }),
+    }
+}
+
+#[tauri::command]
 fn list_remote_directory(
     host: HostRecord,
     path: String,
@@ -984,6 +1210,7 @@ fn main() {
             test_connection,
             observe_server,
             list_local_directory,
+            read_local_file_preview,
             list_remote_directory,
             upload_to_remote,
             download_from_remote,

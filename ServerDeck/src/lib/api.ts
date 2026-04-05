@@ -27,6 +27,19 @@ export type TerminalEventPayload = {
   stream?: "stdout" | "stderr" | "system";
 };
 
+export type LocalFilePreview = {
+  path: string;
+  name: string;
+  kind: "text" | "image" | "pdf" | "archive" | "unsupported";
+  size: number;
+  mimeType?: string;
+  text?: string;
+  bytes?: number[];
+  archiveEntries?: string[];
+  truncated?: boolean;
+  detail?: string;
+};
+
 export type SshConnectionOptions = {
   connectTimeoutSeconds: number;
   serverAliveIntervalSeconds: number;
@@ -219,6 +232,14 @@ export async function startLocalTerminalSession(cwd?: string) {
     return tauriInvoke<string>("start_local_terminal_session", { cwd });
   }
   return crypto.randomUUID();
+}
+
+export async function readLocalFilePreview(path: string) {
+  if (hasTauri()) {
+    return tauriInvoke<LocalFilePreview>("read_local_file_preview", { path });
+  }
+
+  throw new Error(`Local preview is only available in the desktop app: ${path}`);
 }
 
 export async function observeServer(host: SavedHost, sshOptions: SshConnectionOptions) {

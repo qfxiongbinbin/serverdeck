@@ -109,6 +109,18 @@ type Messages = {
   localTerminalDefaultPathDescription: string;
   localTerminalDefaultPathPlaceholder: string;
   localTerminalPathSaved: string;
+  localFiles: string;
+  preview: string;
+  openPreview: string;
+  hidePreview: string;
+  previewEmpty: string;
+  previewLoading: string;
+  previewUnsupported: string;
+  previewTruncated: string;
+  archiveEntries: string;
+  failedLoadLocalPreview: string;
+  formatCode: string;
+  showRaw: string;
   update: string;
   settings: string;
   searchPlaceholder: string;
@@ -338,6 +350,18 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     localTerminalDefaultPathDescription: "Optional directory used when opening a local terminal tab.",
     localTerminalDefaultPathPlaceholder: "Use system default shell directory",
     localTerminalPathSaved: "Saved local terminal default directory",
+    localFiles: "Local Files",
+    preview: "Preview",
+    openPreview: "Open Preview",
+    hidePreview: "Hide Preview",
+    previewEmpty: "Select a file to preview",
+    previewLoading: "Loading preview...",
+    previewUnsupported: "Preview is not supported for this file type",
+    previewTruncated: "Preview truncated to keep the app responsive",
+    archiveEntries: "Archive Entries",
+    failedLoadLocalPreview: "Failed to load local preview",
+    formatCode: "Format",
+    showRaw: "Raw",
     update: "Update",
     settings: "Settings",
     searchPlaceholder: "Find a host or ssh user@hostname...",
@@ -565,6 +589,18 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     localTerminalDefaultPathDescription: "打开本地终端标签页时使用的默认目录，可选。",
     localTerminalDefaultPathPlaceholder: "使用系统默认 shell 目录",
     localTerminalPathSaved: "已保存本地终端默认目录",
+    localFiles: "本地文件",
+    preview: "预览",
+    openPreview: "打开预览",
+    hidePreview: "关闭预览",
+    previewEmpty: "选择一个文件进行预览",
+    previewLoading: "正在加载预览...",
+    previewUnsupported: "暂不支持预览该文件类型",
+    previewTruncated: "为保证响应速度，预览内容已截断",
+    archiveEntries: "压缩包文件列表",
+    failedLoadLocalPreview: "加载本地预览失败",
+    formatCode: "格式化",
+    showRaw: "原文",
     update: "更新",
     settings: "设置",
     searchPlaceholder: "搜索主机或输入 ssh user@hostname...",
@@ -792,6 +828,18 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     localTerminalDefaultPathDescription: "ローカルターミナルタブを開くときに使う既定ディレクトリです。任意です。",
     localTerminalDefaultPathPlaceholder: "システム既定の shell ディレクトリを使用",
     localTerminalPathSaved: "ローカルターミナルの既定ディレクトリを保存しました",
+    localFiles: "ローカルファイル",
+    preview: "プレビュー",
+    openPreview: "プレビューを開く",
+    hidePreview: "プレビューを閉じる",
+    previewEmpty: "プレビューするファイルを選択してください",
+    previewLoading: "プレビューを読み込み中...",
+    previewUnsupported: "このファイル形式のプレビューは未対応です",
+    previewTruncated: "アプリの応答性を保つため、プレビューは一部のみ表示しています",
+    archiveEntries: "アーカイブ内ファイル一覧",
+    failedLoadLocalPreview: "ローカルプレビューの読み込みに失敗しました",
+    formatCode: "整形",
+    showRaw: "原文",
     update: "更新",
     settings: "設定",
     searchPlaceholder: "ホストを検索、または ssh user@hostname... を入力",
