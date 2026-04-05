@@ -664,6 +664,8 @@ function getFileIcon(entry: FileEntry) {
   return { icon: File, className: "browser-row__icon--file" };
 }
 
+// author: BrianXiong
+// time: 2026/04/05/11:55:59
 function FileBrowserPane({
   title,
   refreshLabel,
@@ -720,15 +722,17 @@ function FileBrowserPane({
         {!loading && !error &&
           items.map((entry) => {
             const { icon: FileIcon, className } = getFileIcon(entry);
+            const isNavigable = entry.is_dir;
 
             return (
               <button
                 key={entry.path}
                 type="button"
-                className="browser-row"
-                onClick={() => entry.is_dir && onOpenDir(entry)}
+                className={`browser-row ${isNavigable ? "" : "browser-row--file"}`.trim()}
+                onClick={() => isNavigable && onOpenDir(entry)}
                 onContextMenu={(event) => onContextMenu?.(event, entry)}
-                disabled={disabled || !entry.is_dir}
+                disabled={disabled}
+                aria-disabled={!isNavigable}
               >
                 <div className="browser-row__name">
                   <span className={`browser-row__icon ${className}`}>
