@@ -28,6 +28,8 @@
 - Prefer `camelCase` for variables/functions, `PascalCase` for React components and types, and `SCREAMING_SNAKE_CASE` for constants.
 - Keep changes focused and minimal. Reuse existing helpers in `src/lib/` before adding new wrappers.
 - Do not add inline comments unless the logic is non-obvious and project style already supports them.
+- For implementation classes and functions, add author and timestamp metadata using the format `author: BrianXiong` and `time: yyyy/mm/dd/HH:mm:ss`.
+- Frontend and backend code should be split by component/module responsibility; avoid putting large amounts of unrelated logic into a single file such as `App.tsx` or `main.rs`.
 
 ## Testing Guidelines
 - There is no formal test suite yet. Validate changes with:

@@ -414,6 +414,8 @@ fn ensure_sftp_success(output: &std::process::Output, fallback: &str) -> Result<
     })
 }
 
+// author: BrianXiong
+// time: 2026/04/05/11:21:34
 fn emit_terminal_output(app: &AppHandle, session_id: &str, data: String, stream: &str) {
     eprintln!("[DEBUG] Emitting terminal-output event, stream: {}, data_len: {}", stream, data.len());
     let result = app.emit(
@@ -430,6 +432,8 @@ fn emit_terminal_output(app: &AppHandle, session_id: &str, data: String, stream:
     }
 }
 
+// author: BrianXiong
+// time: 2026/04/05/11:21:34
 fn emit_terminal_bytes(app: &AppHandle, session_id: &str, bytes: Vec<u8>, stream: &str) {
     eprintln!("[DEBUG] Emitting terminal-output bytes, stream: {}, byte_len: {}", stream, bytes.len());
     let result = app.emit(

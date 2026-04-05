@@ -193,10 +193,14 @@ const terminalCharsetOptions: Array<{ label: string; value: TerminalCharset }> =
 const sshConnectTimeoutOptions = [5, 10, 15, 30] as const;
 const sshServerAliveIntervalOptions = [15, 30, 60, 120] as const;
 
+// author: BrianXiong
+// time: 2026/04/05/11:21:34
 function isTerminalCharset(value: unknown): value is TerminalCharset {
   return terminalCharsetOptions.some((option) => option.value === value);
 }
 
+// author: BrianXiong
+// time: 2026/04/05/11:21:34
 function createTerminalDecoder(charset: TerminalCharset) {
   try {
     return new TextDecoder(charset);
@@ -205,6 +209,8 @@ function createTerminalDecoder(charset: TerminalCharset) {
   }
 }
 
+// author: BrianXiong
+// time: 2026/04/05/11:21:34
 function getTerminalControlSequence(event: KeyboardEvent) {
   if (event.type !== "keydown") {
     return null;
@@ -740,6 +746,8 @@ function FileBrowserPane({
   );
 }
 
+// author: BrianXiong
+// time: 2026/04/05/11:21:34
 export default function App() {
   const [activeTabId, setActiveTabId] = useState(HOSTS_TAB_ID);
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
@@ -827,6 +835,8 @@ export default function App() {
     [settings.sshConnectTimeoutSeconds, settings.sshServerAliveIntervalSeconds]
   );
 
+  // author: BrianXiong
+  // time: 2026/04/05/11:21:34
   const sendActiveTerminalInput = useCallback((data: string) => {
     const currentActiveTab = terminalTabsRef.current.find((tab) => tab.id === activeTabIdRef.current);
     if (!currentActiveTab) {
@@ -836,6 +846,8 @@ export default function App() {
     void writeTerminalInput(currentActiveTab.sessionId, data);
   }, []);
 
+  // author: BrianXiong
+  // time: 2026/04/05/11:21:34
   const decodeTerminalPayload = useCallback(
     (payload: TerminalEventPayload) => {
       if (Array.isArray(payload.bytes)) {
@@ -1587,6 +1599,8 @@ export default function App() {
     setStatusTone("success");
   }
 
+  // author: BrianXiong
+  // time: 2026/04/05/11:21:34
   function handleSelectTerminalCharset(terminalCharset: TerminalCharset) {
     setSettings((current) => ({ ...current, terminalCharset }));
     setStatus(messages.appliedTerminalCharset(terminalCharset.toUpperCase()));
@@ -1897,6 +1911,8 @@ export default function App() {
     }
   }
 
+  // author: BrianXiong
+  // time: 2026/04/05/11:21:34
   async function handleCloseTerminalTab(tabId: string) {
     const currentTabs = terminalTabsRef.current;
     const targetIndex = currentTabs.findIndex((tab) => tab.id === tabId);
