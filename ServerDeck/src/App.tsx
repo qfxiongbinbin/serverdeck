@@ -80,6 +80,7 @@ const HOSTS_TAB_ID = "hosts";
 const SFTP_TAB_ID = "sftp";
 const SETTINGS_TAB_ID = "settings";
 const SETTINGS_STORAGE_KEY = "serverdeck.settings";
+const LOCAL_TERMINAL_RECENT_PROJECTS_KEY = "serverdeck.localTerminalRecentProjects";
 const DEFAULT_APP_SETTINGS: AppSettings = {
   appTheme: "dark",
   language: "en",
@@ -158,6 +159,7 @@ type ManagedProject = {
   name: string;
   namespace: string;
   path: string;
+  projectType: "local" | "server" | "hybrid";
 };
 
 type TerminalCharset = "utf-8" | "gb18030" | "gbk" | "big5";
@@ -178,6 +180,7 @@ type UpdateStage = "idle" | "downloading" | "ready";
 type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
 type SettingsSectionId = "general" | "projects" | "connection" | "terminal" | "about" | "danger";
 type ProjectEditorMode = "new" | "edit";
+type LocalTerminalSource = "default" | "project" | "directory";
 
 const terminalFontSizeOptions = [
   { label: "S", value: 12 },
@@ -238,7 +241,8 @@ const blankProject: ManagedProject = {
   id: "",
   name: "",
   namespace: "",
-  path: ""
+  path: "",
+  projectType: "local"
 };
 
 function getHostTitle(host: SavedHost, fallback = "Untitled Host") {
@@ -628,6 +632,9 @@ export default function App() {
   const [projectEditorMode, setProjectEditorMode] = useState<ProjectEditorMode>("new");
   const [projectDraft, setProjectDraft] = useState<ManagedProject>(blankProject);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [localTerminalMenuOpen, setLocalTerminalMenuOpen] = useState(false);
+  const [localTerminalProjectSearch, setLocalTerminalProjectSearch] = useState("");
+  const [recentLocalProjectIds, setRecentLocalProjectIds] = useState<string[]>([]);
   const [activeHostProjectId, setActiveHostProjectId] = useState<string | null>(null);
   const [monitorInfoOpen, setMonitorInfoOpen] = useState(false);
   const [monitorInfoCopied, setMonitorInfoCopied] = useState(false);
@@ -649,6 +656,7 @@ export default function App() {
   const [localPreviewError, setLocalPreviewError] = useState("");
 
   const terminalEl = useRef<HTMLDivElement | null>(null);
+  const localTerminalMenuRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalDecodersRef = useRef<Map<string, TextDecoder>>(new Map());
@@ -744,7 +752,9 @@ export default function App() {
   const projectOptions = useMemo(
     () => [
       { id: DEFAULT_PROJECT_ID, name: messages.defaultProject },
-      ...settings.projects.map((project) => ({ id: project.id, name: project.name }))
+      ...settings.projects
+        .filter((project) => project.projectType === "server" || project.projectType === "hybrid")
+        .map((project) => ({ id: project.id, name: project.name }))
     ],
     [messages.defaultProject, settings.projects]
   );
@@ -756,6 +766,29 @@ export default function App() {
     });
     return map;
   }, [projectOptions]);
+
+  const localTerminalProjects = useMemo(
+    () => settings.projects.filter((project) => project.path.trim() && (project.projectType === "local" || project.projectType === "hybrid")),
+    [settings.projects]
+  );
+
+  const recentLocalProjects = useMemo(
+    () => recentLocalProjectIds
+      .map((projectId) => localTerminalProjects.find((project) => project.id === projectId) ?? null)
+      .filter((project): project is ManagedProject => Boolean(project)),
+    [localTerminalProjects, recentLocalProjectIds]
+  );
+
+  const filteredLocalTerminalProjects = useMemo(() => {
+    const keyword = localTerminalProjectSearch.trim().toLowerCase();
+    if (!keyword) {
+      return localTerminalProjects;
+    }
+
+    return localTerminalProjects.filter((project) =>
+      [project.name, project.namespace, project.path].some((value) => value.toLowerCase().includes(keyword))
+    );
+  }, [localTerminalProjectSearch, localTerminalProjects]);
 
   const settingsNavItems = useMemo(
     () => [
@@ -946,7 +979,11 @@ export default function App() {
                     id: typeof project?.id === "string" && project.id.trim() ? project.id : crypto.randomUUID(),
                     name: typeof project?.name === "string" ? project.name : "",
                     namespace: typeof project?.namespace === "string" ? project.namespace : "",
-                    path: typeof project?.path === "string" ? project.path : ""
+                    path: typeof project?.path === "string" ? project.path : "",
+                    projectType:
+                      project?.projectType === "server" || project?.projectType === "hybrid" || project?.projectType === "local"
+                        ? project.projectType
+                        : "local"
                   }))
                   .filter((project) => project.name.trim())
               : DEFAULT_APP_SETTINGS.projects,
@@ -982,8 +1019,53 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const savedRecentProjects = window.localStorage.getItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY);
+    if (!savedRecentProjects) {
+      return;
+    }
+
+    try {
+      const parsed = JSON.parse(savedRecentProjects) as string[];
+      setRecentLocalProjectIds(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
+    } catch {
+      window.localStorage.removeItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY);
+    }
+  }, []);
+
+  useEffect(() => {
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    window.localStorage.setItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY, JSON.stringify(recentLocalProjectIds));
+  }, [recentLocalProjectIds]);
+
+  useEffect(() => {
+    if (!localTerminalMenuOpen) {
+      setLocalTerminalProjectSearch("");
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!localTerminalMenuRef.current?.contains(event.target as Node)) {
+        setLocalTerminalMenuOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setLocalTerminalMenuOpen(false);
+      }
+    };
+
+    window.addEventListener("mousedown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("mousedown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [localTerminalMenuOpen]);
 
   useEffect(() => {
     terminalDecodersRef.current.clear();
@@ -1420,6 +1502,7 @@ export default function App() {
     try {
       await clearAppData();
       window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
+      window.localStorage.removeItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY);
       setHosts([]);
       setSelectedId("");
       setDraft(blankHost);
@@ -1432,6 +1515,7 @@ export default function App() {
       setRemoteError("");
       setTransferJobs([]);
       setSettings(DEFAULT_APP_SETTINGS);
+      setRecentLocalProjectIds([]);
       setLocalPath("~");
       setRemotePath(".");
       setStatus(messages.clearDataSuccess);
@@ -1495,7 +1579,8 @@ export default function App() {
       id: projectDraft.id || crypto.randomUUID(),
       name,
       namespace: projectDraft.namespace.trim(),
-      path: projectDraft.path.trim()
+      path: projectDraft.path.trim(),
+      projectType: projectDraft.projectType
     };
 
     setSettings((current) => ({
@@ -1837,15 +1922,27 @@ export default function App() {
     }
   }
 
-  async function handleOpenLocalTerminal() {
+  // author: BrianXiong
+  // time: 2026/04/05/20:55:02
+  function rememberRecentLocalProject(projectId: string) {
+    setRecentLocalProjectIds((current) => [projectId, ...current.filter((item) => item !== projectId)].slice(0, 5));
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/05/20:55:02
+  async function handleOpenLocalTerminal(options?: { cwd?: string; title?: string; source?: LocalTerminalSource; projectId?: string }) {
     setBusy(true);
     setStatusTone("neutral");
 
     try {
       setStatus(messages.openingLocalTerminal);
-      const sessionId = await startLocalTerminalSession(settings.localTerminalDefaultPath.trim() || undefined);
+      const requestedPath = options?.cwd?.trim();
+      const fallbackPath = settings.localTerminalDefaultPath.trim();
+      const cwd = requestedPath || fallbackPath || undefined;
+      const sessionId = await startLocalTerminalSession(cwd);
       const localTabCount = terminalTabsRef.current.filter((tab) => tab.kind === "local").length;
-      const title = localTabCount > 0 ? `${messages.localTerminal} ${localTabCount + 1}` : messages.localTerminal;
+      const baseTitle = options?.title?.trim() || messages.localTerminal;
+      const title = localTabCount > 0 ? `${baseTitle} ${localTabCount + 1}` : baseTitle;
       const tabId = crypto.randomUUID();
 
       setTerminalTabs((prev) => [
@@ -1863,9 +1960,15 @@ export default function App() {
       ]);
 
       setActiveTabId(tabId);
-      if (settings.localTerminalDefaultPath.trim()) {
+      if (cwd) {
+        setLocalPath(cwd);
+      } else if (settings.localTerminalDefaultPath.trim()) {
         setLocalPath(settings.localTerminalDefaultPath.trim());
       }
+      if (options?.projectId) {
+        rememberRecentLocalProject(options.projectId);
+      }
+      setLocalTerminalMenuOpen(false);
       setStatus(messages.localTerminalOpened);
       setStatusTone("success");
     } catch (error) {
@@ -1873,6 +1976,40 @@ export default function App() {
       setStatusTone("error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/05/20:55:02
+  function handleToggleLocalTerminalMenu() {
+    setLocalTerminalMenuOpen((current) => {
+      const next = !current;
+      if (!next) {
+        setLocalTerminalProjectSearch("");
+      }
+      return next;
+    });
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/05/20:55:02
+  async function handleOpenProjectLocalTerminal(project: ManagedProject) {
+    await handleOpenLocalTerminal({ cwd: project.path, title: project.name, source: "project", projectId: project.id });
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/05/20:55:02
+  async function handleOpenPickedDirectoryTerminal() {
+    try {
+      const path = await pickLocalDirectory();
+      if (!path) {
+        return;
+      }
+
+      await handleOpenLocalTerminal({ cwd: path, title: messages.localTerminal, source: "directory" });
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.projectPathPickFailed));
+      setStatusTone("error");
     }
   }
 
@@ -2194,10 +2331,72 @@ export default function App() {
             </div>
           ))}
 
-          <button type="button" className="top-tab top-tab--ghost" onClick={() => void handleOpenLocalTerminal()}>
-            <Plus size={16} />
-            {messages.localTerminal}
-          </button>
+          <div className="topbar-menu" ref={localTerminalMenuRef}>
+            <button type="button" className="top-tab top-tab--ghost" onClick={handleToggleLocalTerminalMenu}>
+              <Plus size={16} />
+              {messages.localTerminal}
+            </button>
+
+            {localTerminalMenuOpen ? (
+              <div className="topbar-popover">
+                <div className="topbar-popover__search">
+                  <Search size={14} />
+                  <input
+                    value={localTerminalProjectSearch}
+                    onChange={(event) => setLocalTerminalProjectSearch(event.target.value)}
+                    placeholder={messages.searchProjectsPlaceholder}
+                  />
+                </div>
+
+                {recentLocalProjects.length ? (
+                  <div className="topbar-popover__section">
+                    <div className="topbar-popover__label">{messages.recentProjects}</div>
+                    {recentLocalProjects.map((project) => (
+                      <button key={project.id} type="button" className="topbar-popover__item" onClick={() => void handleOpenProjectLocalTerminal(project)}>
+                        <div>
+                          <strong>{project.name}</strong>
+                          <span>{project.path}</span>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+
+                <div className="topbar-popover__section">
+                  <div className="topbar-popover__label">{messages.projects}</div>
+                  {filteredLocalTerminalProjects.length ? (
+                    <div className="topbar-popover__list">
+                      {filteredLocalTerminalProjects.map((project) => (
+                      <button key={project.id} type="button" className="topbar-popover__item" onClick={() => void handleOpenProjectLocalTerminal(project)}>
+                        <div>
+                          <strong>{project.name}</strong>
+                          <span>{project.path}</span>
+                        </div>
+                      </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="topbar-popover__empty">{messages.noProjectPaths}</div>
+                  )}
+                </div>
+
+                <div className="topbar-popover__section topbar-popover__section--actions">
+                  <button type="button" className="topbar-popover__item" onClick={() => void handleOpenLocalTerminal({ source: "default" })}>
+                    <div>
+                      <strong>{messages.openDefaultDirectory}</strong>
+                      <span>{settings.localTerminalDefaultPath.trim() || "~"}</span>
+                    </div>
+                  </button>
+                  <button type="button" className="topbar-popover__item" onClick={() => void handleOpenPickedDirectoryTerminal()}>
+                    <div>
+                      <strong>{messages.chooseDirectory}</strong>
+                      <span>{messages.localTerminal}</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
 
@@ -3437,6 +3636,22 @@ export default function App() {
                   value={projectDraft.namespace}
                   onChange={(event) => setProjectDraft((current) => ({ ...current, namespace: event.target.value }))}
                 />
+              </label>
+
+              <label>
+                <span>{messages.projectType}</span>
+                <small>{messages.projectTypeDescription}</small>
+                <select
+                  value={projectDraft.projectType}
+                  onChange={(event) => setProjectDraft((current) => ({
+                    ...current,
+                    projectType: event.target.value as ManagedProject["projectType"]
+                  }))}
+                >
+                  <option value="local">{messages.localProject}</option>
+                  <option value="server">{messages.serverProject}</option>
+                  <option value="hybrid">{messages.hybridProject}</option>
+                </select>
               </label>
 
               <label>

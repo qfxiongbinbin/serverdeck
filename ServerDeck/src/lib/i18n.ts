@@ -130,6 +130,10 @@ type Messages = {
   homeDirectory: string;
   chooseDirectory: string;
   projectPathPickFailed: string;
+  recentProjects: string;
+  openDefaultDirectory: string;
+  noProjectPaths: string;
+  searchProjectsPlaceholder: string;
   update: string;
   settings: string;
   searchPlaceholder: string;
@@ -186,6 +190,11 @@ type Messages = {
   projectNamespaceDescription: string;
   projectPath: string;
   projectPathDescription: string;
+  projectType: string;
+  projectTypeDescription: string;
+  localProject: string;
+  serverProject: string;
+  hybridProject: string;
   newProject: string;
   editProject: string;
   saveProject: string;
@@ -380,6 +389,10 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     homeDirectory: "Home",
     chooseDirectory: "Choose Folder",
     projectPathPickFailed: "Failed to choose project directory",
+    recentProjects: "Recent Projects",
+    openDefaultDirectory: "Open Default Directory",
+    noProjectPaths: "No projects with local paths yet",
+    searchProjectsPlaceholder: "Search projects...",
     update: "Update",
     settings: "Settings",
     searchPlaceholder: "Find a host or ssh user@hostname...",
@@ -436,6 +449,11 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     projectNamespaceDescription: "Optional owner, org, or workspace grouping.",
     projectPath: "Local Path",
     projectPathDescription: "Optional local workspace path for this project.",
+    projectType: "Project Type",
+    projectTypeDescription: "Choose whether this project is used for local work, server management, or both.",
+    localProject: "Local Project",
+    serverProject: "Server Project",
+    hybridProject: "Hybrid Project",
     newProject: "New Project",
     editProject: "Edit Project",
     saveProject: "Save Project",
@@ -628,6 +646,10 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     homeDirectory: "家目录",
     chooseDirectory: "选择目录",
     projectPathPickFailed: "选择项目目录失败",
+    recentProjects: "最近项目",
+    openDefaultDirectory: "打开默认目录",
+    noProjectPaths: "还没有配置本地路径的项目",
+    searchProjectsPlaceholder: "搜索项目...",
     update: "更新",
     settings: "设置",
     searchPlaceholder: "搜索主机或输入 ssh user@hostname...",
@@ -684,6 +706,11 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     projectNamespaceDescription: "可选的 owner、组织或工作区分组。",
     projectPath: "本地路径",
     projectPathDescription: "该项目对应的本地工作区路径（可选）。",
+    projectType: "项目类型",
+    projectTypeDescription: "选择这个项目用于本地工作、服务器管理，或两者都用。",
+    localProject: "本地项目",
+    serverProject: "服务器项目",
+    hybridProject: "混合项目",
     newProject: "新建项目",
     editProject: "编辑项目",
     saveProject: "保存项目",
@@ -876,6 +903,10 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     homeDirectory: "ホーム",
     chooseDirectory: "フォルダを選択",
     projectPathPickFailed: "プロジェクトディレクトリの選択に失敗しました",
+    recentProjects: "最近のプロジェクト",
+    openDefaultDirectory: "既定ディレクトリで開く",
+    noProjectPaths: "ローカルパス付きのプロジェクトはまだありません",
+    searchProjectsPlaceholder: "プロジェクトを検索...",
     update: "更新",
     settings: "設定",
     searchPlaceholder: "ホストを検索、または ssh user@hostname... を入力",
@@ -932,6 +963,11 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     projectNamespaceDescription: "任意の owner、組織、またはワークスペースの分類です。",
     projectPath: "ローカルパス",
     projectPathDescription: "このプロジェクトに対応するローカルワークスペースのパス（任意）。",
+    projectType: "プロジェクト種別",
+    projectTypeDescription: "このプロジェクトをローカル作業用、サーバー管理用、または両方に使うか選択します。",
+    localProject: "ローカルプロジェクト",
+    serverProject: "サーバープロジェクト",
+    hybridProject: "ハイブリッドプロジェクト",
     newProject: "新規プロジェクト",
     editProject: "プロジェクトを編集",
     saveProject: "プロジェクトを保存",
