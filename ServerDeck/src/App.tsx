@@ -62,6 +62,7 @@ import {
   type TerminalEventPayload
 } from "./lib/api";
 import { FileBrowserPane } from "./components/files/FileBrowserPane";
+import { ProjectEditorModal } from "./components/projects/ProjectEditorModal";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
 import {
   getDocumentLanguageTag,
@@ -3604,83 +3605,33 @@ export default function App() {
         </div>
       ) : null}
 
-      {projectEditorOpen ? (
-        <div className="update-modal-backdrop" onMouseDown={closeProjectEditor}>
-          <section className="update-modal update-modal--project" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="update-modal__header">
-              <div>
-                <div className="drawer-eyebrow">{messages.projects}</div>
-                <h3>{projectEditorMode === "edit" ? messages.editProject : messages.newProject}</h3>
-                <span>{messages.projectsDescription}</span>
-              </div>
-
-              <button type="button" className="icon-button" onClick={closeProjectEditor}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className="project-form project-form--modal">
-              <label>
-                <span>{messages.projectName}</span>
-                <small>{messages.projectNameDescription}</small>
-                <input
-                  value={projectDraft.name}
-                  onChange={(event) => setProjectDraft((current) => ({ ...current, name: event.target.value }))}
-                />
-              </label>
-
-              <label>
-                <span>{messages.projectNamespace}</span>
-                <small>{messages.projectNamespaceDescription}</small>
-                <input
-                  value={projectDraft.namespace}
-                  onChange={(event) => setProjectDraft((current) => ({ ...current, namespace: event.target.value }))}
-                />
-              </label>
-
-              <label>
-                <span>{messages.projectType}</span>
-                <small>{messages.projectTypeDescription}</small>
-                <select
-                  value={projectDraft.projectType}
-                  onChange={(event) => setProjectDraft((current) => ({
-                    ...current,
-                    projectType: event.target.value as ManagedProject["projectType"]
-                  }))}
-                >
-                  <option value="local">{messages.localProject}</option>
-                  <option value="server">{messages.serverProject}</option>
-                  <option value="hybrid">{messages.hybridProject}</option>
-                </select>
-              </label>
-
-              <label>
-                <span>{messages.projectPath}</span>
-                <small>{messages.projectPathDescription}</small>
-                <div className="project-path-field">
-                  <input
-                    value={projectDraft.path}
-                    onChange={(event) => setProjectDraft((current) => ({ ...current, path: event.target.value }))}
-                  />
-                  <button type="button" className="secondary-button secondary-button--compact" onClick={() => void handlePickProjectPath()}>
-                    <FolderOpen size={14} />
-                    {messages.chooseDirectory}
-                  </button>
-                </div>
-              </label>
-            </div>
-
-            <div className="project-form__actions project-form__actions--modal">
-              <button type="button" className="secondary-button" onClick={closeProjectEditor}>
-                {messages.cancel}
-              </button>
-              <button type="button" className="primary-button" onClick={handleSaveProject}>
-                {messages.saveProject}
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
+      <ProjectEditorModal
+        open={projectEditorOpen}
+        mode={projectEditorMode}
+        draft={projectDraft}
+        projectsLabel={messages.projects}
+        projectsDescription={messages.projectsDescription}
+        editProjectLabel={messages.editProject}
+        newProjectLabel={messages.newProject}
+        projectNameLabel={messages.projectName}
+        projectNameDescription={messages.projectNameDescription}
+        projectNamespaceLabel={messages.projectNamespace}
+        projectNamespaceDescription={messages.projectNamespaceDescription}
+        projectTypeLabel={messages.projectType}
+        projectTypeDescription={messages.projectTypeDescription}
+        localProjectLabel={messages.localProject}
+        serverProjectLabel={messages.serverProject}
+        hybridProjectLabel={messages.hybridProject}
+        projectPathLabel={messages.projectPath}
+        projectPathDescription={messages.projectPathDescription}
+        chooseDirectoryLabel={messages.chooseDirectory}
+        cancelLabel={messages.cancel}
+        saveProjectLabel={messages.saveProject}
+        onClose={closeProjectEditor}
+        onSave={handleSaveProject}
+        onPickPath={() => void handlePickProjectPath()}
+        onDraftChange={setProjectDraft}
+      />
     </div>
   );
 }
