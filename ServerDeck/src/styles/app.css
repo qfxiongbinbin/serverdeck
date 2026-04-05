@@ -2831,6 +2831,48 @@ select {
   width: min(760px, 100%);
 }
 
+:root[data-app-theme="dark"] .update-modal--project {
+  border-color: var(--settings-border);
+  background: var(--settings-card-bg);
+  color: var(--settings-text);
+}
+
+:root[data-app-theme="dark"] .update-modal--project .update-modal__header span,
+:root[data-app-theme="dark"] .update-modal--project .drawer-eyebrow {
+  color: var(--settings-muted);
+}
+
+:root[data-app-theme="dark"] .update-modal--project .update-modal__header h3 {
+  color: var(--settings-text);
+}
+
+:root[data-app-theme="dark"] .update-modal--project .project-form label span {
+  color: var(--settings-text);
+}
+
+:root[data-app-theme="dark"] .update-modal--project .project-form label small {
+  color: var(--settings-muted);
+}
+
+:root[data-app-theme="dark"] .update-modal--project .project-form input,
+:root[data-app-theme="dark"] .update-modal--project .project-form select {
+  border-color: var(--settings-control-border);
+  background: var(--settings-control-bg);
+  color: var(--settings-control-text);
+}
+
+:root[data-app-theme="dark"] .update-modal--project .secondary-button {
+  background: var(--settings-control-bg);
+  color: var(--settings-control-text);
+  border-color: var(--settings-control-border);
+}
+
+:root[data-app-theme="dark"] .update-modal--project .icon-button {
+  background: var(--settings-control-bg);
+  color: var(--settings-control-text);
+  border-color: var(--settings-control-border);
+}
+
 .update-modal__header,
 .update-modal__actions,
 .update-progress__meta {
