@@ -579,9 +579,9 @@ select {
   gap: 12px;
   padding: 10px 12px;
   border: 0;
-  border-bottom: 1px solid #edf1f6;
+  border-bottom: 1px solid var(--content-border);
   background: transparent;
-  color: #203044;
+  color: var(--content-text);
   font-size: 12px;
   text-align: left;
 }
@@ -591,6 +591,10 @@ select {
 }
 
 .browser-row:disabled {
+  cursor: default;
+}
+
+.browser-row--file {
   cursor: default;
 }
 
@@ -607,13 +611,17 @@ select {
   white-space: nowrap;
 }
 
+.browser-row > span {
+  color: var(--content-muted);
+}
+
 .browser-row__icon {
   flex: 0 0 auto;
   min-width: 36px;
   padding: 4px 6px;
   border-radius: 8px;
   background: var(--content-subtle-bg);
-  color: #607085;
+  color: var(--content-muted);
   font-size: 9px;
   font-weight: 700;
   text-align: center;
