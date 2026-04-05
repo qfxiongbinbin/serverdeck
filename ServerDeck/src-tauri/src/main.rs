@@ -224,6 +224,34 @@ fn resolve_local_shell() -> Result<PathBuf, String> {
         .ok_or_else(|| "Local shell not found".to_string())
 }
 
+// author: BrianXiong
+// time: 2026/04/05/16:45:00
+fn apply_local_terminal_utf8_env(cmd: &mut CommandBuilder) {
+    let needs_utf8_locale = cmd
+        .get_env("LANG")
+        .and_then(|value| value.to_str())
+        .map(|value| !value.to_ascii_uppercase().contains("UTF-8"))
+        .unwrap_or(true);
+
+    if needs_utf8_locale {
+        cmd.env("LANG", "en_US.UTF-8");
+    }
+
+    let needs_utf8_ctype = cmd
+        .get_env("LC_CTYPE")
+        .and_then(|value| value.to_str())
+        .map(|value| !value.to_ascii_uppercase().contains("UTF-8"))
+        .unwrap_or(true);
+
+    if needs_utf8_ctype {
+        cmd.env("LC_CTYPE", "en_US.UTF-8");
+    }
+
+    if cmd.get_env("TERM").is_none() {
+        cmd.env("TERM", "xterm-256color");
+    }
+}
+
 fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
     let read_dir = fs::read_dir(path).map_err(|error| error.to_string())?;
@@ -1137,6 +1165,7 @@ fn start_local_terminal_session(
 
     let shell = resolve_local_shell()?;
     let mut cmd = CommandBuilder::new(shell.to_string_lossy().into_owned());
+    apply_local_terminal_utf8_env(&mut cmd);
 
     if let Some(path) = cwd {
         let trimmed = path.trim();
