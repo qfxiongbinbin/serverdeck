@@ -86,7 +86,8 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   sshConnectTimeoutSeconds: 5,
   sshServerAliveIntervalSeconds: 30,
   terminalThemeId: defaultTerminalThemeId,
-  terminalFontSize: 14
+  terminalFontSize: 14,
+  terminalCharset: "utf-8"
 };
 
 const blankHost: SavedHost = {
@@ -157,6 +158,8 @@ type ManagedProject = {
   path: string;
 };
 
+type TerminalCharset = "utf-8" | "gb18030" | "gbk" | "big5";
+
 type AppSettings = {
   appTheme: "light" | "dark";
   language: AppLanguage;
@@ -166,6 +169,7 @@ type AppSettings = {
   sshServerAliveIntervalSeconds: number;
   terminalThemeId: string;
   terminalFontSize: number;
+  terminalCharset: TerminalCharset;
 };
 
 type UpdateStage = "idle" | "downloading" | "ready";
@@ -179,8 +183,48 @@ const terminalFontSizeOptions = [
   { label: "L", value: 16 }
 ] as const;
 
+const terminalCharsetOptions: Array<{ label: string; value: TerminalCharset }> = [
+  { label: "UTF-8", value: "utf-8" },
+  { label: "GB18030", value: "gb18030" },
+  { label: "GBK", value: "gbk" },
+  { label: "Big5", value: "big5" }
+];
+
 const sshConnectTimeoutOptions = [5, 10, 15, 30] as const;
 const sshServerAliveIntervalOptions = [15, 30, 60, 120] as const;
+
+function isTerminalCharset(value: unknown): value is TerminalCharset {
+  return terminalCharsetOptions.some((option) => option.value === value);
+}
+
+function createTerminalDecoder(charset: TerminalCharset) {
+  try {
+    return new TextDecoder(charset);
+  } catch {
+    return new TextDecoder("utf-8");
+  }
+}
+
+function getTerminalControlSequence(event: KeyboardEvent) {
+  if (event.type !== "keydown") {
+    return null;
+  }
+
+  if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) {
+    return null;
+  }
+
+  switch (event.key) {
+    case "ArrowUp":
+      return "\u001b[A";
+    case "Backspace":
+      return "\u007f";
+    case "Delete":
+      return "\u001b[3~";
+    default:
+      return null;
+  }
+}
 
 const blankProject: ManagedProject = {
   id: "",
@@ -745,6 +789,7 @@ export default function App() {
   const terminalEl = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const terminalDecodersRef = useRef<Map<string, TextDecoder>>(new Map());
   const activeTabIdRef = useRef(HOSTS_TAB_ID);
   const terminalTabsRef = useRef<TerminalTab[]>([]);
   const monitorTabsRef = useRef<MonitorTab[]>([]);
@@ -780,6 +825,31 @@ export default function App() {
       serverAliveIntervalSeconds: settings.sshServerAliveIntervalSeconds
     }),
     [settings.sshConnectTimeoutSeconds, settings.sshServerAliveIntervalSeconds]
+  );
+
+  const sendActiveTerminalInput = useCallback((data: string) => {
+    const currentActiveTab = terminalTabsRef.current.find((tab) => tab.id === activeTabIdRef.current);
+    if (!currentActiveTab) {
+      return;
+    }
+
+    void writeTerminalInput(currentActiveTab.sessionId, data);
+  }, []);
+
+  const decodeTerminalPayload = useCallback(
+    (payload: TerminalEventPayload) => {
+      if (Array.isArray(payload.bytes)) {
+        let decoder = terminalDecodersRef.current.get(payload.sessionId);
+        if (!decoder) {
+          decoder = createTerminalDecoder(settings.terminalCharset);
+          terminalDecodersRef.current.set(payload.sessionId, decoder);
+        }
+        return decoder.decode(new Uint8Array(payload.bytes), { stream: true });
+      }
+
+      return payload.data ?? "";
+    },
+    [settings.terminalCharset]
   );
 
   const appThemeOptions = useMemo(
@@ -1030,7 +1100,10 @@ export default function App() {
           terminalFontSize:
             typeof parsed.terminalFontSize === "number" && parsed.terminalFontSize >= 10 && parsed.terminalFontSize <= 24
             ? parsed.terminalFontSize
-            : DEFAULT_APP_SETTINGS.terminalFontSize
+            : DEFAULT_APP_SETTINGS.terminalFontSize,
+          terminalCharset: isTerminalCharset(parsed.terminalCharset)
+            ? parsed.terminalCharset
+            : DEFAULT_APP_SETTINGS.terminalCharset
       });
     } catch {
       window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
@@ -1040,6 +1113,10 @@ export default function App() {
   useEffect(() => {
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
   }, [settings]);
+
+  useEffect(() => {
+    terminalDecodersRef.current.clear();
+  }, [settings.terminalCharset]);
 
   useEffect(() => {
     document.documentElement.dataset.appTheme = settings.appTheme;
@@ -1167,6 +1244,16 @@ export default function App() {
     terminal.open(terminalEl.current);
     fitAddon.fit();
     terminal.focus();
+    terminal.attachCustomKeyEventHandler((event) => {
+      const sequence = getTerminalControlSequence(event);
+      if (!sequence) {
+        return true;
+      }
+
+      event.preventDefault();
+      sendActiveTerminalInput(sequence);
+      return false;
+    });
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
@@ -1176,9 +1263,7 @@ export default function App() {
     }
 
     const disposable = terminal.onData((data) => {
-      const currentActiveTab = terminalTabsRef.current.find((tab) => tab.id === activeTabIdRef.current);
-      if (!currentActiveTab) return;
-      void writeTerminalInput(currentActiveTab.sessionId, data);
+      sendActiveTerminalInput(data);
     });
 
     const onResize = () => fitAddon.fit();
@@ -1191,7 +1276,7 @@ export default function App() {
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [activeTerminalTab?.id, activeTerminalTheme, settings.terminalFontSize]);
+  }, [activeTerminalTab?.id, activeTerminalTheme, sendActiveTerminalInput, settings.terminalFontSize]);
 
   useEffect(() => {
     if (!terminalRef.current) {
@@ -1220,6 +1305,8 @@ export default function App() {
         return;
       }
 
+      const chunk = decodeTerminalPayload(event.payload);
+
       const nextState: TerminalState =
         matchingTab.state === "connecting" && event.payload.stream === "stdout"
           ? "connected"
@@ -1233,13 +1320,13 @@ export default function App() {
       setTerminalTabs((prev) =>
         prev.map((tab) =>
           tab.sessionId === event.payload.sessionId
-            ? { ...tab, state: nextState, statusText: nextStatusText, buffer: [...tab.buffer, event.payload.data] }
+            ? { ...tab, state: nextState, statusText: nextStatusText, buffer: [...tab.buffer, chunk] }
             : tab
         )
       );
 
       if (activeTabIdRef.current === matchingTab.id && terminalRef.current) {
-        terminalRef.current.write(event.payload.data);
+        terminalRef.current.write(chunk);
       }
     })
       .then((unlisten) => {
@@ -1258,7 +1345,7 @@ export default function App() {
       disposed = true;
       cleanup?.();
     };
-  }, []);
+  }, [decodeTerminalPayload, messages.connected]);
 
   function openNewDrawer() {
     setActiveTabId(HOSTS_TAB_ID);
@@ -1497,6 +1584,12 @@ export default function App() {
   function handleSelectTerminalFontSize(fontSize: number) {
     setSettings((current) => ({ ...current, terminalFontSize: fontSize }));
     setStatus(messages.appliedTerminalFontSize(fontSize));
+    setStatusTone("success");
+  }
+
+  function handleSelectTerminalCharset(terminalCharset: TerminalCharset) {
+    setSettings((current) => ({ ...current, terminalCharset }));
+    setStatus(messages.appliedTerminalCharset(terminalCharset.toUpperCase()));
     setStatusTone("success");
   }
 
@@ -1810,6 +1903,7 @@ export default function App() {
     if (targetIndex < 0) return;
 
     const targetTab = currentTabs[targetIndex];
+    terminalDecodersRef.current.delete(targetTab.sessionId);
     await closeTerminalSession(targetTab.sessionId);
 
     const nextTabs = currentTabs.filter((tab) => tab.id !== tabId);
@@ -2784,8 +2878,8 @@ export default function App() {
 
                         <div className="settings-item settings-item--panel">
                           <div>
-                            <strong>{messages.terminal}</strong>
-                            <span>{messages.terminalDescription}</span>
+                            <strong>{messages.terminalFontSize}</strong>
+                            <span>{messages.terminalFontSizeDescription}</span>
                           </div>
                           <select
                             className="settings-select"
@@ -2795,6 +2889,24 @@ export default function App() {
                             {terminalFontSizeOptions.map((option) => (
                               <option key={option.value} value={option.value}>
                                 {option.label} ({option.value}px)
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="settings-item settings-item--panel">
+                          <div>
+                            <strong>{messages.terminalCharset}</strong>
+                            <span>{messages.terminalCharsetDescription}</span>
+                          </div>
+                          <select
+                            className="settings-select"
+                            value={settings.terminalCharset}
+                            onChange={(event) => handleSelectTerminalCharset(event.target.value as TerminalCharset)}
+                          >
+                            {terminalCharsetOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
                               </option>
                             ))}
                           </select>
@@ -3033,6 +3145,7 @@ export default function App() {
               <div
                 className="terminal-frame"
                 ref={terminalEl}
+                onMouseDown={() => terminalRef.current?.focus()}
                 style={{ background: activeTerminalTheme.theme.background }}
               />
             </section>
