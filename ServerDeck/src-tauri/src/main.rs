@@ -78,7 +78,8 @@ struct FileEntry {
 #[serde(rename_all = "camelCase")]
 struct TerminalOutputPayload {
     session_id: String,
-    data: String,
+    data: Option<String>,
+    bytes: Option<Vec<u8>>,
     stream: String,
 }
 
@@ -419,12 +420,29 @@ fn emit_terminal_output(app: &AppHandle, session_id: &str, data: String, stream:
         "terminal-output",
         TerminalOutputPayload {
             session_id: session_id.to_string(),
-            data,
+            data: Some(data),
+            bytes: None,
             stream: stream.to_string(),
         },
     );
     if let Err(e) = result {
         eprintln!("[DEBUG] Failed to emit terminal-output: {}", e);
+    }
+}
+
+fn emit_terminal_bytes(app: &AppHandle, session_id: &str, bytes: Vec<u8>, stream: &str) {
+    eprintln!("[DEBUG] Emitting terminal-output bytes, stream: {}, byte_len: {}", stream, bytes.len());
+    let result = app.emit(
+        "terminal-output",
+        TerminalOutputPayload {
+            session_id: session_id.to_string(),
+            data: None,
+            bytes: Some(bytes),
+            stream: stream.to_string(),
+        },
+    );
+    if let Err(e) = result {
+        eprintln!("[DEBUG] Failed to emit terminal-output bytes: {}", e);
     }
 }
 
@@ -501,8 +519,7 @@ fn wire_terminal_pty_stream<R: Read + Send + 'static>(
                 }
                 Ok(n) => {
                     eprintln!("[DEBUG] PTY reader got {} bytes", n);
-                    let chunk = String::from_utf8_lossy(&buffer[..n]).to_string();
-                    emit_terminal_output(&app, &session_id, chunk, "stdout");
+                    emit_terminal_bytes(&app, &session_id, buffer[..n].to_vec(), "stdout");
                 }
                 Err(error) => {
                     eprintln!("[DEBUG] PTY reader error: {:?}", error);

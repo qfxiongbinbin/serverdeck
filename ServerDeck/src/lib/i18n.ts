@@ -34,6 +34,7 @@ type Messages = {
   appliedAppTheme: (themeName: string) => string;
   appliedLanguage: (languageName: string) => string;
   appliedTerminalFontSize: (fontSize: number) => string;
+  appliedTerminalCharset: (charset: string) => string;
   uploadingTo: (path: string) => string;
   uploaded: (name: string) => string;
   uploadedTo: (path: string) => string;
@@ -187,6 +188,10 @@ type Messages = {
   appliedSshDefaults: (connectTimeout: number, keepaliveInterval: number) => string;
   terminal: string;
   terminalDescription: string;
+  terminalFontSize: string;
+  terminalFontSizeDescription: string;
+  terminalCharset: string;
+  terminalCharsetDescription: string;
   terminalTheme: string;
   selected: string;
   select: string;
@@ -258,6 +263,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     appliedAppTheme: (themeName) => `Applied ${themeName} app theme`,
     appliedLanguage: (languageName) => `Language switched to ${languageName}`,
     appliedTerminalFontSize: (fontSize) => `Applied terminal font size ${fontSize}px`,
+    appliedTerminalCharset: (charset) => `Applied terminal charset ${charset}`,
     uploadingTo: (path) => `Uploading to ${path}`,
     uploaded: (name) => `Uploaded ${name}`,
     uploadedTo: (path) => `Uploaded to ${path}`,
@@ -410,7 +416,11 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     secondsValue: (value) => `${value}s`,
     appliedSshDefaults: (connectTimeout, keepaliveInterval) => `Applied SSH defaults ${connectTimeout}s / ${keepaliveInterval}s`,
     terminal: "Terminal",
-    terminalDescription: "Font size for all terminal sessions.",
+    terminalDescription: "Adjust the local shell and terminal appearance.",
+    terminalFontSize: "Terminal Font Size",
+    terminalFontSizeDescription: "Choose the font size used by terminal tabs.",
+    terminalCharset: "Terminal Charset",
+    terminalCharsetDescription: "Select how terminal output bytes are decoded, useful for Chinese servers.",
     terminalTheme: "Terminal Theme",
     selected: "Selected",
     select: "Select",
@@ -480,6 +490,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     appliedAppTheme: (themeName) => `已应用${themeName}应用主题`,
     appliedLanguage: (languageName) => `语言已切换为 ${languageName}`,
     appliedTerminalFontSize: (fontSize) => `已应用终端字号 ${fontSize}px`,
+    appliedTerminalCharset: (charset) => `已应用终端字符集 ${charset}`,
     uploadingTo: (path) => `正在上传到 ${path}`,
     uploaded: (name) => `已上传 ${name}`,
     uploadedTo: (path) => `已上传到 ${path}`,
@@ -632,7 +643,11 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     secondsValue: (value) => `${value} 秒`,
     appliedSshDefaults: (connectTimeout, keepaliveInterval) => `已应用 SSH 默认值 ${connectTimeout} 秒 / ${keepaliveInterval} 秒`,
     terminal: "终端",
-    terminalDescription: "所有终端会话共用的字号。",
+    terminalDescription: "调整本地 shell 与终端外观。",
+    terminalFontSize: "终端字号",
+    terminalFontSizeDescription: "选择终端标签页使用的字号。",
+    terminalCharset: "终端字符集",
+    terminalCharsetDescription: "选择终端输出字节的解码方式，中文服务器场景下尤其有用。",
     terminalTheme: "终端主题",
     selected: "已选择",
     select: "选择",
@@ -702,6 +717,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     appliedAppTheme: (themeName) => `${themeName} テーマを適用しました`,
     appliedLanguage: (languageName) => `言語を ${languageName} に変更しました`,
     appliedTerminalFontSize: (fontSize) => `ターミナルフォントサイズを ${fontSize}px に変更しました`,
+    appliedTerminalCharset: (charset) => `ターミナル文字コードを ${charset} に設定しました`,
     uploadingTo: (path) => `${path} にアップロード中`,
     uploaded: (name) => `${name} をアップロードしました`,
     uploadedTo: (path) => `${path} にアップロードしました`,
@@ -854,7 +870,11 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     secondsValue: (value) => `${value} 秒`,
     appliedSshDefaults: (connectTimeout, keepaliveInterval) => `SSH デフォルトを ${connectTimeout} 秒 / ${keepaliveInterval} 秒に設定しました`,
     terminal: "ターミナル",
-    terminalDescription: "すべてのターミナルセッションで使うフォントサイズ。",
+    terminalDescription: "ローカルシェルとターミナル表示を調整します。",
+    terminalFontSize: "ターミナルフォントサイズ",
+    terminalFontSizeDescription: "ターミナルタブで使うフォントサイズを選択します。",
+    terminalCharset: "ターミナル文字コード",
+    terminalCharsetDescription: "ターミナル出力バイト列のデコード方式を選択します。中国語サーバーで特に有効です。",
     terminalTheme: "ターミナルテーマ",
     selected: "選択中",
     select: "選択",

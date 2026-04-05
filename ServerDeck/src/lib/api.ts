@@ -22,7 +22,8 @@ export type FileEntry = {
 
 export type TerminalEventPayload = {
   sessionId: string;
-  data: string;
+  data?: string;
+  bytes?: number[];
   stream?: "stdout" | "stderr" | "system";
 };
 
