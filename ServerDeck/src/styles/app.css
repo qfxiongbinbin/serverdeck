@@ -285,6 +285,14 @@ select {
   overflow: hidden;
 }
 
+.workspace--sidebar-collapsed {
+  grid-template-columns: 0 1fr;
+}
+
+.workspace--sidebar-collapsed .terminal-screen {
+  border-left: 0;
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -295,10 +303,41 @@ select {
   background: var(--chrome-sidebar-bg);
 }
 
+.sidebar--collapsed {
+  padding: 0;
+  border-right: 0;
+  overflow: hidden;
+}
+
 .sidebar__top,
 .sidebar__bottom {
   display: grid;
   gap: 10px;
+}
+
+.sidebar-toggle {
+  width: 100%;
+  height: 36px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+}
+
+.sidebar-toggle:hover {
+  background: var(--chrome-tab-bg);
+}
+
+.sidebar-toggle--floating {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  width: 36px;
+  background: var(--chrome-tab-bg);
+  border-color: var(--chrome-sidebar-active-border);
 }
 
 .side-nav {
@@ -314,6 +353,18 @@ select {
   font-size: 11px;
 }
 
+.side-nav span {
+  display: inline-block;
+}
+
+.sidebar--collapsed .side-nav {
+  padding: 10px 6px;
+}
+
+.sidebar--collapsed .side-nav span {
+  display: none;
+}
+
 .side-nav--active {
   background: var(--chrome-sidebar-active-bg);
   border-color: var(--chrome-sidebar-active-border);
@@ -327,6 +378,7 @@ select {
 }
 
 .mainpane {
+  position: relative;
   min-width: 0;
   min-height: 0;
   height: 100%;
