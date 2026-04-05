@@ -17,6 +17,8 @@ import {
   FolderOpen,
   Info,
   Link2,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Plus,
   PlugZap,
@@ -624,6 +626,7 @@ export default function App() {
   const [projectEditorOpen, setProjectEditorOpen] = useState(false);
   const [projectEditorMode, setProjectEditorMode] = useState<ProjectEditorMode>("new");
   const [projectDraft, setProjectDraft] = useState<ManagedProject>(blankProject);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [activeHostProjectId, setActiveHostProjectId] = useState<string | null>(null);
   const [monitorInfoOpen, setMonitorInfoOpen] = useState(false);
   const [monitorInfoCopied, setMonitorInfoCopied] = useState(false);
@@ -1958,6 +1961,12 @@ export default function App() {
     }
   }
 
+  // author: BrianXiong
+  // time: 2026/04/05/17:00:22
+  function handleToggleSidebar() {
+    setSidebarCollapsed((current) => !current);
+  }
+
   async function handleRefreshMonitor(tabId: string, options?: { silent?: boolean }) {
     const targetTab = monitorTabsRef.current.find((tab) => tab.id === tabId);
     if (!targetTab) return;
@@ -2082,6 +2091,16 @@ export default function App() {
         <div className="topbar__tabs">
           <button
             type="button"
+            className="top-tab top-tab--ghost"
+            onClick={handleToggleSidebar}
+            aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+
+          <button
+            type="button"
             className={`top-tab ${isHostsView ? "top-tab--active" : ""}`}
             onClick={() => setActiveTabId(HOSTS_TAB_ID)}
           >
@@ -2165,8 +2184,8 @@ export default function App() {
         </div>
       </header>
 
-      <div className="workspace">
-        <aside className="sidebar">
+      <div className={`workspace ${sidebarCollapsed ? "workspace--sidebar-collapsed" : ""}`}>
+        <aside className={`sidebar ${sidebarCollapsed ? "sidebar--collapsed" : ""}`}>
           <div className="sidebar__top">
             <button
               type="button"
@@ -2174,7 +2193,7 @@ export default function App() {
               onClick={() => setActiveTabId(HOSTS_TAB_ID)}
             >
               <Server size={18} />
-              Hosts
+              <span>Hosts</span>
             </button>
           </div>
 
@@ -2186,7 +2205,7 @@ export default function App() {
                 onClick={handleUpdateClick}
             >
               <Download size={18} />
-              {messages.update}
+              <span>{messages.update}</span>
             </button>
           ) : null}
 
@@ -2196,7 +2215,7 @@ export default function App() {
               onClick={openSettings}
             >
               <Wrench size={18} />
-              {messages.settings}
+              <span>{messages.settings}</span>
             </button>
           </div>
         </aside>
