@@ -8,6 +8,7 @@ type LocalTerminalWorkspaceProps = {
   terminalBackground: string;
   previewOpen: boolean;
   browserTitle: string;
+  homeLabel: string;
   previewTitle: string;
   refreshLabel: string;
   upLabel: string;
@@ -40,6 +41,7 @@ type LocalTerminalWorkspaceProps = {
   onRefresh: () => void;
   onOpenDir: (entry: FileEntry) => void;
   onGoUp: () => void;
+  onGoHome: () => void;
   onSelectEntry: (entry: FileEntry | null) => void;
   onFocusTerminal: () => void;
 };
@@ -51,6 +53,7 @@ export function LocalTerminalWorkspace({
   terminalBackground,
   previewOpen,
   browserTitle,
+  homeLabel,
   previewTitle,
   refreshLabel,
   upLabel,
@@ -83,6 +86,7 @@ export function LocalTerminalWorkspace({
   onRefresh,
   onOpenDir,
   onGoUp,
+  onGoHome,
   onSelectEntry,
   onFocusTerminal
 }: LocalTerminalWorkspaceProps) {
@@ -108,6 +112,7 @@ export function LocalTerminalWorkspace({
           <div className="local-terminal-split-workspace__pane local-terminal-split-workspace__pane--navigator">
             <TerminalFileNavigator
               title={browserTitle}
+              homeLabel={homeLabel}
               refreshLabel={refreshLabel}
               upLabel={upLabel}
               loadingText={browserLoadingLabel}
@@ -127,6 +132,7 @@ export function LocalTerminalWorkspace({
               onPathChange={onPathChange}
               onRefresh={onRefresh}
               onGoUp={onGoUp}
+              onGoHome={onGoHome}
               onOpenDir={onOpenDir}
               onSelectEntry={onSelectEntry}
             />

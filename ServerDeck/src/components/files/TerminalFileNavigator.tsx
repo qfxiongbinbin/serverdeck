@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
+import { ChevronUp, Home, RefreshCw } from "lucide-react";
 import type { FileEntry } from "../../lib/api";
 import { formatFileSize, formatTimestamp } from "../../lib/fileBrowser";
 
@@ -9,6 +10,7 @@ type TerminalFileNavigatorProps = {
   title: string;
   refreshLabel: string;
   upLabel: string;
+  homeLabel: string;
   loadingText: string;
   emptyText: string;
   nameColumnLabel: string;
@@ -26,6 +28,7 @@ type TerminalFileNavigatorProps = {
   onPathChange: (path: string) => void;
   onRefresh: () => void;
   onGoUp: () => void;
+  onGoHome: () => void;
   onOpenDir: (entry: FileEntry) => void;
   onSelectEntry: (entry: FileEntry | null) => void;
   onContextMenu?: (event: MouseEvent<HTMLButtonElement>, entry: FileEntry) => void;
@@ -46,6 +49,7 @@ export function TerminalFileNavigator({
   title,
   refreshLabel,
   upLabel,
+  homeLabel,
   loadingText,
   emptyText,
   nameColumnLabel,
@@ -63,6 +67,7 @@ export function TerminalFileNavigator({
   onPathChange,
   onRefresh,
   onGoUp,
+  onGoHome,
   onOpenDir,
   onSelectEntry,
   onContextMenu
@@ -181,17 +186,24 @@ export function TerminalFileNavigator({
   return (
     <section className="terminal-file-navigator" ref={paneRef} tabIndex={0} onKeyDown={handleKeyDown}>
       <div className="terminal-file-navigator__header">
-        <div>
-          <strong>{title}</strong>
-          <span>{path}</span>
-        </div>
-        <div className="terminal-file-navigator__actions">
-          <button type="button" className="terminal-mini-button" onClick={onGoUp}>
-            {upLabel}
-          </button>
-          <button type="button" className="terminal-mini-button" onClick={onRefresh}>
-            {refreshLabel}
-          </button>
+        <div className="terminal-file-navigator__header-main">
+          <div className="terminal-file-navigator__header-topline">
+            <div className="terminal-file-navigator__titleline">
+              <strong>{title}</strong>
+              <button type="button" className="terminal-mini-button terminal-mini-button--icon" onClick={onGoHome} title={homeLabel} aria-label={homeLabel}>
+                <Home size={15} />
+              </button>
+            </div>
+
+            <div className="terminal-file-navigator__actions">
+              <button type="button" className="terminal-mini-button terminal-mini-button--icon" onClick={onGoUp} title={upLabel} aria-label={upLabel}>
+                <ChevronUp size={15} />
+              </button>
+              <button type="button" className="terminal-mini-button terminal-mini-button--icon" onClick={onRefresh} title={refreshLabel} aria-label={refreshLabel}>
+                <RefreshCw size={15} />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 

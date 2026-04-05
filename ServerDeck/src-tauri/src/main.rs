@@ -192,6 +192,12 @@ fn resolve_binary(name: &str) -> Result<PathBuf, String> {
             candidates.push(PathBuf::from("/opt/homebrew/bin/curl"));
             candidates.push(PathBuf::from("/usr/local/bin/curl"));
         }
+        "lsof" => {
+            candidates.push(PathBuf::from("/usr/sbin/lsof"));
+            candidates.push(PathBuf::from("/usr/bin/lsof"));
+            candidates.push(PathBuf::from("/opt/homebrew/bin/lsof"));
+            candidates.push(PathBuf::from("/usr/local/bin/lsof"));
+        }
         _ => {}
     }
 
@@ -1153,6 +1159,51 @@ fn start_local_terminal_session(
 }
 
 #[tauri::command]
+// author: BrianXiong
+// time: 2026/04/05/16:20:45
+fn get_terminal_session_cwd(state: State<AppState>, session_id: String) -> Result<String, String> {
+    let sessions = state
+        .terminal_sessions
+        .lock()
+        .map_err(|_| "Lock poisoned".to_string())?;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| "Terminal session not found".to_string())?;
+    let child = session.child.lock().map_err(|_| "Lock poisoned".to_string())?;
+    let pid = child
+        .process_id()
+        .ok_or_else(|| "Cannot resolve terminal process id".to_string())?;
+
+    let output = Command::new(
+        resolve_binary("lsof")
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|error| error.to_string())?,
+    )
+    .arg("-a")
+    .arg("-p")
+    .arg(pid.to_string())
+    .arg("-d")
+    .arg("cwd")
+    .arg("-Fn")
+    .output()
+    .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Failed to resolve terminal cwd".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .find_map(|line| line.strip_prefix('n').map(|value| value.to_string()))
+        .ok_or_else(|| "Terminal cwd not available".to_string())
+}
+
+#[tauri::command]
 fn write_terminal_input(
     state: State<AppState>,
     session_id: String,
@@ -1218,6 +1269,7 @@ fn main() {
             delete_remote_entry,
             start_terminal_session,
             start_local_terminal_session,
+            get_terminal_session_cwd,
             write_terminal_input,
             close_terminal_session
         ])

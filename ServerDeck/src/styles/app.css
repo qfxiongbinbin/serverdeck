@@ -811,10 +811,25 @@ select {
   z-index: 3;
 }
 
-.terminal-file-navigator__header div {
+.terminal-file-navigator__header-main {
   min-width: 0;
   display: grid;
   gap: 4px;
+  flex: 1;
+}
+
+.terminal-file-navigator__header-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.terminal-file-navigator__titleline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
 }
 
 .terminal-file-navigator__header strong {
@@ -831,6 +846,9 @@ select {
 .terminal-file-navigator__actions {
   display: inline-flex;
   gap: 8px;
+  flex-wrap: nowrap;
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .terminal-mini-button {
@@ -841,6 +859,13 @@ select {
   background: rgba(255, 255, 255, 0.04);
   color: #cbd5e1;
   font-size: 12px;
+}
+
+.terminal-mini-button--icon {
+  width: 32px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
 }
 
 .terminal-file-navigator__pathbar {
@@ -981,12 +1006,21 @@ select {
   gap: 12px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--content-border);
+  flex-wrap: nowrap;
 }
 
 .local-preview-pane__header div {
   min-width: 0;
   display: grid;
   gap: 4px;
+}
+
+.local-preview-pane__header div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
 }
 
 .local-preview-pane__header strong {
@@ -1002,10 +1036,17 @@ select {
   white-space: nowrap;
 }
 
-.local-preview-pane__header-actions {
+.local-preview-pane__header .local-preview-pane__header-actions {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: nowrap;
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.local-preview-pane__header .local-preview-pane__header-actions .settings-pill {
+  white-space: nowrap;
 }
 
 .local-preview-pane__body,
