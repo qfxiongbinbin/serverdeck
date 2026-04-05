@@ -19,3 +19,4 @@ ServerDeck/.env.*
 # Editor / IDE
 .idea/
 .vscode/
+.alma-snapshots
