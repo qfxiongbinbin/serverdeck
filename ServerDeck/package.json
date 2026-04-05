@@ -1,13 +1,20 @@
 {
   "name": "serverdeck",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "node ./scripts/sync-version.mjs",
     "dev": "vite",
+    "prebuild": "node ./scripts/sync-version.mjs",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "pretauri": "node ./scripts/sync-version.mjs",
+    "tauri": "tauri",
+    "version:sync": "node ./scripts/sync-version.mjs",
+    "release:patch": "npm version patch --no-git-tag-version && npm run version:sync",
+    "release:minor": "npm version minor --no-git-tag-version && npm run version:sync",
+    "release:major": "npm version major --no-git-tag-version && npm run version:sync"
   },
   "dependencies": {
     "@tauri-apps/api": "2.0.2",
