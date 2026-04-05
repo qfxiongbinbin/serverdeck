@@ -26,6 +26,27 @@ export function formatModified(value: string) {
 }
 
 // author: BrianXiong
+// time: 2026/04/05/16:10:11
+export function formatTimestamp(value: string) {
+  if (!value) return "-";
+
+  const numeric = Number(value);
+  const date = Number.isNaN(numeric) ? new Date(value) : new Date(numeric * 1000);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+// author: BrianXiong
 // time: 2026/04/05/12:19:04
 export function getParentPath(path: string) {
   const normalized = path.trim();

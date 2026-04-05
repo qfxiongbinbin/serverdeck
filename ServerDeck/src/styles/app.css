@@ -787,10 +787,11 @@ select {
 .terminal-file-navigator {
   height: 100%;
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   background: #0b0f14;
   color: #d5e2f1;
   outline: none;
+  overflow: hidden;
 }
 
 .terminal-file-navigator:focus {
@@ -806,6 +807,8 @@ select {
   padding: 10px 12px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   background: #11161d;
+  position: relative;
+  z-index: 3;
 }
 
 .terminal-file-navigator__header div {
@@ -857,10 +860,54 @@ select {
   box-shadow: none;
 }
 
+.terminal-file-navigator__columns {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 140px 120px 160px;
+  gap: 10px;
+  align-items: center;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  background: #11161d;
+  position: relative;
+  z-index: 4;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.terminal-file-navigator__column-spacer {
+  height: 38px;
+}
+
+.terminal-file-navigator__column {
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+  position: relative;
+  z-index: 5;
+}
+
+.terminal-file-navigator__column:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.terminal-file-navigator__column--name {
+  padding-left: 12px;
+}
+
 .terminal-file-navigator__list {
   min-height: 0;
   overflow: auto;
-  padding: 8px 0;
+  padding: 8px 0 0;
+  position: relative;
+  z-index: 1;
 }
 
 .terminal-file-navigator__state {
@@ -877,7 +924,7 @@ select {
 .terminal-file-navigator__row {
   width: 100%;
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 110px 70px;
+  grid-template-columns: 18px minmax(0, 1fr) 140px 120px 160px;
   align-items: center;
   gap: 10px;
   padding: 6px 12px;
@@ -913,6 +960,8 @@ select {
 }
 
 .terminal-file-navigator__meta {
+  padding-left: 12px;
+  box-sizing: border-box;
   color: #7dd3fc;
 }
 

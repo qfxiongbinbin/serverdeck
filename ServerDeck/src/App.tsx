@@ -3118,6 +3118,12 @@ export default function App() {
               browserLoadingLabel={messages.loading}
               previewLoadingLabel={messages.previewLoading}
               emptyFilesLabel={messages.noLocalFiles}
+              nameColumnLabel={messages.fileNameColumn}
+              sizeColumnLabel={messages.fileSizeColumn}
+              kindColumnLabel={messages.fileKindColumn}
+              addedDateColumnLabel={messages.fileAddedDateColumn}
+              folderKindLabel={messages.folderKind}
+              fileKindFallbackLabel={messages.fileKindFallback}
               emptyPreviewLabel={messages.previewEmpty}
               unsupportedPreviewLabel={messages.previewUnsupported}
               truncatedPreviewLabel={messages.previewTruncated}

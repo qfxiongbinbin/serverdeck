@@ -14,6 +14,12 @@ type LocalTerminalWorkspaceProps = {
   browserLoadingLabel: string;
   previewLoadingLabel: string;
   emptyFilesLabel: string;
+  nameColumnLabel: string;
+  sizeColumnLabel: string;
+  kindColumnLabel: string;
+  addedDateColumnLabel: string;
+  folderKindLabel: string;
+  fileKindFallbackLabel: string;
   emptyPreviewLabel: string;
   unsupportedPreviewLabel: string;
   truncatedPreviewLabel: string;
@@ -51,6 +57,12 @@ export function LocalTerminalWorkspace({
   browserLoadingLabel,
   previewLoadingLabel,
   emptyFilesLabel,
+  nameColumnLabel,
+  sizeColumnLabel,
+  kindColumnLabel,
+  addedDateColumnLabel,
+  folderKindLabel,
+  fileKindFallbackLabel,
   emptyPreviewLabel,
   unsupportedPreviewLabel,
   truncatedPreviewLabel,
@@ -100,6 +112,12 @@ export function LocalTerminalWorkspace({
               upLabel={upLabel}
               loadingText={browserLoadingLabel}
               emptyText={emptyFilesLabel}
+              nameColumnLabel={nameColumnLabel}
+              sizeColumnLabel={sizeColumnLabel}
+              kindColumnLabel={kindColumnLabel}
+              addedDateColumnLabel={addedDateColumnLabel}
+              folderKindLabel={folderKindLabel}
+              fileKindFallbackLabel={fileKindFallbackLabel}
               path={localPath}
               items={localEntries}
               loading={localLoading}

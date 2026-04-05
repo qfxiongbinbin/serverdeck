@@ -121,6 +121,12 @@ type Messages = {
   failedLoadLocalPreview: string;
   formatCode: string;
   showRaw: string;
+  fileNameColumn: string;
+  fileSizeColumn: string;
+  fileKindColumn: string;
+  fileAddedDateColumn: string;
+  folderKind: string;
+  fileKindFallback: string;
   update: string;
   settings: string;
   searchPlaceholder: string;
@@ -362,6 +368,12 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     failedLoadLocalPreview: "Failed to load local preview",
     formatCode: "Format",
     showRaw: "Raw",
+    fileNameColumn: "Name",
+    fileSizeColumn: "Size",
+    fileKindColumn: "Kind",
+    fileAddedDateColumn: "Added Date",
+    folderKind: "Folder",
+    fileKindFallback: "File",
     update: "Update",
     settings: "Settings",
     searchPlaceholder: "Find a host or ssh user@hostname...",
@@ -601,6 +613,12 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     failedLoadLocalPreview: "加载本地预览失败",
     formatCode: "格式化",
     showRaw: "原文",
+    fileNameColumn: "名称",
+    fileSizeColumn: "大小",
+    fileKindColumn: "种类",
+    fileAddedDateColumn: "添加日期",
+    folderKind: "文件夹",
+    fileKindFallback: "文件",
     update: "更新",
     settings: "设置",
     searchPlaceholder: "搜索主机或输入 ssh user@hostname...",
@@ -840,6 +858,12 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     failedLoadLocalPreview: "ローカルプレビューの読み込みに失敗しました",
     formatCode: "整形",
     showRaw: "原文",
+    fileNameColumn: "名前",
+    fileSizeColumn: "サイズ",
+    fileKindColumn: "種類",
+    fileAddedDateColumn: "追加日",
+    folderKind: "フォルダ",
+    fileKindFallback: "ファイル",
     update: "更新",
     settings: "設定",
     searchPlaceholder: "ホストを検索、または ssh user@hostname... を入力",
