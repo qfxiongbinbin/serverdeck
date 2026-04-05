@@ -39,6 +39,7 @@ import {
   deleteHost,
   deleteRemoteEntry,
   downloadFromRemote,
+  getTerminalSessionCwd,
   listLocalDirectory,
   readLocalFilePreview,
   listRemoteDirectory,
@@ -1110,6 +1111,30 @@ export default function App() {
       setLocalBrowserSelectedPath(localEntries[0].path);
     }
   }, [isLocalTerminalView, localBrowserSelectedPath, localEntries, localLoading, localPreviewOpen]);
+
+  useEffect(() => {
+    if (!isLocalTerminalView || !localPreviewOpen) {
+      return;
+    }
+
+    if (!activeTerminalTab) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void getTerminalSessionCwd(activeTerminalTab.sessionId)
+      .then((cwd) => {
+        if (!cancelled && cwd.trim()) {
+          setLocalPath(cwd);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTerminalTab, isLocalTerminalView, localPreviewOpen]);
 
   useEffect(() => {
     if (!isLocalTerminalView || !localPreviewOpen) {
@@ -3112,6 +3137,7 @@ export default function App() {
               terminalBackground={activeTerminalTheme.theme.background}
               previewOpen={localPreviewOpen}
               browserTitle={messages.localFiles}
+              homeLabel={messages.homeDirectory}
               previewTitle={messages.preview}
               refreshLabel={messages.refresh}
               upLabel={messages.up}
@@ -3144,6 +3170,7 @@ export default function App() {
               onRefresh={() => setLocalRefreshTick((current) => current + 1)}
               onOpenDir={(entry) => setLocalPath((current) => joinChildPath(current, entry.name))}
               onGoUp={() => setLocalPath((current) => getParentPath(current))}
+              onGoHome={() => setLocalPath("~")}
               onSelectEntry={handleSelectLocalPreview}
               onFocusTerminal={() => terminalRef.current?.focus()}
             />

@@ -127,6 +127,7 @@ type Messages = {
   fileAddedDateColumn: string;
   folderKind: string;
   fileKindFallback: string;
+  homeDirectory: string;
   update: string;
   settings: string;
   searchPlaceholder: string;
@@ -374,6 +375,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     fileAddedDateColumn: "Added Date",
     folderKind: "Folder",
     fileKindFallback: "File",
+    homeDirectory: "Home",
     update: "Update",
     settings: "Settings",
     searchPlaceholder: "Find a host or ssh user@hostname...",
@@ -619,6 +621,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     fileAddedDateColumn: "添加日期",
     folderKind: "文件夹",
     fileKindFallback: "文件",
+    homeDirectory: "家目录",
     update: "更新",
     settings: "设置",
     searchPlaceholder: "搜索主机或输入 ssh user@hostname...",
@@ -864,6 +867,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     fileAddedDateColumn: "追加日",
     folderKind: "フォルダ",
     fileKindFallback: "ファイル",
+    homeDirectory: "ホーム",
     update: "更新",
     settings: "設定",
     searchPlaceholder: "ホストを検索、または ssh user@hostname... を入力",

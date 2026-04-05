@@ -234,6 +234,16 @@ export async function startLocalTerminalSession(cwd?: string) {
   return crypto.randomUUID();
 }
 
+// author: BrianXiong
+// time: 2026/04/05/16:20:45
+export async function getTerminalSessionCwd(sessionId: string) {
+  if (hasTauri()) {
+    return tauriInvoke<string>("get_terminal_session_cwd", { sessionId });
+  }
+
+  return "~";
+}
+
 export async function readLocalFilePreview(path: string) {
   if (hasTauri()) {
     return tauriInvoke<LocalFilePreview>("read_local_file_preview", { path });
