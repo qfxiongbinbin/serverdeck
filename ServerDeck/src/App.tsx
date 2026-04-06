@@ -3338,6 +3338,7 @@ export default function App() {
               truncatedPreviewLabel={messages.previewTruncated}
               archiveEntriesLabel={messages.archiveEntries}
               formatCodeLabel={messages.formatCode}
+              renderMarkdownLabel={messages.renderMarkdown}
               showRawLabel={messages.showRaw}
               previewSwitchLabel={messages.preview}
               localPath={localPath}
