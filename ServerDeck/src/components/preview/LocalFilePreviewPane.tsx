@@ -1,7 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ImgHTMLAttributes } from "react";
 import { FileArchive, FileCode2, FileImage, FileText } from "lucide-react";
-import type { LocalFilePreview } from "../../lib/api";
-import { detectCodePreviewMeta, formatCodeText, highlightCodeToHtml } from "../../lib/codePreview";
+import { readLocalFilePreview, type LocalFilePreview } from "../../lib/api";
+import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import remarkGfm from "remark-gfm";
+import { detectCodePreviewMeta, formatCodeText, highlightCodeToHtml, isMarkdownPreview, resolveMarkdownUrl } from "../../lib/codePreview";
 import { formatFileSize } from "../../lib/fileBrowser";
 
 type LocalFilePreviewPaneProps = {
@@ -12,12 +15,19 @@ type LocalFilePreviewPaneProps = {
   truncatedLabel: string;
   archiveEntriesLabel: string;
   formatCodeLabel: string;
+  renderMarkdownLabel: string;
   showRawLabel: string;
   loading: boolean;
   error: string;
   preview: LocalFilePreview | null;
   dark?: boolean;
 };
+
+type MarkdownImageProps = {
+  src?: string;
+  alt?: string;
+  baseFilePath?: string;
+} & ImgHTMLAttributes<HTMLImageElement>;
 
 // author: BrianXiong
 // time: 2026/04/05/12:19:04
@@ -35,6 +45,47 @@ function getPreviewIcon(kind: LocalFilePreview["kind"]) {
 }
 
 // author: BrianXiong
+// time: 2026/04/06/10:58:37
+function MarkdownImage({ src = "", alt = "", baseFilePath, ...props }: MarkdownImageProps) {
+  const [imageUrl, setImageUrl] = useState(src);
+
+  useEffect(() => {
+    const resolved = resolveMarkdownUrl(src, { baseFilePath });
+    if (!resolved.localPath) {
+      setImageUrl(resolved.url ?? src);
+      return;
+    }
+
+    let cancelled = false;
+    let objectUrl = "";
+
+    void readLocalFilePreview(resolved.localPath)
+      .then((preview) => {
+        if (!preview.bytes || cancelled) {
+          return;
+        }
+
+        objectUrl = URL.createObjectURL(
+          new Blob([new Uint8Array(preview.bytes)], { type: preview.mimeType ?? "application/octet-stream" })
+        );
+        setImageUrl(objectUrl);
+      })
+      .catch(() => {
+        setImageUrl(resolved.url ?? src);
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+  }, [baseFilePath, src]);
+
+  return <img src={imageUrl} alt={alt} {...props} />;
+}
+
+// author: BrianXiong
 // time: 2026/04/05/12:19:04
 export function LocalFilePreviewPane({
   title,
@@ -44,6 +95,7 @@ export function LocalFilePreviewPane({
   truncatedLabel,
   archiveEntriesLabel,
   formatCodeLabel,
+  renderMarkdownLabel,
   showRawLabel,
   loading,
   error,
@@ -52,15 +104,18 @@ export function LocalFilePreviewPane({
 }: LocalFilePreviewPaneProps) {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [formatted, setFormatted] = useState(false);
+  const [markdownRendered, setMarkdownRendered] = useState(false);
 
   const codePreviewMeta = preview ? detectCodePreviewMeta(preview.name) : { isCode: false, language: "plaintext" as const };
+  const markdownPreview = preview?.kind === "text" && isMarkdownPreview(preview.name, preview.mimeType);
   const rawText = preview?.text ?? "";
   const displayText = codePreviewMeta.isCode && formatted ? formatCodeText(rawText, codePreviewMeta.language) : rawText;
   const highlightedHtml = codePreviewMeta.isCode ? highlightCodeToHtml(displayText, codePreviewMeta.language) : "";
 
   useEffect(() => {
     setFormatted(false);
-  }, [preview?.path]);
+    setMarkdownRendered(markdownPreview);
+  }, [markdownPreview, preview?.path]);
 
   useEffect(() => {
     if (!preview?.bytes || preview.bytes.length === 0) {
@@ -88,6 +143,11 @@ export function LocalFilePreviewPane({
           <span>{preview?.name ?? emptyLabel}</span>
         </div>
         <div className="local-preview-pane__header-actions">
+          {markdownPreview ? (
+            <button type="button" className="terminal-mini-button" onClick={() => setMarkdownRendered((current) => !current)}>
+              {markdownRendered ? showRawLabel : renderMarkdownLabel}
+            </button>
+          ) : null}
           {preview?.kind === "text" && codePreviewMeta.isCode ? (
             <button type="button" className="terminal-mini-button" onClick={() => setFormatted((current) => !current)}>
               {formatted ? showRawLabel : formatCodeLabel}
@@ -111,7 +171,44 @@ export function LocalFilePreviewPane({
         {!loading && !error && preview?.kind === "text" ? (
           <div className="local-preview-pane__content">
             {preview.truncated ? <div className="local-preview-pane__notice">{truncatedLabel}</div> : null}
-            {codePreviewMeta.isCode ? (
+            {markdownPreview && markdownRendered ? (
+              <div className="local-preview-pane__markdown">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  rehypePlugins={[rehypeRaw]}
+                  components={{
+                    img: ({ src = "", alt = "", ...props }) => (
+                      <MarkdownImage src={src} alt={alt} baseFilePath={preview?.path} {...props} />
+                    ),
+                    a: ({ href = "", children, ...props }) => {
+                      const resolved = resolveMarkdownUrl(href, { baseFilePath: preview?.path });
+                      return (
+                        <a href={resolved.url ?? href} target="_blank" rel="noreferrer" {...props}>
+                          {children}
+                        </a>
+                      );
+                    },
+                    code: ({ className, children, ...props }) => {
+                      const match = /language-(\w+)/.exec(className || "");
+                      const source = String(children).replace(/\n$/, "");
+
+                      if (!match) {
+                        return <code {...props}>{children}</code>;
+                      }
+
+                      const html = highlightCodeToHtml(source, detectCodePreviewMeta(`file.${match[1]}`).language);
+                      return (
+                        <pre className="local-preview-pane__text local-preview-pane__text--code local-preview-pane__markdown-code">
+                          <code dangerouslySetInnerHTML={{ __html: html }} />
+                        </pre>
+                      );
+                    }
+                  }}
+                >
+                  {rawText}
+                </ReactMarkdown>
+              </div>
+            ) : codePreviewMeta.isCode ? (
               <pre className="local-preview-pane__text local-preview-pane__text--code">
                 <code dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
               </pre>

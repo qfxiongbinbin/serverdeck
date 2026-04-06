@@ -28,6 +28,7 @@ type LocalTerminalWorkspaceProps = {
   truncatedPreviewLabel: string;
   archiveEntriesLabel: string;
   formatCodeLabel: string;
+  renderMarkdownLabel: string;
   showRawLabel: string;
   previewSwitchLabel: string;
   localPath: string;
@@ -73,6 +74,7 @@ export function LocalTerminalWorkspace({
   truncatedPreviewLabel,
   archiveEntriesLabel,
   formatCodeLabel,
+  renderMarkdownLabel,
   showRawLabel,
   previewSwitchLabel,
   localPath,
@@ -259,6 +261,7 @@ export function LocalTerminalWorkspace({
               truncatedLabel={truncatedPreviewLabel}
               archiveEntriesLabel={archiveEntriesLabel}
               formatCodeLabel={formatCodeLabel}
+              renderMarkdownLabel={renderMarkdownLabel}
               showRawLabel={showRawLabel}
               loading={previewLoading}
               error={previewError}

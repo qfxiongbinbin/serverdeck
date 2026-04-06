@@ -120,6 +120,7 @@ type Messages = {
   archiveEntries: string;
   failedLoadLocalPreview: string;
   formatCode: string;
+  renderMarkdown: string;
   showRaw: string;
   fileNameColumn: string;
   fileSizeColumn: string;
@@ -379,6 +380,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     archiveEntries: "Archive Entries",
     failedLoadLocalPreview: "Failed to load local preview",
     formatCode: "Format",
+    renderMarkdown: "Markdown",
     showRaw: "Raw",
     fileNameColumn: "Name",
     fileSizeColumn: "Size",
@@ -636,6 +638,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     archiveEntries: "压缩包文件列表",
     failedLoadLocalPreview: "加载本地预览失败",
     formatCode: "格式化",
+    renderMarkdown: "Markdown",
     showRaw: "原文",
     fileNameColumn: "名称",
     fileSizeColumn: "大小",
@@ -893,6 +896,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     archiveEntries: "アーカイブ内ファイル一覧",
     failedLoadLocalPreview: "ローカルプレビューの読み込みに失敗しました",
     formatCode: "整形",
+    renderMarkdown: "Markdown",
     showRaw: "原文",
     fileNameColumn: "名前",
     fileSizeColumn: "サイズ",
