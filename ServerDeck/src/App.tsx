@@ -45,6 +45,7 @@ import {
   listLocalDirectory,
   pickLocalDirectory,
   readLocalFilePreview,
+  resizeTerminalSession,
   listRemoteDirectory,
   listHosts,
   observeServer,
@@ -227,10 +228,6 @@ function getTerminalControlSequence(event: KeyboardEvent) {
   }
 
   switch (event.key) {
-    case "ArrowUp":
-      return "\u001b[A";
-    case "Backspace":
-      return "\u007f";
     case "Delete":
       return "\u001b[3~";
     default:
@@ -1284,6 +1281,7 @@ export default function App() {
     terminal.loadAddon(fitAddon);
     terminal.open(terminalEl.current);
     fitAddon.fit();
+    void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
     terminal.focus();
     terminal.attachCustomKeyEventHandler((event) => {
       const sequence = getTerminalControlSequence(event);
@@ -1307,7 +1305,10 @@ export default function App() {
       sendActiveTerminalInput(data);
     });
 
-    const onResize = () => fitAddon.fit();
+    const onResize = () => {
+      fitAddon.fit();
+      void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
+    };
     window.addEventListener("resize", onResize);
 
     return () => {
