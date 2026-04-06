@@ -11,6 +11,7 @@ import "@xterm/xterm/css/xterm.css";
 import {
   Activity,
   ArrowLeft,
+  Bot,
   ChevronRight,
   Copy,
   Download,
@@ -41,6 +42,7 @@ import {
   deleteHost,
   deleteRemoteEntry,
   downloadFromRemote,
+  fetchAiProviderModels,
   getTerminalSessionCwd,
   listLocalDirectory,
   pickLocalDirectory,
@@ -57,6 +59,8 @@ import {
   testConnection,
   uploadToRemote,
   writeTerminalInput,
+  type AiProviderConfig,
+  type AiProviderFetchRequest,
   type FileEntry,
   type ManagedProject,
   type AppPreferences,
@@ -67,6 +71,7 @@ import {
   type TerminalEventPayload
 } from "./lib/api";
 import { FileBrowserPane } from "./components/files/FileBrowserPane";
+import { AiProviderEditorModal } from "./components/ai/AiProviderEditorModal";
 import { ProjectEditorModal } from "./components/projects/ProjectEditorModal";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
 import {
@@ -91,6 +96,7 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   appTheme: "dark",
   language: "en",
   projects: [],
+  aiProviders: [],
   localTerminalDefaultPath: "",
   sshConnectTimeoutSeconds: 5,
   sshServerAliveIntervalSeconds: 30,
@@ -166,6 +172,7 @@ type AppSettings = {
   appTheme: "light" | "dark";
   language: AppLanguage;
   projects: ManagedProject[];
+  aiProviders: AiProviderConfig[];
   localTerminalDefaultPath: string;
   sshConnectTimeoutSeconds: number;
   sshServerAliveIntervalSeconds: number;
@@ -176,9 +183,23 @@ type AppSettings = {
 
 type UpdateStage = "idle" | "downloading" | "ready";
 type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
-type SettingsSectionId = "general" | "projects" | "connection" | "terminal" | "about" | "danger";
+type SettingsSectionId = "general" | "projects" | "connection" | "terminal" | "ai" | "about" | "danger";
 type ProjectEditorMode = "new" | "edit";
 type LocalTerminalSource = "default" | "project" | "directory";
+type AiProviderEditorMode = "new" | "edit";
+
+const blankAiProvider: AiProviderConfig = {
+  id: "",
+  name: "",
+  providerType: "custom-openai",
+  baseUrl: "",
+  apiKey: "",
+  model: "",
+  availableModels: [],
+  enabledModels: [],
+  enabled: true,
+  isDefault: false
+};
 
 const terminalFontSizeOptions = [
   { label: "S", value: 12 },
@@ -260,6 +281,35 @@ function normalizeAppSettings(parsed: Partial<AppSettings>): AppSettings {
             }))
             .filter((project) => project.name.trim())
         : DEFAULT_APP_SETTINGS.projects,
+    aiProviders:
+      Array.isArray(parsed.aiProviders)
+        ? parsed.aiProviders
+            .map((provider) => ({
+              id: typeof provider?.id === "string" && provider.id.trim() ? provider.id : crypto.randomUUID(),
+              name: typeof provider?.name === "string" ? provider.name : "",
+              providerType:
+                provider?.providerType === "openai" ||
+                provider?.providerType === "anthropic" ||
+                provider?.providerType === "gemini" ||
+                provider?.providerType === "openrouter" ||
+                provider?.providerType === "azure-openai" ||
+                provider?.providerType === "custom-openai"
+                  ? provider.providerType
+                  : "custom-openai",
+              baseUrl: typeof provider?.baseUrl === "string" ? provider.baseUrl : "",
+              apiKey: typeof provider?.apiKey === "string" ? provider.apiKey : "",
+              model: typeof provider?.model === "string" ? provider.model : "",
+              availableModels: Array.isArray(provider?.availableModels)
+                ? provider.availableModels.filter((item): item is string => typeof item === "string")
+                : [],
+              enabledModels: Array.isArray(provider?.enabledModels)
+                ? provider.enabledModels.filter((item): item is string => typeof item === "string")
+                : [],
+              enabled: typeof provider?.enabled === "boolean" ? provider.enabled : true,
+              isDefault: typeof provider?.isDefault === "boolean" ? provider.isDefault : false
+            }))
+            .filter((provider) => provider.name.trim())
+        : DEFAULT_APP_SETTINGS.aiProviders,
     localTerminalDefaultPath:
       typeof parsed.localTerminalDefaultPath === "string"
         ? parsed.localTerminalDefaultPath
@@ -672,6 +722,11 @@ export default function App() {
   const [projectEditorOpen, setProjectEditorOpen] = useState(false);
   const [projectEditorMode, setProjectEditorMode] = useState<ProjectEditorMode>("new");
   const [projectDraft, setProjectDraft] = useState<ManagedProject>(blankProject);
+  const [aiProviderEditorOpen, setAiProviderEditorOpen] = useState(false);
+  const [aiProviderEditorMode, setAiProviderEditorMode] = useState<AiProviderEditorMode>("new");
+  const [aiProviderDraft, setAiProviderDraft] = useState<AiProviderConfig>(blankAiProvider);
+  const [aiProviderModelsLoading, setAiProviderModelsLoading] = useState(false);
+  const [aiProviderModelsError, setAiProviderModelsError] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [localTerminalMenuOpen, setLocalTerminalMenuOpen] = useState(false);
   const [localTerminalProjectSearch, setLocalTerminalProjectSearch] = useState("");
@@ -781,6 +836,18 @@ export default function App() {
     [messages.dark, messages.light]
   );
 
+  const aiProviderTypeLabels = useMemo(
+    () => ({
+      openai: "OpenAI",
+      anthropic: messages.anthropic,
+      gemini: messages.gemini,
+      openrouter: messages.openrouter,
+      "azure-openai": messages.azureOpenai,
+      "custom-openai": messages.openaiCompatible
+    }),
+    [messages.anthropic, messages.azureOpenai, messages.gemini, messages.openaiCompatible, messages.openrouter]
+  );
+
   const getDisplayHostTitle = useCallback(
     (host: SavedHost) => getHostTitle(host, messages.untitledHost),
     [messages.untitledHost]
@@ -838,10 +905,11 @@ export default function App() {
       { id: "projects" as const, label: messages.projects, icon: FolderOpen },
       { id: "connection" as const, label: messages.connection, icon: PlugZap },
       { id: "terminal" as const, label: messages.terminal, icon: TerminalSquare },
+      { id: "ai" as const, label: messages.ai, icon: Bot },
       { id: "about" as const, label: messages.about, icon: Info },
       { id: "danger" as const, label: messages.dangerZone, icon: ShieldAlert }
     ],
-    [messages.about, messages.connection, messages.dangerZone, messages.general, messages.projects, messages.terminal]
+    [messages.about, messages.ai, messages.connection, messages.dangerZone, messages.general, messages.projects, messages.terminal]
   );
 
   const filteredHosts = useMemo(() => {
@@ -1627,6 +1695,116 @@ export default function App() {
     setProjectEditorOpen(false);
     setProjectDraft(blankProject);
     setProjectEditorMode("new");
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/06/12:08:30
+  function openNewAiProviderEditor() {
+    setAiProviderEditorMode("new");
+    setAiProviderDraft(blankAiProvider);
+    setAiProviderModelsError("");
+    setAiProviderEditorOpen(true);
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/06/12:08:30
+  function openEditAiProviderEditor(provider: AiProviderConfig) {
+    setAiProviderEditorMode("edit");
+    setAiProviderDraft(provider);
+    setAiProviderModelsError("");
+    setAiProviderEditorOpen(true);
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/06/12:08:30
+  function closeAiProviderEditor() {
+    setAiProviderEditorOpen(false);
+    setAiProviderDraft(blankAiProvider);
+    setAiProviderModelsError("");
+    setAiProviderModelsLoading(false);
+    setAiProviderEditorMode("new");
+  }
+
+  async function handleFetchAiProviderModels() {
+    setAiProviderModelsLoading(true);
+    setAiProviderModelsError("");
+
+    try {
+      const request: AiProviderFetchRequest = {
+        providerType: aiProviderDraft.providerType,
+        baseUrl: aiProviderDraft.baseUrl,
+        apiKey: aiProviderDraft.apiKey
+      };
+      const models = await fetchAiProviderModels(request);
+      setAiProviderDraft((current) => ({
+        ...current,
+        availableModels: models,
+        enabledModels: current.enabledModels.length ? current.enabledModels.filter((model) => models.includes(model)) : models,
+        model: current.model && models.includes(current.model) ? current.model : models[0] ?? current.model
+      }));
+    } catch (error) {
+      setAiProviderModelsError(getErrorMessage(error, messages.fetchModelsFailed));
+    } finally {
+      setAiProviderModelsLoading(false);
+    }
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/06/12:08:30
+  function handleSaveAiProvider() {
+    const name = aiProviderDraft.name.trim();
+    if (!name) {
+      return;
+    }
+
+    const nextProvider: AiProviderConfig = {
+      ...aiProviderDraft,
+      id: aiProviderDraft.id || crypto.randomUUID(),
+      name,
+      baseUrl: aiProviderDraft.baseUrl.trim(),
+      apiKey: aiProviderDraft.apiKey.trim(),
+      model: aiProviderDraft.model.trim()
+    };
+
+    setSettings((current) => {
+      const nextProviders = aiProviderEditorMode === "edit"
+        ? current.aiProviders.map((provider) => (provider.id === nextProvider.id ? nextProvider : provider))
+        : [nextProvider, ...current.aiProviders];
+
+      return {
+        ...current,
+        aiProviders: nextProvider.isDefault
+          ? nextProviders.map((provider) => ({ ...provider, isDefault: provider.id === nextProvider.id }))
+          : nextProviders
+      };
+    });
+
+    closeAiProviderEditor();
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/06/12:08:30
+  function handleDeleteAiProvider(providerId: string) {
+    setSettings((current) => ({
+      ...current,
+      aiProviders: current.aiProviders.filter((provider) => provider.id !== providerId)
+    }));
+
+    if (aiProviderDraft.id === providerId) {
+      closeAiProviderEditor();
+    }
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/06/12:08:30
+  function handleSetDefaultAiProvider(providerId: string) {
+    setSettings((current) => ({
+      ...current,
+      aiProviders: current.aiProviders.map((provider) => ({
+        ...provider,
+        isDefault: provider.id === providerId
+      }))
+    }));
   }
 
   function handleSaveProject() {
@@ -3184,6 +3362,68 @@ export default function App() {
                     </section>
                   ) : null}
 
+                  {activeSettingsSection === "ai" ? (
+                    <section className="settings-panel">
+                      <div className="settings-panel__header">
+                        <Bot size={18} />
+                        <div>
+                          <h3>{messages.ai}</h3>
+                          <span>{messages.aiDescription}</span>
+                        </div>
+                      </div>
+
+                      <div className="settings-panel__toolbar">
+                        <span className="settings-panel__toolbar-label">{messages.aiProviders}</span>
+                        <button type="button" className="secondary-button" onClick={openNewAiProviderEditor}>
+                          <Plus size={14} />
+                          {messages.addAiProvider}
+                        </button>
+                      </div>
+
+                      <div className="settings-card settings-card--projects">
+                        {settings.aiProviders.length ? (
+                          settings.aiProviders.map((provider) => (
+                            <div key={provider.id} className="project-row">
+                              <div className="project-row__icon">
+                                <Bot size={18} />
+                              </div>
+
+                              <div className="project-row__body">
+                                <div className="project-row__titleline">
+                                  <strong>{provider.name}</strong>
+                                  <span>{aiProviderTypeLabels[provider.providerType]}</span>
+                                  {provider.isDefault ? <span>{messages.aiProviderDefault}</span> : null}
+                                </div>
+                                <div className="project-row__path">{provider.model || provider.baseUrl || provider.providerType}</div>
+                              </div>
+
+                              <div className="project-row__actions">
+                                {!provider.isDefault ? (
+                                  <button type="button" className="row-button" onClick={() => handleSetDefaultAiProvider(provider.id)}>
+                                    {messages.setAsDefaultProvider}
+                                  </button>
+                                ) : null}
+                                <button type="button" className="row-button" onClick={() => openEditAiProviderEditor(provider)}>
+                                  <Pencil size={14} />
+                                  {messages.edit}
+                                </button>
+                                <button type="button" className="danger-button" onClick={() => handleDeleteAiProvider(provider.id)}>
+                                  <Trash2 size={14} />
+                                  {messages.delete}
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="project-empty-state">
+                            <strong>{messages.noAiProviders}</strong>
+                            <span>{messages.noAiProvidersDescription}</span>
+                          </div>
+                        )}
+                      </div>
+                    </section>
+                  ) : null}
+
                   {activeSettingsSection === "about" ? (
                     <section className="settings-panel">
                       <div className="settings-panel__header">
@@ -3694,6 +3934,45 @@ export default function App() {
         onSave={handleSaveProject}
         onPickPath={() => void handlePickProjectPath()}
         onDraftChange={setProjectDraft}
+      />
+
+      <AiProviderEditorModal
+        open={aiProviderEditorOpen}
+        mode={aiProviderEditorMode}
+        draft={aiProviderDraft}
+        aiLabel={messages.ai}
+        aiDescription={messages.aiDescription}
+        newAiProviderLabel={messages.newAiProvider}
+        editAiProviderLabel={messages.editAiProvider}
+        aiProviderNameLabel={messages.aiProviderName}
+        aiProviderNameDescription={messages.aiProviderNameDescription}
+        aiProviderTypeLabel={messages.aiProviderType}
+        aiProviderTypeDescription={messages.aiProviderTypeDescription}
+        aiProviderBaseUrlLabel={messages.aiProviderBaseUrl}
+        aiProviderBaseUrlDescription={messages.aiProviderBaseUrlDescription}
+        aiProviderApiKeyLabel={messages.aiProviderApiKey}
+        aiProviderApiKeyDescription={messages.aiProviderApiKeyDescription}
+        aiProviderModelLabel={messages.aiProviderModel}
+        aiProviderModelDescription={messages.aiProviderModelDescription}
+        fetchModelsLabel={messages.fetchModels}
+        enabledModelsLabel={messages.enabledModels}
+        enabledModelsDescription={messages.enabledModelsDescription}
+        noModelsFetchedLabel={messages.noModelsFetched}
+        fetchModelsError={aiProviderModelsError}
+        fetchModelsLoading={aiProviderModelsLoading}
+        aiProviderEnabledLabel={messages.aiProviderEnabled}
+        aiProviderEnabledDescription={messages.aiProviderEnabledDescription}
+        openaiCompatibleLabel={messages.openaiCompatible}
+        anthropicLabel={messages.anthropic}
+        geminiLabel={messages.gemini}
+        openrouterLabel={messages.openrouter}
+        azureOpenaiLabel={messages.azureOpenai}
+        cancelLabel={messages.cancel}
+        saveLabel={messages.save}
+        onClose={closeAiProviderEditor}
+        onSave={handleSaveAiProvider}
+        onFetchModels={() => void handleFetchAiProviderModels()}
+        onDraftChange={setAiProviderDraft}
       />
     </div>
   );
