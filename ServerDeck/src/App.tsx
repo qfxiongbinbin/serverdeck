@@ -183,7 +183,7 @@ type AppSettings = {
 
 type UpdateStage = "idle" | "downloading" | "ready";
 type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
-type SettingsSectionId = "general" | "projects" | "connection" | "terminal" | "ai" | "about" | "danger";
+type SettingsSectionId = "general" | "projects" | "terminal" | "ai" | "about" | "danger";
 type ProjectEditorMode = "new" | "edit";
 type LocalTerminalSource = "default" | "project" | "directory";
 type AiProviderEditorMode = "new" | "edit";
@@ -903,13 +903,12 @@ export default function App() {
     () => [
       { id: "general" as const, label: messages.general, icon: Wrench },
       { id: "projects" as const, label: messages.projects, icon: FolderOpen },
-      { id: "connection" as const, label: messages.connection, icon: PlugZap },
       { id: "terminal" as const, label: messages.terminal, icon: TerminalSquare },
       { id: "ai" as const, label: messages.ai, icon: Bot },
       { id: "about" as const, label: messages.about, icon: Info },
       { id: "danger" as const, label: messages.dangerZone, icon: ShieldAlert }
     ],
-    [messages.about, messages.ai, messages.connection, messages.dangerZone, messages.general, messages.projects, messages.terminal]
+    [messages.about, messages.ai, messages.dangerZone, messages.general, messages.projects, messages.terminal]
   );
 
   const filteredHosts = useMemo(() => {
@@ -3210,16 +3209,17 @@ export default function App() {
                     </section>
                   ) : null}
 
-                  {activeSettingsSection === "connection" ? (
+                  {activeSettingsSection === "terminal" ? (
                     <section className="settings-panel">
                       <div className="settings-panel__header">
-                        <PlugZap size={18} />
+                        <SwatchBook size={18} />
                         <div>
-                          <h3>{messages.connection}</h3>
-                          <span>{messages.sshDefaultsDescription}</span>
+                          <h3>{messages.terminal}</h3>
+                          <span>{messages.terminalDescription}</span>
                         </div>
                       </div>
 
+                      <div className="settings-panel__subheading">{messages.connection}</div>
                       <div className="settings-card">
                         <div className="settings-item settings-item--panel">
                           <div>
@@ -3255,18 +3255,6 @@ export default function App() {
                               </option>
                             ))}
                           </select>
-                        </div>
-                      </div>
-                    </section>
-                  ) : null}
-
-                  {activeSettingsSection === "terminal" ? (
-                    <section className="settings-panel">
-                      <div className="settings-panel__header">
-                        <SwatchBook size={18} />
-                        <div>
-                          <h3>{messages.terminal}</h3>
-                          <span>{messages.terminalDescription}</span>
                         </div>
                       </div>
 
