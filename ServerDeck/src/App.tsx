@@ -48,14 +48,18 @@ import {
   resizeTerminalSession,
   listRemoteDirectory,
   listHosts,
+  loadAppPreferences,
   observeServer,
   saveHost,
+  saveAppPreferences,
   startLocalTerminalSession,
   startTerminalSession,
   testConnection,
   uploadToRemote,
   writeTerminalInput,
   type FileEntry,
+  type ManagedProject,
+  type AppPreferences,
   type LocalFilePreview,
   type SavedHost,
   type ServerObservation,
@@ -156,14 +160,6 @@ type TransferJob = {
   detail: string;
 };
 
-type ManagedProject = {
-  id: string;
-  name: string;
-  namespace: string;
-  path: string;
-  projectType: "local" | "server" | "hybrid";
-};
-
 type TerminalCharset = "utf-8" | "gb18030" | "gbk" | "big5";
 
 type AppSettings = {
@@ -242,6 +238,53 @@ const blankProject: ManagedProject = {
   path: "",
   projectType: "local"
 };
+
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+function normalizeAppSettings(parsed: Partial<AppSettings>): AppSettings {
+  return {
+    appTheme: parsed.appTheme === "light" ? "light" : DEFAULT_APP_SETTINGS.appTheme,
+    language: languageOptions.find((item) => item.value === parsed.language)?.value ?? DEFAULT_APP_SETTINGS.language,
+    projects:
+      Array.isArray(parsed.projects)
+        ? parsed.projects
+            .map((project) => ({
+              id: typeof project?.id === "string" && project.id.trim() ? project.id : crypto.randomUUID(),
+              name: typeof project?.name === "string" ? project.name : "",
+              namespace: typeof project?.namespace === "string" ? project.namespace : "",
+              path: typeof project?.path === "string" ? project.path : "",
+              projectType:
+                project?.projectType === "server" || project?.projectType === "hybrid" || project?.projectType === "local"
+                  ? project.projectType
+                  : "local"
+            }))
+            .filter((project) => project.name.trim())
+        : DEFAULT_APP_SETTINGS.projects,
+    localTerminalDefaultPath:
+      typeof parsed.localTerminalDefaultPath === "string"
+        ? parsed.localTerminalDefaultPath
+        : DEFAULT_APP_SETTINGS.localTerminalDefaultPath,
+    sshConnectTimeoutSeconds:
+      typeof parsed.sshConnectTimeoutSeconds === "number" &&
+      sshConnectTimeoutOptions.includes(parsed.sshConnectTimeoutSeconds as (typeof sshConnectTimeoutOptions)[number])
+        ? parsed.sshConnectTimeoutSeconds
+        : DEFAULT_APP_SETTINGS.sshConnectTimeoutSeconds,
+    sshServerAliveIntervalSeconds:
+      typeof parsed.sshServerAliveIntervalSeconds === "number" &&
+      sshServerAliveIntervalOptions.includes(parsed.sshServerAliveIntervalSeconds as (typeof sshServerAliveIntervalOptions)[number])
+        ? parsed.sshServerAliveIntervalSeconds
+        : DEFAULT_APP_SETTINGS.sshServerAliveIntervalSeconds,
+    terminalThemeId:
+      terminalThemePresets.find((item) => item.id === parsed.terminalThemeId)?.id ?? defaultTerminalThemeId,
+    terminalFontSize:
+      typeof parsed.terminalFontSize === "number" && parsed.terminalFontSize >= 10 && parsed.terminalFontSize <= 24
+        ? parsed.terminalFontSize
+        : DEFAULT_APP_SETTINGS.terminalFontSize,
+    terminalCharset: isTerminalCharset(parsed.terminalCharset)
+      ? parsed.terminalCharset
+      : DEFAULT_APP_SETTINGS.terminalCharset
+  };
+}
 
 function getHostTitle(host: SavedHost, fallback = "Untitled Host") {
   return host.label.trim() || host.address.trim() || fallback;
@@ -652,6 +695,7 @@ export default function App() {
   const [localPreview, setLocalPreview] = useState<LocalFilePreview | null>(null);
   const [localPreviewLoading, setLocalPreviewLoading] = useState(false);
   const [localPreviewError, setLocalPreviewError] = useState("");
+  const [preferencesHydrated, setPreferencesHydrated] = useState(false);
 
   const terminalEl = useRef<HTMLDivElement | null>(null);
   const localTerminalMenuRef = useRef<HTMLDivElement | null>(null);
@@ -960,83 +1004,100 @@ export default function App() {
   }, [availableUpdate]);
 
   useEffect(() => {
+    if (hasTauriRuntime()) {
+      let cancelled = false;
+
+      void loadAppPreferences()
+        .then((payload: AppPreferences) => {
+          if (cancelled) {
+            return;
+          }
+
+          const hasStoredData = payload.settings.projects.length > 0 || payload.recentProjectIds.length > 0;
+          const legacySettings = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
+          const legacyRecentProjects = window.localStorage.getItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY);
+
+          if (!hasStoredData && legacySettings) {
+            try {
+              const parsedSettings = JSON.parse(legacySettings) as Partial<AppSettings>;
+              const nextSettings = normalizeAppSettings(parsedSettings);
+              const parsedRecentProjects = legacyRecentProjects ? (JSON.parse(legacyRecentProjects) as string[]) : [];
+              const nextRecentProjects = Array.isArray(parsedRecentProjects)
+                ? parsedRecentProjects.filter((item) => typeof item === "string")
+                : [];
+
+              setSettings(nextSettings);
+              setRecentLocalProjectIds(nextRecentProjects);
+              void saveAppPreferences({ settings: nextSettings as AppPreferences["settings"], recentProjectIds: nextRecentProjects });
+              window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
+              window.localStorage.removeItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY);
+            } catch {
+              window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
+              window.localStorage.removeItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY);
+              setSettings(normalizeAppSettings(payload.settings as Partial<AppSettings>));
+              setRecentLocalProjectIds(payload.recentProjectIds);
+            }
+          } else {
+            setSettings(normalizeAppSettings(payload.settings as Partial<AppSettings>));
+            setRecentLocalProjectIds(payload.recentProjectIds);
+          }
+
+          setPreferencesHydrated(true);
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setPreferencesHydrated(true);
+          }
+        });
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const savedSettings = window.localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!savedSettings) {
-      return;
+    if (savedSettings) {
+      try {
+        const parsed = JSON.parse(savedSettings) as Partial<AppSettings>;
+        setSettings(normalizeAppSettings(parsed));
+      } catch {
+        window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
+      }
     }
 
-    try {
-      const parsed = JSON.parse(savedSettings) as Partial<AppSettings>;
-      setSettings({
-          appTheme: parsed.appTheme === "light" ? "light" : DEFAULT_APP_SETTINGS.appTheme,
-          language: languageOptions.find((item) => item.value === parsed.language)?.value ?? DEFAULT_APP_SETTINGS.language,
-          projects:
-            Array.isArray(parsed.projects)
-              ? parsed.projects
-                  .map((project) => ({
-                    id: typeof project?.id === "string" && project.id.trim() ? project.id : crypto.randomUUID(),
-                    name: typeof project?.name === "string" ? project.name : "",
-                    namespace: typeof project?.namespace === "string" ? project.namespace : "",
-                    path: typeof project?.path === "string" ? project.path : "",
-                    projectType:
-                      project?.projectType === "server" || project?.projectType === "hybrid" || project?.projectType === "local"
-                        ? project.projectType
-                        : "local"
-                  }))
-                  .filter((project) => project.name.trim())
-              : DEFAULT_APP_SETTINGS.projects,
-          localTerminalDefaultPath:
-            typeof parsed.localTerminalDefaultPath === "string"
-              ? parsed.localTerminalDefaultPath
-              : DEFAULT_APP_SETTINGS.localTerminalDefaultPath,
-          sshConnectTimeoutSeconds:
-            typeof parsed.sshConnectTimeoutSeconds === "number" &&
-            sshConnectTimeoutOptions.includes(parsed.sshConnectTimeoutSeconds as (typeof sshConnectTimeoutOptions)[number])
-              ? parsed.sshConnectTimeoutSeconds
-              : DEFAULT_APP_SETTINGS.sshConnectTimeoutSeconds,
-          sshServerAliveIntervalSeconds:
-            typeof parsed.sshServerAliveIntervalSeconds === "number" &&
-            sshServerAliveIntervalOptions.includes(
-              parsed.sshServerAliveIntervalSeconds as (typeof sshServerAliveIntervalOptions)[number]
-            )
-              ? parsed.sshServerAliveIntervalSeconds
-              : DEFAULT_APP_SETTINGS.sshServerAliveIntervalSeconds,
-          terminalThemeId:
-            terminalThemePresets.find((item) => item.id === parsed.terminalThemeId)?.id ?? defaultTerminalThemeId,
-          terminalFontSize:
-            typeof parsed.terminalFontSize === "number" && parsed.terminalFontSize >= 10 && parsed.terminalFontSize <= 24
-            ? parsed.terminalFontSize
-            : DEFAULT_APP_SETTINGS.terminalFontSize,
-          terminalCharset: isTerminalCharset(parsed.terminalCharset)
-            ? parsed.terminalCharset
-            : DEFAULT_APP_SETTINGS.terminalCharset
-      });
-    } catch {
-      window.localStorage.removeItem(SETTINGS_STORAGE_KEY);
-    }
-  }, []);
-
-  useEffect(() => {
     const savedRecentProjects = window.localStorage.getItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY);
-    if (!savedRecentProjects) {
-      return;
+    if (savedRecentProjects) {
+      try {
+        const parsed = JSON.parse(savedRecentProjects) as string[];
+        setRecentLocalProjectIds(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
+      } catch {
+        window.localStorage.removeItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY);
+      }
     }
 
-    try {
-      const parsed = JSON.parse(savedRecentProjects) as string[];
-      setRecentLocalProjectIds(Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string") : []);
-    } catch {
-      window.localStorage.removeItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY);
-    }
+    setPreferencesHydrated(true);
   }, []);
 
   useEffect(() => {
+    if (!preferencesHydrated) {
+      return;
+    }
+
+    if (hasTauriRuntime()) {
+      void saveAppPreferences({ settings: settings as AppPreferences["settings"], recentProjectIds: recentLocalProjectIds });
+      return;
+    }
+
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-  }, [settings]);
+  }, [preferencesHydrated, recentLocalProjectIds, settings]);
 
   useEffect(() => {
+    if (!preferencesHydrated || hasTauriRuntime()) {
+      return;
+    }
+
     window.localStorage.setItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY, JSON.stringify(recentLocalProjectIds));
-  }, [recentLocalProjectIds]);
+  }, [preferencesHydrated, recentLocalProjectIds]);
 
   useEffect(() => {
     if (!localTerminalMenuOpen) {

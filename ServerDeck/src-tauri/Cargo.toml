@@ -15,6 +15,7 @@ uuid = { version = "1", features = ["v4"] }
 portable-pty = "0.8"
 tauri-plugin-updater = "2.10.0"
 tauri-plugin-process = "2.3.1"
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [features]
 default = ["custom-protocol"]
