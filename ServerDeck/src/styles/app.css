@@ -2559,6 +2559,10 @@ select {
   gap: 6px;
 }
 
+.project-toggle-field {
+  align-items: start;
+}
+
 .project-form label span {
   font-size: 13px;
   font-weight: 600;
@@ -2598,6 +2602,56 @@ select {
   height: 42px;
   padding: 0 12px;
   white-space: nowrap;
+}
+
+.preview-switch--inline {
+  align-self: start;
+  margin-top: 4px;
+}
+
+.ai-model-list {
+  display: grid;
+  gap: 8px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--settings-control-border);
+  border-radius: 14px;
+  background: var(--settings-control-bg);
+}
+
+.ai-model-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--settings-control-border);
+}
+
+.ai-model-list__item:last-child {
+  border-bottom: 0;
+}
+
+.ai-model-list__item-body {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.ai-model-list__item-body strong {
+  font-size: 12px;
+  color: var(--settings-control-text);
+}
+
+.ai-model-list__item-body span {
+  font-size: 11px;
+  color: var(--settings-muted);
+}
+
+.update-modal--project {
+  max-height: min(88vh, 860px);
+  overflow: auto;
 }
 
 .project-form__actions {

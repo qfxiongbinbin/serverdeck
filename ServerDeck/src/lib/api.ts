@@ -53,11 +53,25 @@ export type ManagedProject = {
   projectType: "local" | "server" | "hybrid";
 };
 
+export type AiProviderConfig = {
+  id: string;
+  name: string;
+  providerType: "openai" | "anthropic" | "gemini" | "openrouter" | "azure-openai" | "custom-openai";
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  availableModels: string[];
+  enabledModels: string[];
+  enabled: boolean;
+  isDefault: boolean;
+};
+
 export type AppPreferences = {
   settings: {
     appTheme: "light" | "dark";
     language: string;
     projects: ManagedProject[];
+    aiProviders: AiProviderConfig[];
     localTerminalDefaultPath: string;
     sshConnectTimeoutSeconds: number;
     sshServerAliveIntervalSeconds: number;
@@ -67,6 +81,8 @@ export type AppPreferences = {
   };
   recentProjectIds: string[];
 };
+
+export type AiProviderFetchRequest = Pick<AiProviderConfig, "providerType" | "baseUrl" | "apiKey">;
 
 export type ServerObservation = {
   hostname: string;
@@ -257,6 +273,14 @@ export async function saveAppPreferences(payload: AppPreferences) {
   }
 
   return true;
+}
+
+export async function fetchAiProviderModels(request: AiProviderFetchRequest) {
+  if (hasTauri()) {
+    return tauriInvoke<string[]>("fetch_ai_provider_models", { request });
+  }
+
+  return [];
 }
 
 export async function startTerminalSession(host: SavedHost, sshOptions: SshConnectionOptions) {

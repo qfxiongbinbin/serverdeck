@@ -40,6 +40,29 @@ struct ManagedProjectRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct AiProviderRecord {
+    id: String,
+    name: String,
+    provider_type: String,
+    base_url: String,
+    api_key: String,
+    model: String,
+    available_models: Vec<String>,
+    enabled_models: Vec<String>,
+    enabled: bool,
+    is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AiProviderFetchRequest {
+    provider_type: String,
+    base_url: String,
+    api_key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AppPreferencesPayload {
     settings: AppSettingsRecord,
     recent_project_ids: Vec<String>,
@@ -51,6 +74,7 @@ struct AppSettingsRecord {
     app_theme: String,
     language: String,
     projects: Vec<ManagedProjectRecord>,
+    ai_providers: Vec<AiProviderRecord>,
     local_terminal_default_path: String,
     ssh_connect_timeout_seconds: u16,
     ssh_server_alive_interval_seconds: u16,
@@ -162,6 +186,7 @@ fn default_app_settings_record() -> AppSettingsRecord {
         app_theme: "dark".to_string(),
         language: "en".to_string(),
         projects: Vec::new(),
+        ai_providers: Vec::new(),
         local_terminal_default_path: String::new(),
         ssh_connect_timeout_seconds: 5,
         ssh_server_alive_interval_seconds: 30,
@@ -206,6 +231,19 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           project_type TEXT NOT NULL DEFAULT 'local'
         );
 
+        CREATE TABLE IF NOT EXISTS ai_providers (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          provider_type TEXT NOT NULL,
+          base_url TEXT NOT NULL DEFAULT '',
+          api_key TEXT NOT NULL DEFAULT '',
+          model TEXT NOT NULL DEFAULT '',
+          available_models_json TEXT NOT NULL DEFAULT '[]',
+          enabled_models_json TEXT NOT NULL DEFAULT '[]',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          is_default INTEGER NOT NULL DEFAULT 0
+        );
+
         CREATE TABLE IF NOT EXISTS app_settings (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
@@ -217,7 +255,18 @@ fn init_db(conn: &Connection) -> Result<(), String> {
         );
         "#,
     )
-    .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())?;
+
+    let _ = conn.execute(
+        "ALTER TABLE ai_providers ADD COLUMN available_models_json TEXT NOT NULL DEFAULT '[]'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE ai_providers ADD COLUMN enabled_models_json TEXT NOT NULL DEFAULT '[]'",
+        [],
+    );
+
+    Ok(())
 }
 
 // author: BrianXiong
@@ -255,6 +304,7 @@ fn load_app_preferences() -> Result<AppPreferencesPayload, String> {
     let mut settings = default_app_settings_record();
 
     settings.projects = load_projects_from_db(&conn)?;
+    settings.ai_providers = load_ai_providers_from_db(&conn)?;
     settings.app_theme = get_setting(&conn, "appTheme")?.unwrap_or(settings.app_theme);
     settings.language = get_setting(&conn, "language")?.unwrap_or(settings.language);
     settings.local_terminal_default_path = get_setting(&conn, "localTerminalDefaultPath")?.unwrap_or(settings.local_terminal_default_path);
@@ -288,6 +338,26 @@ fn save_app_preferences(payload: AppPreferencesPayload) -> Result<bool, String> 
         tx.execute(
             "INSERT INTO projects (id, name, namespace, path, project_type) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![project.id, project.name, project.namespace, project.path, project.project_type],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    tx.execute("DELETE FROM ai_providers", []).map_err(|error| error.to_string())?;
+    for provider in &payload.settings.ai_providers {
+        tx.execute(
+            "INSERT INTO ai_providers (id, name, provider_type, base_url, api_key, model, available_models_json, enabled_models_json, enabled, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                provider.id,
+                provider.name,
+                provider.provider_type,
+                provider.base_url,
+                provider.api_key,
+                provider.model,
+                serde_json::to_string(&provider.available_models).unwrap_or_else(|_| "[]".to_string()),
+                serde_json::to_string(&provider.enabled_models).unwrap_or_else(|_| "[]".to_string()),
+                provider.enabled,
+                provider.is_default,
+            ],
         )
         .map_err(|error| error.to_string())?;
     }
@@ -416,6 +486,33 @@ fn load_projects_from_db(conn: &Connection) -> Result<Vec<ManagedProjectRecord>,
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
+fn load_ai_providers_from_db(conn: &Connection) -> Result<Vec<AiProviderRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, provider_type, base_url, api_key, model, available_models_json, enabled_models_json, enabled, is_default FROM ai_providers ORDER BY is_default DESC, name",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            let available_models_json: String = row.get(6)?;
+            let enabled_models_json: String = row.get(7)?;
+            Ok(AiProviderRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                provider_type: row.get(2)?,
+                base_url: row.get(3)?,
+                api_key: row.get(4)?,
+                model: row.get(5)?,
+                available_models: serde_json::from_str(&available_models_json).unwrap_or_default(),
+                enabled_models: serde_json::from_str(&enabled_models_json).unwrap_or_default(),
+                enabled: row.get(8)?,
+                is_default: row.get(9)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
 fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -513,6 +610,36 @@ fn resolve_local_shell() -> Result<PathBuf, String> {
         .into_iter()
         .find(|path| path.is_file())
         .ok_or_else(|| "Local shell not found".to_string())
+}
+
+fn default_ai_provider_base_url(provider_type: &str) -> &str {
+    match provider_type {
+        "openai" => "https://api.openai.com/v1",
+        "openrouter" => "https://openrouter.ai/api/v1",
+        "gemini" => "https://generativelanguage.googleapis.com/v1beta",
+        _ => "",
+    }
+}
+
+fn fetch_model_list_via_curl(url: &str, headers: &[(&str, String)]) -> Result<serde_json::Value, String> {
+    let mut command = Command::new(
+        resolve_binary("curl")
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|error| error.to_string())?,
+    );
+    command.arg("-sS").arg(url);
+
+    for (name, value) in headers {
+        command.arg("-H").arg(format!("{}: {}", name, value));
+    }
+
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() { "Failed to fetch models".to_string() } else { stderr });
+    }
+
+    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
 }
 
 // author: BrianXiong
@@ -1506,6 +1633,68 @@ fn pick_local_directory() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
+fn fetch_ai_provider_models(request: AiProviderFetchRequest) -> Result<Vec<String>, String> {
+    let provider_type = request.provider_type.trim();
+
+    if provider_type == "anthropic" {
+        return Ok(vec![
+            "claude-3-7-sonnet-latest".to_string(),
+            "claude-3-5-sonnet-latest".to_string(),
+            "claude-3-5-haiku-latest".to_string(),
+        ]);
+    }
+
+    if provider_type == "azure-openai" {
+        return Err("Azure OpenAI deployments need to be configured manually".to_string());
+    }
+
+    if request.api_key.trim().is_empty() {
+        return Err("API key is required before fetching models".to_string());
+    }
+
+    let base_url = if request.base_url.trim().is_empty() {
+        default_ai_provider_base_url(provider_type)
+    } else {
+        request.base_url.trim()
+    };
+
+    if base_url.is_empty() {
+        return Err("Base URL is required for this provider".to_string());
+    }
+
+    if provider_type == "gemini" {
+        let url = format!("{}/models?key={}", base_url.trim_end_matches('/'), request.api_key.trim());
+        let json = fetch_model_list_via_curl(&url, &[])?;
+        let models = json
+            .get("models")
+            .and_then(|value| value.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.get("name").and_then(|value| value.as_str()))
+                    .map(|name| name.trim_start_matches("models/").to_string())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        return Ok(models);
+    }
+
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let json = fetch_model_list_via_curl(&url, &[("Authorization", format!("Bearer {}", request.api_key.trim()))])?;
+    Ok(json
+        .get("data")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.get("id").and_then(|value| value.as_str()))
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default())
+}
+
+#[tauri::command]
 // author: BrianXiong
 // time: 2026/04/05/16:20:45
 fn get_terminal_session_cwd(state: State<AppState>, session_id: String) -> Result<String, String> {
@@ -1631,6 +1820,7 @@ fn main() {
             clear_app_data,
             load_app_preferences,
             save_app_preferences,
+            fetch_ai_provider_models,
             list_hosts,
             save_host,
             delete_host,

@@ -224,6 +224,38 @@ type Messages = {
   terminalCharset: string;
   terminalCharsetDescription: string;
   terminalTheme: string;
+  ai: string;
+  aiDescription: string;
+  aiProviders: string;
+  addAiProvider: string;
+  noAiProviders: string;
+  noAiProvidersDescription: string;
+  newAiProvider: string;
+  editAiProvider: string;
+  aiProviderName: string;
+  aiProviderNameDescription: string;
+  aiProviderType: string;
+  aiProviderTypeDescription: string;
+  aiProviderBaseUrl: string;
+  aiProviderBaseUrlDescription: string;
+  aiProviderApiKey: string;
+  aiProviderApiKeyDescription: string;
+  aiProviderModel: string;
+  aiProviderModelDescription: string;
+  aiProviderEnabled: string;
+  aiProviderEnabledDescription: string;
+  aiProviderDefault: string;
+  setAsDefaultProvider: string;
+  fetchModels: string;
+  fetchModelsFailed: string;
+  enabledModels: string;
+  enabledModelsDescription: string;
+  noModelsFetched: string;
+  openaiCompatible: string;
+  anthropic: string;
+  gemini: string;
+  openrouter: string;
+  azureOpenai: string;
   selected: string;
   select: string;
   about: string;
@@ -484,6 +516,38 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalCharset: "Terminal Charset",
     terminalCharsetDescription: "Select how terminal output bytes are decoded, useful for Chinese servers.",
     terminalTheme: "Terminal Theme",
+    ai: "AI",
+    aiDescription: "Manage AI providers and default model settings for future AI-native features.",
+    aiProviders: "AI Providers",
+    addAiProvider: "Add Provider",
+    noAiProviders: "No AI providers yet",
+    noAiProvidersDescription: "Add a provider to power future AI capabilities across the app.",
+    newAiProvider: "New AI Provider",
+    editAiProvider: "Edit AI Provider",
+    aiProviderName: "Provider Name",
+    aiProviderNameDescription: "A label to identify this provider in the app.",
+    aiProviderType: "Provider Type",
+    aiProviderTypeDescription: "Choose the upstream AI provider or protocol type.",
+    aiProviderBaseUrl: "Base URL",
+    aiProviderBaseUrlDescription: "API endpoint base URL. Leave blank for official defaults when applicable.",
+    aiProviderApiKey: "API Key",
+    aiProviderApiKeyDescription: "Stored locally for now. Keychain integration can be added later.",
+    aiProviderModel: "Default Model",
+    aiProviderModelDescription: "Model name used by default for this provider.",
+    aiProviderEnabled: "Enabled",
+    aiProviderEnabledDescription: "Whether this provider is available for AI features.",
+    aiProviderDefault: "Default",
+    setAsDefaultProvider: "Set as Default",
+    fetchModels: "Fetch Models",
+    fetchModelsFailed: "Failed to fetch models",
+    enabledModels: "Enabled Models",
+    enabledModelsDescription: "Choose which models from this provider can be used by the app.",
+    noModelsFetched: "No models fetched yet",
+    openaiCompatible: "OpenAI Compatible",
+    anthropic: "Anthropic",
+    gemini: "Gemini",
+    openrouter: "OpenRouter",
+    azureOpenai: "Azure OpenAI",
     selected: "Selected",
     select: "Select",
     about: "About",
@@ -742,6 +806,38 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalCharset: "终端字符集",
     terminalCharsetDescription: "选择终端输出字节的解码方式，中文服务器场景下尤其有用。",
     terminalTheme: "终端主题",
+    ai: "AI",
+    aiDescription: "管理 AI Provider 和默认模型设置，为后续 AI Native 能力打基础。",
+    aiProviders: "AI Providers",
+    addAiProvider: "添加 Provider",
+    noAiProviders: "还没有 AI Provider",
+    noAiProvidersDescription: "添加一个 Provider，为后续 AI 功能提供能力基础。",
+    newAiProvider: "新建 AI Provider",
+    editAiProvider: "编辑 AI Provider",
+    aiProviderName: "Provider 名称",
+    aiProviderNameDescription: "用于在应用内识别这个 Provider 的显示名称。",
+    aiProviderType: "Provider 类型",
+    aiProviderTypeDescription: "选择上游 AI Provider 或兼容协议类型。",
+    aiProviderBaseUrl: "Base URL",
+    aiProviderBaseUrlDescription: "API 基础地址。若使用官方默认地址，可留空。",
+    aiProviderApiKey: "API Key",
+    aiProviderApiKeyDescription: "当前先保存在本地，后续可接 Keychain。",
+    aiProviderModel: "默认模型",
+    aiProviderModelDescription: "该 Provider 默认使用的模型名称。",
+    aiProviderEnabled: "启用",
+    aiProviderEnabledDescription: "是否允许这个 Provider 被 AI 功能使用。",
+    aiProviderDefault: "默认",
+    setAsDefaultProvider: "设为默认",
+    fetchModels: "获取模型",
+    fetchModelsFailed: "获取模型失败",
+    enabledModels: "启用模型",
+    enabledModelsDescription: "选择这个 Provider 中允许被应用使用的模型。",
+    noModelsFetched: "还没有获取到模型",
+    openaiCompatible: "OpenAI 兼容",
+    anthropic: "Anthropic",
+    gemini: "Gemini",
+    openrouter: "OpenRouter",
+    azureOpenai: "Azure OpenAI",
     selected: "已选择",
     select: "选择",
     about: "关于",
@@ -1000,6 +1096,38 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalCharset: "ターミナル文字コード",
     terminalCharsetDescription: "ターミナル出力バイト列のデコード方式を選択します。中国語サーバーで特に有効です。",
     terminalTheme: "ターミナルテーマ",
+    ai: "AI",
+    aiDescription: "AI Provider と既定モデル設定を管理し、今後の AI Native 機能の基盤にします。",
+    aiProviders: "AI Provider",
+    addAiProvider: "Provider を追加",
+    noAiProviders: "AI Provider はまだありません",
+    noAiProvidersDescription: "Provider を追加して、今後の AI 機能の基盤を用意します。",
+    newAiProvider: "新規 AI Provider",
+    editAiProvider: "AI Provider を編集",
+    aiProviderName: "Provider 名",
+    aiProviderNameDescription: "アプリ内で識別するための表示名です。",
+    aiProviderType: "Provider 種別",
+    aiProviderTypeDescription: "上流 AI Provider または互換プロトコル種別を選択します。",
+    aiProviderBaseUrl: "Base URL",
+    aiProviderBaseUrlDescription: "API のベース URL。公式既定を使う場合は空欄でも可。",
+    aiProviderApiKey: "API Key",
+    aiProviderApiKeyDescription: "現時点ではローカル保存です。将来的に Keychain 連携可能です。",
+    aiProviderModel: "既定モデル",
+    aiProviderModelDescription: "この Provider で既定使用するモデル名です。",
+    aiProviderEnabled: "有効",
+    aiProviderEnabledDescription: "この Provider を AI 機能で利用可能にするかどうか。",
+    aiProviderDefault: "既定",
+    setAsDefaultProvider: "既定にする",
+    fetchModels: "モデル取得",
+    fetchModelsFailed: "モデル取得に失敗しました",
+    enabledModels: "有効モデル",
+    enabledModelsDescription: "この Provider でアプリが利用可能にするモデルを選択します。",
+    noModelsFetched: "まだモデルを取得していません",
+    openaiCompatible: "OpenAI 互換",
+    anthropic: "Anthropic",
+    gemini: "Gemini",
+    openrouter: "OpenRouter",
+    azureOpenai: "Azure OpenAI",
     selected: "選択中",
     select: "選択",
     about: "情報",
