@@ -61,6 +61,18 @@ struct AiProviderFetchRequest {
     api_key: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiProviderImportSuggestion {
+    source_id: String,
+    title: String,
+    provider_type: String,
+    base_url: String,
+    api_key: String,
+    model: String,
+    note: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AppPreferencesPayload {
@@ -640,6 +652,36 @@ fn fetch_model_list_via_curl(url: &str, headers: &[(&str, String)]) -> Result<se
     }
 
     serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+}
+
+fn binary_exists(name: &str) -> bool {
+    resolve_binary(name).is_ok()
+}
+
+fn read_json_if_exists(path: PathBuf) -> Option<serde_json::Value> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+}
+
+fn read_text_if_exists(path: PathBuf) -> Option<String> {
+    fs::read_to_string(path).ok()
+}
+
+fn parse_toml_string_value(content: &str, key: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let trimmed = line.trim();
+        let prefix = format!("{} = ", key);
+        if !trimmed.starts_with(&prefix) {
+            return None;
+        }
+
+        let value = trimmed[prefix.len()..].trim();
+        value
+            .strip_prefix('"')
+            .and_then(|rest| rest.strip_suffix('"'))
+            .map(|rest| rest.to_string())
+    })
 }
 
 // author: BrianXiong
@@ -1695,6 +1737,75 @@ fn fetch_ai_provider_models(request: AiProviderFetchRequest) -> Result<Vec<Strin
 }
 
 #[tauri::command]
+fn detect_ai_provider_imports() -> Result<Vec<AiProviderImportSuggestion>, String> {
+    let mut suggestions = Vec::new();
+
+    let anthropic_api_key = env::var("ANTHROPIC_API_KEY").unwrap_or_default();
+    let claude_installed = binary_exists("claude") || home_dir().map(|dir| dir.join(".claude").exists()).unwrap_or(false);
+    if claude_installed {
+        suggestions.push(AiProviderImportSuggestion {
+            source_id: "claude-code".to_string(),
+            title: "Claude Code".to_string(),
+            provider_type: "anthropic".to_string(),
+            base_url: String::new(),
+            api_key: anthropic_api_key.clone(),
+            model: env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-3-7-sonnet-latest".to_string()),
+            note: if anthropic_api_key.is_empty() {
+                "Claude Code detected. API key not found in environment; please confirm credentials manually.".to_string()
+            } else {
+                "Imported from local Claude Code environment.".to_string()
+            },
+        });
+    }
+
+    let codex_installed = binary_exists("codex") || home_dir().map(|dir| dir.join(".codex").exists()).unwrap_or(false);
+    if codex_installed {
+        let codex_dir = home_dir().map(|dir| dir.join(".codex")).unwrap_or_default();
+        let config_toml = read_text_if_exists(codex_dir.join("config.toml")).unwrap_or_default();
+        let auth_json = read_json_if_exists(codex_dir.join("auth.json"));
+        let openai_api_key = env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                auth_json
+                    .as_ref()
+                    .and_then(|value| value.get("OPENAI_API_KEY"))
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.to_string())
+            })
+            .or_else(|| {
+                auth_json
+                    .as_ref()
+                    .and_then(|value| value.get("tokens"))
+                    .and_then(|tokens| tokens.get("access_token"))
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.to_string())
+            })
+            .unwrap_or_default();
+
+        suggestions.push(AiProviderImportSuggestion {
+            source_id: "codex-cli".to_string(),
+            title: "Codex CLI".to_string(),
+            provider_type: if env::var("OPENAI_BASE_URL").ok().filter(|value| !value.trim().is_empty()).is_some() {
+                "custom-openai".to_string()
+            } else {
+                "openai".to_string()
+            },
+            base_url: env::var("OPENAI_BASE_URL").unwrap_or_default(),
+            api_key: openai_api_key.clone(),
+            model: parse_toml_string_value(&config_toml, "model").unwrap_or_default(),
+            note: if openai_api_key.is_empty() {
+                "Codex CLI detected. No API key found; imported model/profile defaults only.".to_string()
+            } else {
+                "Imported from local Codex CLI configuration.".to_string()
+            },
+        });
+    }
+
+    Ok(suggestions)
+}
+
+#[tauri::command]
 // author: BrianXiong
 // time: 2026/04/05/16:20:45
 fn get_terminal_session_cwd(state: State<AppState>, session_id: String) -> Result<String, String> {
@@ -1821,6 +1932,7 @@ fn main() {
             load_app_preferences,
             save_app_preferences,
             fetch_ai_provider_models,
+            detect_ai_provider_imports,
             list_hosts,
             save_host,
             delete_host,

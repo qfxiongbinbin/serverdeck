@@ -231,6 +231,8 @@ type Messages = {
   aiUsage: string;
   aiSkills: string;
   addAiProvider: string;
+  importClaudeCode: string;
+  importCodexCli: string;
   noAiProviders: string;
   noAiProvidersDescription: string;
   aiModelsDescription: string;
@@ -257,6 +259,7 @@ type Messages = {
   enabledModels: string;
   enabledModelsDescription: string;
   noModelsFetched: string;
+  aiImportApplied: (name: string) => string;
   openaiCompatible: string;
   anthropic: string;
   gemini: string;
@@ -529,6 +532,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     aiUsage: "Usage",
     aiSkills: "Skills",
     addAiProvider: "Add Provider",
+    importClaudeCode: "Import Claude Code",
+    importCodexCli: "Import Codex CLI",
     noAiProviders: "No AI providers yet",
     noAiProvidersDescription: "Add a provider to power future AI capabilities across the app.",
     aiModelsDescription: "Configure which models are enabled and which are used for different AI tasks.",
@@ -555,6 +560,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     enabledModels: "Enabled Models",
     enabledModelsDescription: "Choose which models from this provider can be used by the app.",
     noModelsFetched: "No models fetched yet",
+    aiImportApplied: (name) => `Imported provider draft from ${name}`,
     openaiCompatible: "OpenAI Compatible",
     anthropic: "Anthropic",
     gemini: "Gemini",
@@ -825,6 +831,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     aiUsage: "用量",
     aiSkills: "技能",
     addAiProvider: "添加 Provider",
+    importClaudeCode: "导入 Claude Code",
+    importCodexCli: "导入 Codex CLI",
     noAiProviders: "还没有 AI Provider",
     noAiProvidersDescription: "添加一个 Provider，为后续 AI 功能提供能力基础。",
     aiModelsDescription: "在这里配置启用模型，以及不同 AI 任务默认使用的模型。",
@@ -851,6 +859,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     enabledModels: "启用模型",
     enabledModelsDescription: "选择这个 Provider 中允许被应用使用的模型。",
     noModelsFetched: "还没有获取到模型",
+    aiImportApplied: (name) => `已从 ${name} 导入 Provider 草稿`,
     openaiCompatible: "OpenAI 兼容",
     anthropic: "Anthropic",
     gemini: "Gemini",
@@ -1121,6 +1130,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     aiUsage: "利用量",
     aiSkills: "スキル",
     addAiProvider: "Provider を追加",
+    importClaudeCode: "Claude Code を導入",
+    importCodexCli: "Codex CLI を導入",
     noAiProviders: "AI Provider はまだありません",
     noAiProvidersDescription: "Provider を追加して、今後の AI 機能の基盤を用意します。",
     aiModelsDescription: "有効モデルや AI タスクごとの既定モデルをここで設定します。",
@@ -1147,6 +1158,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     enabledModels: "有効モデル",
     enabledModelsDescription: "この Provider でアプリが利用可能にするモデルを選択します。",
     noModelsFetched: "まだモデルを取得していません",
+    aiImportApplied: (name) => `${name} から Provider 草稿を取り込みました`,
     openaiCompatible: "OpenAI 互換",
     anthropic: "Anthropic",
     gemini: "Gemini",

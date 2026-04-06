@@ -41,6 +41,7 @@ import {
   deleteLocalEntry,
   deleteHost,
   deleteRemoteEntry,
+  detectAiProviderImports,
   downloadFromRemote,
   fetchAiProviderModels,
   getTerminalSessionCwd,
@@ -60,6 +61,7 @@ import {
   uploadToRemote,
   writeTerminalInput,
   type AiProviderConfig,
+  type AiProviderImportSuggestion,
   type AiProviderFetchRequest,
   type FileEntry,
   type ManagedProject,
@@ -729,6 +731,7 @@ export default function App() {
   const [aiProviderDraft, setAiProviderDraft] = useState<AiProviderConfig>(blankAiProvider);
   const [aiProviderModelsLoading, setAiProviderModelsLoading] = useState(false);
   const [aiProviderModelsError, setAiProviderModelsError] = useState("");
+  const [aiImportSuggestions, setAiImportSuggestions] = useState<AiProviderImportSuggestion[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [localTerminalMenuOpen, setLocalTerminalMenuOpen] = useState(false);
   const [localTerminalProjectSearch, setLocalTerminalProjectSearch] = useState("");
@@ -1194,6 +1197,14 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [localTerminalMenuOpen]);
+
+  useEffect(() => {
+    if (activeSettingsSection !== "ai") {
+      return;
+    }
+
+    void detectAiProviderImports().then(setAiImportSuggestions).catch(() => {});
+  }, [activeSettingsSection]);
 
   useEffect(() => {
     terminalDecodersRef.current.clear();
@@ -1806,6 +1817,41 @@ export default function App() {
         isDefault: provider.id === providerId
       }))
     }));
+  }
+
+  async function handleImportAiProvider(sourceId: AiProviderImportSuggestion["sourceId"]) {
+    try {
+      let suggestions = aiImportSuggestions;
+      if (!suggestions.length) {
+        suggestions = await detectAiProviderImports();
+        setAiImportSuggestions(suggestions);
+      }
+
+      const suggestion = suggestions.find((item) => item.sourceId === sourceId);
+      if (!suggestion) {
+        return;
+      }
+
+      setAiProviderEditorMode("new");
+      setAiProviderDraft({
+        ...blankAiProvider,
+        id: crypto.randomUUID(),
+        name: suggestion.title,
+        providerType: suggestion.providerType,
+        baseUrl: suggestion.baseUrl,
+        apiKey: suggestion.apiKey,
+        model: suggestion.model,
+        availableModels: suggestion.model ? [suggestion.model] : [],
+        enabledModels: suggestion.model ? [suggestion.model] : []
+      });
+      setAiProviderModelsError(suggestion.note);
+      setAiProviderEditorOpen(true);
+      setStatus(messages.aiImportApplied(suggestion.title));
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.fetchModelsFailed));
+      setStatusTone("error");
+    }
   }
 
   function handleSaveProject() {
@@ -3381,10 +3427,12 @@ export default function App() {
                         <>
                           <div className="settings-panel__toolbar">
                             <span className="settings-panel__toolbar-label">{messages.aiProviders}</span>
-                            <button type="button" className="secondary-button" onClick={openNewAiProviderEditor}>
-                              <Plus size={14} />
-                              {messages.addAiProvider}
-                            </button>
+                            <div className="settings-panel__toolbar-actions">
+                              <button type="button" className="secondary-button" onClick={openNewAiProviderEditor}>
+                                <Plus size={14} />
+                                {messages.addAiProvider}
+                              </button>
+                            </div>
                           </div>
 
                           <div className="settings-card settings-card--projects">
