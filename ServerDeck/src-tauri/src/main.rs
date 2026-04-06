@@ -1,5 +1,5 @@
 use dirs::home_dir;
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -100,6 +100,7 @@ struct TerminalOutputPayload {
 
 struct TerminalSession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    pty: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     child: Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>,
 }
 
@@ -664,6 +665,7 @@ fn spawn_terminal_command(
 
     let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let pty = Arc::new(Mutex::new(pair.master));
 
     wire_terminal_pty_stream(app.clone(), session_id.clone(), reader);
 
@@ -678,6 +680,7 @@ fn spawn_terminal_command(
             session_id.clone(),
             TerminalSession {
                 writer: Arc::new(Mutex::new(writer)),
+                pty,
                 child,
             },
         );
@@ -1263,6 +1266,33 @@ fn get_terminal_session_cwd(state: State<AppState>, session_id: String) -> Resul
 }
 
 #[tauri::command]
+fn resize_terminal_session(
+    state: State<AppState>,
+    session_id: String,
+    cols: u16,
+    rows: u16,
+) -> Result<bool, String> {
+    let sessions = state
+        .terminal_sessions
+        .lock()
+        .map_err(|_| "Lock poisoned".to_string())?;
+    let session = sessions
+        .get(&session_id)
+        .ok_or_else(|| "Terminal session not found".to_string())?;
+    let pty = session.pty.lock().map_err(|_| "Lock poisoned".to_string())?;
+
+    pty.resize(PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    })
+    .map_err(|error| error.to_string())?;
+
+    Ok(true)
+}
+
+#[tauri::command]
 fn write_terminal_input(
     state: State<AppState>,
     session_id: String,
@@ -1330,6 +1360,7 @@ fn main() {
             start_local_terminal_session,
             pick_local_directory,
             get_terminal_session_cwd,
+            resize_terminal_session,
             write_terminal_input,
             close_terminal_session
         ])

@@ -245,6 +245,16 @@ export async function getTerminalSessionCwd(sessionId: string) {
 }
 
 // author: BrianXiong
+// time: 2026/04/06/11:12:14
+export async function resizeTerminalSession(sessionId: string, cols: number, rows: number) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("resize_terminal_session", { sessionId, cols, rows });
+  }
+
+  return true;
+}
+
+// author: BrianXiong
 // time: 2026/04/05/17:12:08
 export async function pickLocalDirectory() {
   if (hasTauri()) {
