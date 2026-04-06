@@ -2286,6 +2286,13 @@ select {
   padding: 2px 4px 0;
 }
 
+.settings-panel__toolbar-actions {
+  display: inline-flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .settings-panel__toolbar-label {
   font-size: 14px;
   font-weight: 700;

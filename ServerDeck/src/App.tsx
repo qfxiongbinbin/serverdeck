@@ -41,6 +41,7 @@ import {
   deleteLocalEntry,
   deleteHost,
   deleteRemoteEntry,
+  detectAiProviderImports,
   downloadFromRemote,
   fetchAiProviderModels,
   getTerminalSessionCwd,
@@ -60,6 +61,7 @@ import {
   uploadToRemote,
   writeTerminalInput,
   type AiProviderConfig,
+  type AiProviderImportSuggestion,
   type AiProviderFetchRequest,
   type FileEntry,
   type ManagedProject,
@@ -183,10 +185,11 @@ type AppSettings = {
 
 type UpdateStage = "idle" | "downloading" | "ready";
 type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
-type SettingsSectionId = "general" | "projects" | "connection" | "terminal" | "ai" | "about" | "danger";
+type SettingsSectionId = "general" | "projects" | "terminal" | "ai" | "about" | "danger";
 type ProjectEditorMode = "new" | "edit";
 type LocalTerminalSource = "default" | "project" | "directory";
 type AiProviderEditorMode = "new" | "edit";
+type AiSettingsSectionId = "providers" | "models" | "usage" | "skills";
 
 const blankAiProvider: AiProviderConfig = {
   id: "",
@@ -719,6 +722,7 @@ export default function App() {
   const [updateError, setUpdateError] = useState("");
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>("general");
+  const [activeAiSettingsSection, setActiveAiSettingsSection] = useState<AiSettingsSectionId>("providers");
   const [projectEditorOpen, setProjectEditorOpen] = useState(false);
   const [projectEditorMode, setProjectEditorMode] = useState<ProjectEditorMode>("new");
   const [projectDraft, setProjectDraft] = useState<ManagedProject>(blankProject);
@@ -727,6 +731,7 @@ export default function App() {
   const [aiProviderDraft, setAiProviderDraft] = useState<AiProviderConfig>(blankAiProvider);
   const [aiProviderModelsLoading, setAiProviderModelsLoading] = useState(false);
   const [aiProviderModelsError, setAiProviderModelsError] = useState("");
+  const [aiImportSuggestions, setAiImportSuggestions] = useState<AiProviderImportSuggestion[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [localTerminalMenuOpen, setLocalTerminalMenuOpen] = useState(false);
   const [localTerminalProjectSearch, setLocalTerminalProjectSearch] = useState("");
@@ -903,13 +908,12 @@ export default function App() {
     () => [
       { id: "general" as const, label: messages.general, icon: Wrench },
       { id: "projects" as const, label: messages.projects, icon: FolderOpen },
-      { id: "connection" as const, label: messages.connection, icon: PlugZap },
       { id: "terminal" as const, label: messages.terminal, icon: TerminalSquare },
       { id: "ai" as const, label: messages.ai, icon: Bot },
       { id: "about" as const, label: messages.about, icon: Info },
       { id: "danger" as const, label: messages.dangerZone, icon: ShieldAlert }
     ],
-    [messages.about, messages.ai, messages.connection, messages.dangerZone, messages.general, messages.projects, messages.terminal]
+    [messages.about, messages.ai, messages.dangerZone, messages.general, messages.projects, messages.terminal]
   );
 
   const filteredHosts = useMemo(() => {
@@ -1193,6 +1197,14 @@ export default function App() {
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [localTerminalMenuOpen]);
+
+  useEffect(() => {
+    if (activeSettingsSection !== "ai") {
+      return;
+    }
+
+    void detectAiProviderImports().then(setAiImportSuggestions).catch(() => {});
+  }, [activeSettingsSection]);
 
   useEffect(() => {
     terminalDecodersRef.current.clear();
@@ -1805,6 +1817,41 @@ export default function App() {
         isDefault: provider.id === providerId
       }))
     }));
+  }
+
+  async function handleImportAiProvider(sourceId: AiProviderImportSuggestion["sourceId"]) {
+    try {
+      let suggestions = aiImportSuggestions;
+      if (!suggestions.length) {
+        suggestions = await detectAiProviderImports();
+        setAiImportSuggestions(suggestions);
+      }
+
+      const suggestion = suggestions.find((item) => item.sourceId === sourceId);
+      if (!suggestion) {
+        return;
+      }
+
+      setAiProviderEditorMode("new");
+      setAiProviderDraft({
+        ...blankAiProvider,
+        id: crypto.randomUUID(),
+        name: suggestion.title,
+        providerType: suggestion.providerType,
+        baseUrl: suggestion.baseUrl,
+        apiKey: suggestion.apiKey,
+        model: suggestion.model,
+        availableModels: suggestion.model ? [suggestion.model] : [],
+        enabledModels: suggestion.model ? [suggestion.model] : []
+      });
+      setAiProviderModelsError(suggestion.note);
+      setAiProviderEditorOpen(true);
+      setStatus(messages.aiImportApplied(suggestion.title));
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.fetchModelsFailed));
+      setStatusTone("error");
+    }
   }
 
   function handleSaveProject() {
@@ -3210,16 +3257,17 @@ export default function App() {
                     </section>
                   ) : null}
 
-                  {activeSettingsSection === "connection" ? (
+                  {activeSettingsSection === "terminal" ? (
                     <section className="settings-panel">
                       <div className="settings-panel__header">
-                        <PlugZap size={18} />
+                        <SwatchBook size={18} />
                         <div>
-                          <h3>{messages.connection}</h3>
-                          <span>{messages.sshDefaultsDescription}</span>
+                          <h3>{messages.terminal}</h3>
+                          <span>{messages.terminalDescription}</span>
                         </div>
                       </div>
 
+                      <div className="settings-panel__subheading">{messages.connection}</div>
                       <div className="settings-card">
                         <div className="settings-item settings-item--panel">
                           <div>
@@ -3255,18 +3303,6 @@ export default function App() {
                               </option>
                             ))}
                           </select>
-                        </div>
-                      </div>
-                    </section>
-                  ) : null}
-
-                  {activeSettingsSection === "terminal" ? (
-                    <section className="settings-panel">
-                      <div className="settings-panel__header">
-                        <SwatchBook size={18} />
-                        <div>
-                          <h3>{messages.terminal}</h3>
-                          <span>{messages.terminalDescription}</span>
                         </div>
                       </div>
 
@@ -3372,55 +3408,109 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="settings-panel__toolbar">
-                        <span className="settings-panel__toolbar-label">{messages.aiProviders}</span>
-                        <button type="button" className="secondary-button" onClick={openNewAiProviderEditor}>
-                          <Plus size={14} />
-                          {messages.addAiProvider}
+                      <div className="settings-chip-group">
+                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "providers" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("providers")}>
+                          {messages.aiProviders}
+                        </button>
+                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "models" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("models")}>
+                          {messages.aiModels}
+                        </button>
+                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "usage" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("usage")}>
+                          {messages.aiUsage}
+                        </button>
+                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "skills" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("skills")}>
+                          {messages.aiSkills}
                         </button>
                       </div>
 
-                      <div className="settings-card settings-card--projects">
-                        {settings.aiProviders.length ? (
-                          settings.aiProviders.map((provider) => (
-                            <div key={provider.id} className="project-row">
-                              <div className="project-row__icon">
-                                <Bot size={18} />
-                              </div>
-
-                              <div className="project-row__body">
-                                <div className="project-row__titleline">
-                                  <strong>{provider.name}</strong>
-                                  <span>{aiProviderTypeLabels[provider.providerType]}</span>
-                                  {provider.isDefault ? <span>{messages.aiProviderDefault}</span> : null}
-                                </div>
-                                <div className="project-row__path">{provider.model || provider.baseUrl || provider.providerType}</div>
-                              </div>
-
-                              <div className="project-row__actions">
-                                {!provider.isDefault ? (
-                                  <button type="button" className="row-button" onClick={() => handleSetDefaultAiProvider(provider.id)}>
-                                    {messages.setAsDefaultProvider}
-                                  </button>
-                                ) : null}
-                                <button type="button" className="row-button" onClick={() => openEditAiProviderEditor(provider)}>
-                                  <Pencil size={14} />
-                                  {messages.edit}
-                                </button>
-                                <button type="button" className="danger-button" onClick={() => handleDeleteAiProvider(provider.id)}>
-                                  <Trash2 size={14} />
-                                  {messages.delete}
-                                </button>
-                              </div>
+                      {activeAiSettingsSection === "providers" ? (
+                        <>
+                          <div className="settings-panel__toolbar">
+                            <span className="settings-panel__toolbar-label">{messages.aiProviders}</span>
+                            <div className="settings-panel__toolbar-actions">
+                              <button type="button" className="secondary-button" onClick={openNewAiProviderEditor}>
+                                <Plus size={14} />
+                                {messages.addAiProvider}
+                              </button>
                             </div>
-                          ))
-                        ) : (
-                          <div className="project-empty-state">
-                            <strong>{messages.noAiProviders}</strong>
-                            <span>{messages.noAiProvidersDescription}</span>
                           </div>
-                        )}
-                      </div>
+
+                          <div className="settings-card settings-card--projects">
+                            {settings.aiProviders.length ? (
+                              settings.aiProviders.map((provider) => (
+                                <div key={provider.id} className="project-row">
+                                  <div className="project-row__icon">
+                                    <Bot size={18} />
+                                  </div>
+
+                                  <div className="project-row__body">
+                                    <div className="project-row__titleline">
+                                      <strong>{provider.name}</strong>
+                                      <span>{aiProviderTypeLabels[provider.providerType]}</span>
+                                      {provider.isDefault ? <span>{messages.aiProviderDefault}</span> : null}
+                                    </div>
+                                    <div className="project-row__path">{provider.model || provider.baseUrl || provider.providerType}</div>
+                                  </div>
+
+                                  <div className="project-row__actions">
+                                    {!provider.isDefault ? (
+                                      <button type="button" className="row-button" onClick={() => handleSetDefaultAiProvider(provider.id)}>
+                                        {messages.setAsDefaultProvider}
+                                      </button>
+                                    ) : null}
+                                    <button type="button" className="row-button" onClick={() => openEditAiProviderEditor(provider)}>
+                                      <Pencil size={14} />
+                                      {messages.edit}
+                                    </button>
+                                    <button type="button" className="danger-button" onClick={() => handleDeleteAiProvider(provider.id)}>
+                                      <Trash2 size={14} />
+                                      {messages.delete}
+                                    </button>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="project-empty-state">
+                                <strong>{messages.noAiProviders}</strong>
+                                <span>{messages.noAiProvidersDescription}</span>
+                              </div>
+                            )}
+                          </div>
+                        </>
+                      ) : null}
+
+                      {activeAiSettingsSection === "models" ? (
+                        <div className="settings-card">
+                          <div className="settings-item settings-item--panel settings-item--stacked">
+                            <div>
+                              <strong>{messages.aiModels}</strong>
+                              <span>{messages.aiModelsDescription}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {activeAiSettingsSection === "usage" ? (
+                        <div className="settings-card">
+                          <div className="settings-item settings-item--panel settings-item--stacked">
+                            <div>
+                              <strong>{messages.aiUsage}</strong>
+                              <span>{messages.aiUsageDescription}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {activeAiSettingsSection === "skills" ? (
+                        <div className="settings-card">
+                          <div className="settings-item settings-item--panel settings-item--stacked">
+                            <div>
+                              <strong>{messages.aiSkills}</strong>
+                              <span>{messages.aiSkillsDescription}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
                     </section>
                   ) : null}
 

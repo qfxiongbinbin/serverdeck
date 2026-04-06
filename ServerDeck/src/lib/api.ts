@@ -66,6 +66,16 @@ export type AiProviderConfig = {
   isDefault: boolean;
 };
 
+export type AiProviderImportSuggestion = {
+  sourceId: "claude-code" | "codex-cli";
+  title: string;
+  providerType: AiProviderConfig["providerType"];
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  note: string;
+};
+
 export type AppPreferences = {
   settings: {
     appTheme: "light" | "dark";
@@ -278,6 +288,14 @@ export async function saveAppPreferences(payload: AppPreferences) {
 export async function fetchAiProviderModels(request: AiProviderFetchRequest) {
   if (hasTauri()) {
     return tauriInvoke<string[]>("fetch_ai_provider_models", { request });
+  }
+
+  return [];
+}
+
+export async function detectAiProviderImports() {
+  if (hasTauri()) {
+    return tauriInvoke<AiProviderImportSuggestion[]>("detect_ai_provider_imports");
   }
 
   return [];
