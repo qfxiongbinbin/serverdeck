@@ -1,5 +1,6 @@
 use dirs::home_dir;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::env;
@@ -25,6 +26,37 @@ struct HostRecord {
     auth_type: String,
     password: Option<String>,
     private_key_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagedProjectRecord {
+    id: String,
+    name: String,
+    namespace: String,
+    path: String,
+    project_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppPreferencesPayload {
+    settings: AppSettingsRecord,
+    recent_project_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AppSettingsRecord {
+    app_theme: String,
+    language: String,
+    projects: Vec<ManagedProjectRecord>,
+    local_terminal_default_path: String,
+    ssh_connect_timeout_seconds: u16,
+    ssh_server_alive_interval_seconds: u16,
+    terminal_theme_id: String,
+    terminal_font_size: u16,
+    terminal_charset: String,
 }
 
 fn default_project_id() -> String {
@@ -119,12 +151,167 @@ fn hosts_file() -> Result<PathBuf, String> {
     Ok(storage_dir()?.join("hosts.json"))
 }
 
+fn db_file() -> Result<PathBuf, String> {
+    Ok(storage_dir()?.join("serverdeck.db"))
+}
+
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+fn default_app_settings_record() -> AppSettingsRecord {
+    AppSettingsRecord {
+        app_theme: "dark".to_string(),
+        language: "en".to_string(),
+        projects: Vec::new(),
+        local_terminal_default_path: String::new(),
+        ssh_connect_timeout_seconds: 5,
+        ssh_server_alive_interval_seconds: 30,
+        terminal_theme_id: "midnight-operator".to_string(),
+        terminal_font_size: 14,
+        terminal_charset: "utf-8".to_string(),
+    }
+}
+
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+fn open_db() -> Result<Connection, String> {
+    let path = db_file()?;
+    let conn = Connection::open(path).map_err(|error| error.to_string())?;
+    init_db(&conn)?;
+    migrate_legacy_hosts_if_needed(&conn)?;
+    Ok(conn)
+}
+
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+fn init_db(conn: &Connection) -> Result<(), String> {
+    conn.execute_batch(
+        r#"
+        CREATE TABLE IF NOT EXISTS hosts (
+          id TEXT PRIMARY KEY,
+          label TEXT NOT NULL DEFAULT '',
+          project_id TEXT NOT NULL DEFAULT 'default',
+          address TEXT NOT NULL,
+          port INTEGER NOT NULL,
+          username TEXT NOT NULL,
+          auth_type TEXT NOT NULL,
+          password TEXT,
+          private_key_path TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS projects (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          namespace TEXT NOT NULL DEFAULT '',
+          path TEXT NOT NULL DEFAULT '',
+          project_type TEXT NOT NULL DEFAULT 'local'
+        );
+
+        CREATE TABLE IF NOT EXISTS app_settings (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS local_terminal_recent_projects (
+          project_id TEXT PRIMARY KEY,
+          used_at INTEGER NOT NULL
+        );
+        "#,
+    )
+    .map_err(|error| error.to_string())
+}
+
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+fn migrate_legacy_hosts_if_needed(conn: &Connection) -> Result<(), String> {
+    let count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM hosts", [], |row| row.get(0))
+        .map_err(|error| error.to_string())?;
+    if count > 0 {
+        return Ok(());
+    }
+
+    let legacy_hosts = read_hosts()?;
+    if legacy_hosts.is_empty() {
+        return Ok(());
+    }
+
+    save_hosts_to_db(conn, &legacy_hosts)
+}
+
 #[tauri::command]
 fn clear_app_data() -> Result<bool, String> {
     let dir = storage_dir()?;
     if dir.exists() {
         fs::remove_dir_all(&dir).map_err(|error| error.to_string())?;
     }
+    Ok(true)
+}
+
+#[tauri::command]
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+fn load_app_preferences() -> Result<AppPreferencesPayload, String> {
+    let conn = open_db()?;
+    let mut settings = default_app_settings_record();
+
+    settings.projects = load_projects_from_db(&conn)?;
+    settings.app_theme = get_setting(&conn, "appTheme")?.unwrap_or(settings.app_theme);
+    settings.language = get_setting(&conn, "language")?.unwrap_or(settings.language);
+    settings.local_terminal_default_path = get_setting(&conn, "localTerminalDefaultPath")?.unwrap_or(settings.local_terminal_default_path);
+    settings.ssh_connect_timeout_seconds = get_setting(&conn, "sshConnectTimeoutSeconds")?
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(settings.ssh_connect_timeout_seconds);
+    settings.ssh_server_alive_interval_seconds = get_setting(&conn, "sshServerAliveIntervalSeconds")?
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(settings.ssh_server_alive_interval_seconds);
+    settings.terminal_theme_id = get_setting(&conn, "terminalThemeId")?.unwrap_or(settings.terminal_theme_id);
+    settings.terminal_font_size = get_setting(&conn, "terminalFontSize")?
+        .and_then(|value| value.parse::<u16>().ok())
+        .unwrap_or(settings.terminal_font_size);
+    settings.terminal_charset = get_setting(&conn, "terminalCharset")?.unwrap_or(settings.terminal_charset);
+
+    Ok(AppPreferencesPayload {
+        settings,
+        recent_project_ids: load_recent_projects_from_db(&conn)?,
+    })
+}
+
+#[tauri::command]
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+fn save_app_preferences(payload: AppPreferencesPayload) -> Result<bool, String> {
+    let mut conn = open_db()?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+
+    tx.execute("DELETE FROM projects", []).map_err(|error| error.to_string())?;
+    for project in &payload.settings.projects {
+        tx.execute(
+            "INSERT INTO projects (id, name, namespace, path, project_type) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![project.id, project.name, project.namespace, project.path, project.project_type],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    set_setting(&tx, "appTheme", &payload.settings.app_theme)?;
+    set_setting(&tx, "language", &payload.settings.language)?;
+    set_setting(&tx, "localTerminalDefaultPath", &payload.settings.local_terminal_default_path)?;
+    set_setting(&tx, "sshConnectTimeoutSeconds", &payload.settings.ssh_connect_timeout_seconds.to_string())?;
+    set_setting(&tx, "sshServerAliveIntervalSeconds", &payload.settings.ssh_server_alive_interval_seconds.to_string())?;
+    set_setting(&tx, "terminalThemeId", &payload.settings.terminal_theme_id)?;
+    set_setting(&tx, "terminalFontSize", &payload.settings.terminal_font_size.to_string())?;
+    set_setting(&tx, "terminalCharset", &payload.settings.terminal_charset)?;
+
+    tx.execute("DELETE FROM local_terminal_recent_projects", [])
+        .map_err(|error| error.to_string())?;
+    for (index, project_id) in payload.recent_project_ids.iter().enumerate() {
+        tx.execute(
+            "INSERT INTO local_terminal_recent_projects (project_id, used_at) VALUES (?1, ?2)",
+            params![project_id, (payload.recent_project_ids.len() - index) as i64],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    tx.commit().map_err(|error| error.to_string())?;
     Ok(true)
 }
 
@@ -145,10 +332,113 @@ fn read_hosts() -> Result<Vec<HostRecord>, String> {
     serde_json::from_str(&content).map_err(|error| error.to_string())
 }
 
-fn write_hosts(hosts: &[HostRecord]) -> Result<(), String> {
-    let path = hosts_file()?;
-    let content = serde_json::to_string_pretty(hosts).map_err(|error| error.to_string())?;
-    fs::write(path, content).map_err(|error| error.to_string())
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+fn load_hosts_from_db(conn: &Connection) -> Result<Vec<HostRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, label, project_id, address, port, username, auth_type, password, private_key_path FROM hosts ORDER BY label, address",
+        )
+        .map_err(|error| error.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(HostRecord {
+                id: row.get(0)?,
+                label: row.get(1)?,
+                project_id: row.get(2)?,
+                address: row.get(3)?,
+                port: row.get(4)?,
+                username: row.get(5)?,
+                auth_type: row.get(6)?,
+                password: row.get(7)?,
+                private_key_path: row.get(8)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+fn save_hosts_to_db(conn: &Connection, hosts: &[HostRecord]) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|error| error.to_string())?;
+    for host in hosts {
+        tx.execute(
+            r#"
+            INSERT INTO hosts (id, label, project_id, address, port, username, auth_type, password, private_key_path)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(id) DO UPDATE SET
+              label=excluded.label,
+              project_id=excluded.project_id,
+              address=excluded.address,
+              port=excluded.port,
+              username=excluded.username,
+              auth_type=excluded.auth_type,
+              password=excluded.password,
+              private_key_path=excluded.private_key_path
+            "#,
+            params![
+                host.id,
+                host.label,
+                host.project_id,
+                host.address,
+                host.port,
+                host.username,
+                host.auth_type,
+                host.password,
+                host.private_key_path,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    tx.commit().map_err(|error| error.to_string())
+}
+
+// author: BrianXiong
+// time: 2026/04/06/11:42:03
+fn load_projects_from_db(conn: &Connection) -> Result<Vec<ManagedProjectRecord>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, name, namespace, path, project_type FROM projects ORDER BY name")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(ManagedProjectRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                namespace: row.get(2)?,
+                path: row.get(3)?,
+                project_type: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+        params![key, value],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn get_setting(conn: &Connection, key: &str) -> Result<Option<String>, String> {
+    conn.query_row("SELECT value FROM app_settings WHERE key = ?1", params![key], |row| row.get(0))
+        .optional()
+        .map_err(|error| error.to_string())
+}
+
+fn load_recent_projects_from_db(conn: &Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT project_id FROM local_terminal_recent_projects ORDER BY used_at DESC")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
 fn expand_path(path: &str) -> PathBuf {
@@ -772,31 +1062,26 @@ fn wire_terminal_pty_exit(
 
 #[tauri::command]
 fn list_hosts() -> Result<Vec<HostRecord>, String> {
-    read_hosts()
+    let conn = open_db()?;
+    load_hosts_from_db(&conn)
 }
 
 #[tauri::command]
 fn save_host(mut host: HostRecord) -> Result<HostRecord, String> {
-    let mut hosts = read_hosts()?;
     if host.id.trim().is_empty() {
         host.id = now_millis();
     }
 
-    if let Some(index) = hosts.iter().position(|item| item.id == host.id) {
-        hosts[index] = host.clone();
-    } else {
-        hosts.push(host.clone());
-    }
-
-    write_hosts(&hosts)?;
+    let conn = open_db()?;
+    save_hosts_to_db(&conn, &[host.clone()])?;
     Ok(host)
 }
 
 #[tauri::command]
 fn delete_host(id: String) -> Result<bool, String> {
-    let mut hosts = read_hosts()?;
-    hosts.retain(|item| item.id != id);
-    write_hosts(&hosts)?;
+    let conn = open_db()?;
+    conn.execute("DELETE FROM hosts WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
     Ok(true)
 }
 
@@ -1344,6 +1629,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             clear_app_data,
+            load_app_preferences,
+            save_app_preferences,
             list_hosts,
             save_host,
             delete_host,

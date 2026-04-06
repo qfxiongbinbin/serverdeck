@@ -45,6 +45,29 @@ export type SshConnectionOptions = {
   serverAliveIntervalSeconds: number;
 };
 
+export type ManagedProject = {
+  id: string;
+  name: string;
+  namespace: string;
+  path: string;
+  projectType: "local" | "server" | "hybrid";
+};
+
+export type AppPreferences = {
+  settings: {
+    appTheme: "light" | "dark";
+    language: string;
+    projects: ManagedProject[];
+    localTerminalDefaultPath: string;
+    sshConnectTimeoutSeconds: number;
+    sshServerAliveIntervalSeconds: number;
+    terminalThemeId: string;
+    terminalFontSize: number;
+    terminalCharset: string;
+  };
+  recentProjectIds: string[];
+};
+
 export type ServerObservation = {
   hostname: string;
   operatingSystem: string;
@@ -217,6 +240,22 @@ export async function clearAppData() {
     return tauriInvoke<boolean>("clear_app_data");
   }
   window.localStorage.removeItem(STORAGE_KEY);
+  return true;
+}
+
+export async function loadAppPreferences() {
+  if (hasTauri()) {
+    return tauriInvoke<AppPreferences>("load_app_preferences");
+  }
+
+  throw new Error("App preferences require Tauri runtime");
+}
+
+export async function saveAppPreferences(payload: AppPreferences) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("save_app_preferences", { payload });
+  }
+
   return true;
 }
 
