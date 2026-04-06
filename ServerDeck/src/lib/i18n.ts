@@ -227,9 +227,15 @@ type Messages = {
   ai: string;
   aiDescription: string;
   aiProviders: string;
+  aiModels: string;
+  aiUsage: string;
+  aiSkills: string;
   addAiProvider: string;
   noAiProviders: string;
   noAiProvidersDescription: string;
+  aiModelsDescription: string;
+  aiUsageDescription: string;
+  aiSkillsDescription: string;
   newAiProvider: string;
   editAiProvider: string;
   aiProviderName: string;
@@ -519,9 +525,15 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     ai: "AI",
     aiDescription: "Manage AI providers and default model settings for future AI-native features.",
     aiProviders: "AI Providers",
+    aiModels: "Models",
+    aiUsage: "Usage",
+    aiSkills: "Skills",
     addAiProvider: "Add Provider",
     noAiProviders: "No AI providers yet",
     noAiProvidersDescription: "Add a provider to power future AI capabilities across the app.",
+    aiModelsDescription: "Configure which models are enabled and which are used for different AI tasks.",
+    aiUsageDescription: "Usage metrics and token consumption will appear here as AI features start logging activity.",
+    aiSkillsDescription: "Manage app-level AI skills and capability bindings here.",
     newAiProvider: "New AI Provider",
     editAiProvider: "Edit AI Provider",
     aiProviderName: "Provider Name",
@@ -809,9 +821,15 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     ai: "AI",
     aiDescription: "管理 AI Provider 和默认模型设置，为后续 AI Native 能力打基础。",
     aiProviders: "AI Providers",
+    aiModels: "模型",
+    aiUsage: "用量",
+    aiSkills: "技能",
     addAiProvider: "添加 Provider",
     noAiProviders: "还没有 AI Provider",
     noAiProvidersDescription: "添加一个 Provider，为后续 AI 功能提供能力基础。",
+    aiModelsDescription: "在这里配置启用模型，以及不同 AI 任务默认使用的模型。",
+    aiUsageDescription: "随着 AI 功能接入，这里会展示用量和 token 消耗。",
+    aiSkillsDescription: "在这里管理应用级 AI 技能和能力绑定。",
     newAiProvider: "新建 AI Provider",
     editAiProvider: "编辑 AI Provider",
     aiProviderName: "Provider 名称",
@@ -1099,9 +1117,15 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     ai: "AI",
     aiDescription: "AI Provider と既定モデル設定を管理し、今後の AI Native 機能の基盤にします。",
     aiProviders: "AI Provider",
+    aiModels: "モデル",
+    aiUsage: "利用量",
+    aiSkills: "スキル",
     addAiProvider: "Provider を追加",
     noAiProviders: "AI Provider はまだありません",
     noAiProvidersDescription: "Provider を追加して、今後の AI 機能の基盤を用意します。",
+    aiModelsDescription: "有効モデルや AI タスクごとの既定モデルをここで設定します。",
+    aiUsageDescription: "AI 機能が利用ログを記録し始めると、ここに利用量や token 消費が表示されます。",
+    aiSkillsDescription: "アプリ全体の AI スキルと能力バインディングをここで管理します。",
     newAiProvider: "新規 AI Provider",
     editAiProvider: "AI Provider を編集",
     aiProviderName: "Provider 名",
