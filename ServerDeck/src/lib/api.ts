@@ -27,6 +27,17 @@ export type TerminalEventPayload = {
   stream?: "stdout" | "stderr" | "system";
 };
 
+export type TransferUpdatePayload = {
+  jobId: string;
+  direction: "upload" | "download";
+  name: string;
+  status: "running" | "success" | "error" | "cancelled";
+  detail: string;
+  progressPercent?: number;
+  transferredBytes?: number;
+  totalBytes?: number;
+};
+
 export type LocalFilePreview = {
   path: string;
   name: string;
@@ -230,6 +241,26 @@ export async function listRemoteDirectory(host: SavedHost, path: string, sshOpti
 export async function uploadToRemote(host: SavedHost, localPath: string, remoteDir: string, sshOptions: SshConnectionOptions) {
   if (hasTauri()) {
     return tauriInvoke<boolean>("upload_to_remote", { host, localPath, remoteDir, sshOptions });
+  }
+  return true;
+}
+
+export async function startUploadToRemote(
+  host: SavedHost,
+  localPath: string,
+  remoteDir: string,
+  sshOptions: SshConnectionOptions,
+  jobId: string
+) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("start_upload_to_remote", { host, localPath, remoteDir, sshOptions, jobId });
+  }
+  return true;
+}
+
+export async function cancelUploadToRemote(jobId: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("cancel_upload_to_remote", { jobId });
   }
   return true;
 }

@@ -38,6 +38,7 @@ type Messages = {
   uploadingTo: (path: string) => string;
   uploaded: (name: string) => string;
   uploadedTo: (path: string) => string;
+  uploadCancelled: (name: string) => string;
   uploadFailed: (name: string) => string;
   downloadingTo: (path: string) => string;
   downloaded: (name: string) => string;
@@ -178,6 +179,7 @@ type Messages = {
   transferCount: (count: number) => string;
   transferUpload: string;
   transferDownload: string;
+  clearTransfer: string;
   settingsDescription: string;
   general: string;
   projects: string;
@@ -339,6 +341,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     uploadingTo: (path) => `Uploading to ${path}`,
     uploaded: (name) => `Uploaded ${name}`,
     uploadedTo: (path) => `Uploaded to ${path}`,
+    uploadCancelled: (name) => `Cancelled upload for ${name}`,
     uploadFailed: (name) => `Upload failed for ${name}`,
     downloadingTo: (path) => `Downloading to ${path}`,
     downloaded: (name) => `Downloaded ${name}`,
@@ -479,6 +482,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     transferCount: (count) => `${count} item(s)`,
     transferUpload: "Upload",
     transferDownload: "Download",
+    clearTransfer: "Clear",
     settingsDescription: "Application preferences and connection defaults.",
     general: "General",
     projects: "Projects",
@@ -638,6 +642,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     uploadingTo: (path) => `正在上传到 ${path}`,
     uploaded: (name) => `已上传 ${name}`,
     uploadedTo: (path) => `已上传到 ${path}`,
+    uploadCancelled: (name) => `已取消 ${name} 的上传`,
     uploadFailed: (name) => `${name} 上传失败`,
     downloadingTo: (path) => `正在下载到 ${path}`,
     downloaded: (name) => `已下载 ${name}`,
@@ -778,6 +783,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     transferCount: (count) => `${count} 项`,
     transferUpload: "上传",
     transferDownload: "下载",
+    clearTransfer: "清除",
     settingsDescription: "应用偏好与连接默认配置。",
     general: "通用",
     projects: "项目",
@@ -937,6 +943,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     uploadingTo: (path) => `${path} にアップロード中`,
     uploaded: (name) => `${name} をアップロードしました`,
     uploadedTo: (path) => `${path} にアップロードしました`,
+    uploadCancelled: (name) => `${name} のアップロードをキャンセルしました`,
     uploadFailed: (name) => `${name} のアップロードに失敗しました`,
     downloadingTo: (path) => `${path} にダウンロード中`,
     downloaded: (name) => `${name} をダウンロードしました`,
@@ -1077,6 +1084,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     transferCount: (count) => `${count} 件`,
     transferUpload: "アップロード",
     transferDownload: "ダウンロード",
+    clearTransfer: "クリア",
     settingsDescription: "アプリ設定と接続のデフォルト値。",
     general: "一般",
     projects: "プロジェクト",
