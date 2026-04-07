@@ -265,6 +265,34 @@ export async function cancelUploadToRemote(jobId: string) {
   return true;
 }
 
+export async function startDownloadFromRemote(
+  host: SavedHost,
+  remotePath: string,
+  localDir: string,
+  isDir: boolean,
+  sshOptions: SshConnectionOptions,
+  jobId: string
+) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("start_download_from_remote", { host, remotePath, localDir, isDir, sshOptions, jobId });
+  }
+  return true;
+}
+
+export async function cancelDownloadFromRemote(jobId: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("cancel_download_from_remote", { jobId });
+  }
+  return true;
+}
+
+export async function queryLocalEntrySize(path: string) {
+  if (hasTauri()) {
+    return tauriInvoke<number>("query_local_entry_size", { path });
+  }
+  return 0;
+}
+
 export async function downloadFromRemote(
   host: SavedHost,
   remotePath: string,

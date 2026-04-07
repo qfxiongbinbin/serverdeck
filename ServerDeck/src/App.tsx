@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import {
   clearAppData,
+  cancelDownloadFromRemote,
   cancelUploadToRemote,
   closeTerminalSession,
   DEFAULT_PROJECT_ID,
@@ -54,8 +55,10 @@ import {
   listHosts,
   loadAppPreferences,
   observeServer,
+  queryLocalEntrySize,
   saveHost,
   saveAppPreferences,
+  startDownloadFromRemote,
   startLocalTerminalSession,
   startUploadToRemote,
   startTerminalSession,
@@ -173,6 +176,7 @@ type TransferJob = {
   totalBytes?: number;
   host?: SavedHost;
   remoteDir?: string;
+  localTargetPath?: string;
 };
 
 type TerminalCharset = "utf-8" | "gb18030" | "gbk" | "big5";
@@ -1546,7 +1550,7 @@ export default function App() {
 
       if (payload.status === "running") {
         updateTransferJob(payload.jobId, {
-          detail: messages.uploadingTo(payload.detail),
+          detail: payload.direction === "upload" ? messages.uploadingTo(payload.detail) : messages.downloadingTo(payload.detail),
           progressPercent: payload.progressPercent,
           transferredBytes: payload.transferredBytes,
           totalBytes: payload.totalBytes
@@ -1560,11 +1564,17 @@ export default function App() {
           transferredBytes: payload.totalBytes ?? payload.transferredBytes,
           totalBytes: payload.totalBytes
         });
-        finishTransferJob(payload.jobId, "success", messages.uploadedTo(payload.detail));
-        setStatus(messages.uploaded(payload.name));
+        finishTransferJob(
+          payload.jobId,
+          "success",
+          payload.direction === "upload" ? messages.uploadedTo(payload.detail) : messages.downloadedTo(payload.detail)
+        );
+        setStatus(payload.direction === "upload" ? messages.uploaded(payload.name) : messages.downloaded(payload.name));
         setStatusTone("success");
         if (payload.direction === "upload") {
           setRemoteRefreshTick((current) => current + 1);
+        } else {
+          setLocalRefreshTick((current) => current + 1);
         }
         return;
       }
@@ -1654,6 +1664,53 @@ export default function App() {
       window.clearInterval(intervalId);
     };
   }, [sshOptions, transferJobs]);
+
+  useEffect(() => {
+    const runningDownloadJobs = transferJobs.filter(
+      (job) => job.status === "running" && job.direction === "download" && job.localTargetPath && (job.totalBytes ?? 0) > 0
+    );
+
+    if (!runningDownloadJobs.length) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollLocalProgress = async () => {
+      await Promise.all(
+        runningDownloadJobs.map(async (job) => {
+          try {
+            const localSize = await queryLocalEntrySize(job.localTargetPath!);
+            if (cancelled) {
+              return;
+            }
+
+            const totalBytes = job.totalBytes ?? 0;
+            const transferredBytes = Math.min(localSize, totalBytes);
+            const progressPercent = totalBytes > 0 ? (transferredBytes / totalBytes) * 100 : 0;
+
+            updateTransferJob(job.id, {
+              transferredBytes,
+              totalBytes,
+              progressPercent,
+            });
+          } catch {
+            return;
+          }
+        })
+      );
+    };
+
+    void pollLocalProgress();
+    const intervalId = window.setInterval(() => {
+      void pollLocalProgress();
+    }, 800);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [transferJobs]);
 
   function openNewDrawer() {
     setActiveTabId(HOSTS_TAB_ID);
@@ -2075,7 +2132,7 @@ export default function App() {
     name: string,
     direction: TransferJob["direction"],
     detail: string,
-    metadata: Partial<Pick<TransferJob, "host" | "remoteDir" | "totalBytes">> = {}
+    metadata: Partial<Pick<TransferJob, "host" | "remoteDir" | "localTargetPath" | "totalBytes">> = {}
   ) {
     const id = crypto.randomUUID();
     const nextJob: TransferJob = {
@@ -2148,22 +2205,33 @@ export default function App() {
       return;
     }
 
+    if (job.status === "running" && job.direction === "download") {
+      try {
+        await cancelDownloadFromRemote(job.id);
+        removeTransferJob(job.id);
+      } catch (error) {
+        const message = getErrorMessage(error, messages.downloadFailed(job.name));
+        setStatus(message);
+        setStatusTone("error");
+      }
+      return;
+    }
+
     removeTransferJob(job.id);
   }
 
   async function handleDownloadEntry(entry: FileEntry) {
     if (!selectedHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
-    const jobId = startTransferJob(entry.name, "download", messages.downloadingTo(localPath));
+    const jobId = startTransferJob(entry.name, "download", messages.downloadingTo(localPath), {
+      localTargetPath: joinChildPath(localPath, entry.name),
+      totalBytes: entry.is_dir ? undefined : entry.size,
+    });
     setFileMenu(null);
     setStatus(messages.downloadingTo(localPath));
     setStatusTone("neutral");
     try {
-      await downloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir, sshOptions);
-      setStatus(messages.downloaded(entry.name));
-      setStatusTone("success");
-      finishTransferJob(jobId, "success", messages.downloadedTo(localPath));
-      setLocalRefreshTick((current) => current + 1);
+      await startDownloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir, sshOptions, jobId);
     } catch (error) {
       const message = getErrorMessage(error, messages.downloadFailed(entry.name));
       setStatus(message);
@@ -3284,10 +3352,10 @@ export default function App() {
                           type="button"
                           className="transfer-item__clear"
                           onClick={() => void handleClearTransferJob(job)}
-                          aria-label={job.status === "running" && job.direction === "upload" ? messages.cancel : messages.clearTransfer}
-                          title={job.status === "running" && job.direction === "upload" ? messages.cancel : messages.clearTransfer}
+                          aria-label={job.status === "running" ? messages.cancel : messages.clearTransfer}
+                          title={job.status === "running" ? messages.cancel : messages.clearTransfer}
                         >
-                          {job.status === "running" && job.direction === "upload" ? messages.cancel : messages.clearTransfer}
+                          {job.status === "running" ? messages.cancel : messages.clearTransfer}
                         </button>
                       </div>
                       <div className={`transfer-progress transfer-progress--${job.status}`}>
