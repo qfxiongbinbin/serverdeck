@@ -630,9 +630,17 @@ select {
   border-bottom: 1px solid var(--content-border);
 }
 
+.transfer-item__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .transfer-item__meta {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .transfer-item__meta strong {
@@ -642,6 +650,23 @@ select {
 .transfer-item__meta span {
   color: var(--content-muted);
   font-size: 11px;
+}
+
+.transfer-item__clear {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--content-border);
+  border-radius: 6px;
+  background: var(--content-panel-bg);
+  color: var(--content-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.transfer-item__clear:hover {
+  color: var(--content-strong);
+  background: var(--content-subtle-bg);
 }
 
 .transfer-progress {
@@ -654,23 +679,20 @@ select {
 .transfer-progress span {
   display: block;
   height: 100%;
-  width: 40%;
+  width: 0;
   border-radius: 999px;
+  transition: width 0.2s ease;
 }
 
 .transfer-progress--running span {
-  width: 35%;
   background: linear-gradient(90deg, #4da3ff, #7db1ff);
-  animation: transfer-slide 1.2s linear infinite;
 }
 
 .transfer-progress--success span {
-  width: 100%;
   background: #30c48d;
 }
 
 .transfer-progress--error span {
-  width: 100%;
   background: #ff6a6a;
 }
 

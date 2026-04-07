@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import {
   clearAppData,
+  cancelUploadToRemote,
   closeTerminalSession,
   DEFAULT_PROJECT_ID,
   deleteLocalEntry,
@@ -56,9 +57,9 @@ import {
   saveHost,
   saveAppPreferences,
   startLocalTerminalSession,
+  startUploadToRemote,
   startTerminalSession,
   testConnection,
-  uploadToRemote,
   writeTerminalInput,
   type AiProviderConfig,
   type AiProviderImportSuggestion,
@@ -70,7 +71,8 @@ import {
   type SavedHost,
   type ServerObservation,
   type SshConnectionOptions,
-  type TerminalEventPayload
+  type TerminalEventPayload,
+  type TransferUpdatePayload
 } from "./lib/api";
 import { FileBrowserPane } from "./components/files/FileBrowserPane";
 import { AiProviderEditorModal } from "./components/ai/AiProviderEditorModal";
@@ -82,7 +84,7 @@ import {
   messagesByLanguage,
   type AppLanguage
 } from "./lib/i18n";
-import { getParentPath, joinChildPath } from "./lib/fileBrowser";
+import { formatFileSize, getParentPath, joinChildPath } from "./lib/fileBrowser";
 import {
   defaultTerminalThemeId,
   terminalThemePresets,
@@ -164,8 +166,13 @@ type TransferJob = {
   id: string;
   name: string;
   direction: "upload" | "download";
-  status: "running" | "success" | "error";
+  status: "running" | "success" | "error" | "cancelled";
   detail: string;
+  progressPercent?: number;
+  transferredBytes?: number;
+  totalBytes?: number;
+  host?: SavedHost;
+  remoteDir?: string;
 };
 
 type TerminalCharset = "utf-8" | "gb18030" | "gbk" | "big5";
@@ -1530,6 +1537,124 @@ export default function App() {
     };
   }, [decodeTerminalPayload, messages.connected]);
 
+  useEffect(() => {
+    let cleanup: null | (() => void) = null;
+    let disposed = false;
+
+    void listen<TransferUpdatePayload>("transfer-update", (event) => {
+      const payload = event.payload;
+
+      if (payload.status === "running") {
+        updateTransferJob(payload.jobId, {
+          detail: messages.uploadingTo(payload.detail),
+          progressPercent: payload.progressPercent,
+          transferredBytes: payload.transferredBytes,
+          totalBytes: payload.totalBytes
+        });
+        return;
+      }
+
+      if (payload.status === "success") {
+        updateTransferJob(payload.jobId, {
+          progressPercent: payload.progressPercent ?? 100,
+          transferredBytes: payload.totalBytes ?? payload.transferredBytes,
+          totalBytes: payload.totalBytes
+        });
+        finishTransferJob(payload.jobId, "success", messages.uploadedTo(payload.detail));
+        setStatus(messages.uploaded(payload.name));
+        setStatusTone("success");
+        if (payload.direction === "upload") {
+          setRemoteRefreshTick((current) => current + 1);
+        }
+        return;
+      }
+
+      if (payload.status === "cancelled") {
+        removeTransferJob(payload.jobId);
+        setStatus(messages.uploadCancelled(payload.name));
+        setStatusTone("neutral");
+        return;
+      }
+
+      updateTransferJob(payload.jobId, {
+        progressPercent: payload.progressPercent,
+        transferredBytes: payload.transferredBytes,
+        totalBytes: payload.totalBytes
+      });
+      finishTransferJob(payload.jobId, "error", payload.detail);
+      setStatus(payload.detail);
+      setStatusTone("error");
+    })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        cleanup = unlisten;
+      })
+      .catch(() => {
+        setStatus(messages.failedSubscribeTerminalEvents);
+        setStatusTone("error");
+      });
+
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [messages]);
+
+  useEffect(() => {
+    const runningUploadJobs = transferJobs.filter(
+      (job) => job.status === "running" && job.direction === "upload" && job.host && job.remoteDir && (job.totalBytes ?? 0) > 0
+    );
+
+    if (!runningUploadJobs.length) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const pollRemoteProgress = async () => {
+      await Promise.all(
+        runningUploadJobs.map(async (job) => {
+          try {
+            const items = await listRemoteDirectory(job.host!, job.remoteDir!, sshOptions);
+            if (cancelled) {
+              return;
+            }
+
+            const remoteEntry = items.find((item) => item.name === job.name);
+            if (!remoteEntry) {
+              return;
+            }
+
+            const totalBytes = job.totalBytes ?? 0;
+            const transferredBytes = Math.min(remoteEntry.size, totalBytes);
+            const progressPercent = totalBytes > 0 ? (transferredBytes / totalBytes) * 100 : 0;
+
+            updateTransferJob(job.id, {
+              transferredBytes,
+              totalBytes,
+              progressPercent,
+            });
+          } catch {
+            return;
+          }
+        })
+      );
+    };
+
+    void pollRemoteProgress();
+    const intervalId = window.setInterval(() => {
+      void pollRemoteProgress();
+    }, 800);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [sshOptions, transferJobs]);
+
   function openNewDrawer() {
     setActiveTabId(HOSTS_TAB_ID);
     setDrawerMode("new");
@@ -1946,9 +2071,23 @@ export default function App() {
     setSettings((current) => ({ ...current, localTerminalDefaultPath: path }));
   }
 
-  function startTransferJob(name: string, direction: TransferJob["direction"], detail: string) {
+  function startTransferJob(
+    name: string,
+    direction: TransferJob["direction"],
+    detail: string,
+    metadata: Partial<Pick<TransferJob, "host" | "remoteDir" | "totalBytes">> = {}
+  ) {
     const id = crypto.randomUUID();
-    const nextJob: TransferJob = { id, name, direction, status: "running", detail };
+    const nextJob: TransferJob = {
+      id,
+      name,
+      direction,
+      status: "running",
+      detail,
+      progressPercent: 0,
+      transferredBytes: 0,
+      ...metadata
+    };
     setTransferJobs((current) => [nextJob, ...current].slice(0, 8));
     return id;
   }
@@ -1957,8 +2096,17 @@ export default function App() {
     setTransferJobs((current) => current.filter((job) => job.id !== id));
   }
 
+  function updateTransferJob(id: string, patch: Partial<TransferJob>) {
+    setTransferJobs((current) => current.map((job) => (job.id === id ? { ...job, ...patch } : job)));
+  }
+
   function finishTransferJob(id: string, status: TransferJob["status"], detail: string) {
-    setTransferJobs((current) => current.map((job) => (job.id === id ? { ...job, status, detail } : job)));
+    setTransferJobs((current) => current.map((job) => (job.id === id ? {
+      ...job,
+      status,
+      detail,
+      progressPercent: status === "success" ? 100 : job.progressPercent
+    } : job)));
 
     if (status === "success") {
       window.setTimeout(() => {
@@ -1969,14 +2117,16 @@ export default function App() {
 
   async function handleUploadEntry(entry: FileEntry) {
     if (!selectedHost) return;
-    const jobId = startTransferJob(entry.name, "upload", messages.uploadingTo(remotePath));
+    const jobId = startTransferJob(entry.name, "upload", messages.uploadingTo(remotePath), {
+      host: selectedHost,
+      remoteDir: remotePath,
+      totalBytes: entry.size,
+    });
+    setFileMenu(null);
+    setStatus(messages.uploadingTo(remotePath));
+    setStatusTone("neutral");
     try {
-      await uploadToRemote(selectedHost, entry.path, remotePath, sshOptions);
-      setStatus(messages.uploaded(entry.name));
-      setStatusTone("success");
-      finishTransferJob(jobId, "success", messages.uploadedTo(remotePath));
-      setFileMenu(null);
-      setRemoteRefreshTick((current) => current + 1);
+      await startUploadToRemote(selectedHost, entry.path, remotePath, sshOptions, jobId);
     } catch (error) {
       const message = getErrorMessage(error, messages.uploadFailed(entry.name));
       setStatus(message);
@@ -1985,16 +2135,34 @@ export default function App() {
     }
   }
 
+  async function handleClearTransferJob(job: TransferJob) {
+    if (job.status === "running" && job.direction === "upload") {
+      try {
+        await cancelUploadToRemote(job.id);
+        removeTransferJob(job.id);
+      } catch (error) {
+        const message = getErrorMessage(error, messages.uploadFailed(job.name));
+        setStatus(message);
+        setStatusTone("error");
+      }
+      return;
+    }
+
+    removeTransferJob(job.id);
+  }
+
   async function handleDownloadEntry(entry: FileEntry) {
     if (!selectedHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
     const jobId = startTransferJob(entry.name, "download", messages.downloadingTo(localPath));
+    setFileMenu(null);
+    setStatus(messages.downloadingTo(localPath));
+    setStatusTone("neutral");
     try {
       await downloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir, sshOptions);
       setStatus(messages.downloaded(entry.name));
       setStatusTone("success");
       finishTransferJob(jobId, "success", messages.downloadedTo(localPath));
-      setFileMenu(null);
       setLocalRefreshTick((current) => current + 1);
     } catch (error) {
       const message = getErrorMessage(error, messages.downloadFailed(entry.name));
@@ -3103,14 +3271,27 @@ export default function App() {
                 <div className="transfer-list">
                   {transferJobs.map((job) => (
                     <div key={job.id} className="transfer-item">
-                      <div className="transfer-item__meta">
-                        <strong>{job.name}</strong>
-                        <span>
-                          {job.direction === "upload" ? messages.transferUpload : messages.transferDownload} · {job.detail}
-                        </span>
+                      <div className="transfer-item__header">
+                        <div className="transfer-item__meta">
+                          <strong>{job.name}</strong>
+                          <span>
+                            {job.direction === "upload" ? messages.transferUpload : messages.transferDownload}
+                            {job.totalBytes ? ` · ${Math.round(job.progressPercent ?? 0)}% · ${formatFileSize(job.transferredBytes ?? 0)} / ${formatFileSize(job.totalBytes)}` : ""}
+                            {` · ${job.detail}`}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          className="transfer-item__clear"
+                          onClick={() => void handleClearTransferJob(job)}
+                          aria-label={job.status === "running" && job.direction === "upload" ? messages.cancel : messages.clearTransfer}
+                          title={job.status === "running" && job.direction === "upload" ? messages.cancel : messages.clearTransfer}
+                        >
+                          {job.status === "running" && job.direction === "upload" ? messages.cancel : messages.clearTransfer}
+                        </button>
                       </div>
                       <div className={`transfer-progress transfer-progress--${job.status}`}>
-                        <span />
+                        <span style={{ width: `${Math.min(100, Math.max(0, job.progressPercent ?? 0))}%` }} />
                       </div>
                     </div>
                   ))}

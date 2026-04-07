@@ -2,7 +2,7 @@ use dirs::home_dir;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io::{Read, Write};
@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{async_runtime, AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,6 +166,19 @@ struct TerminalOutputPayload {
     stream: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferUpdatePayload {
+    job_id: String,
+    direction: String,
+    name: String,
+    status: String,
+    detail: String,
+    progress_percent: Option<f64>,
+    transferred_bytes: Option<u64>,
+    total_bytes: Option<u64>,
+}
+
 struct TerminalSession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     pty: Arc<Mutex<Box<dyn MasterPty + Send>>>,
@@ -174,6 +187,8 @@ struct TerminalSession {
 
 struct AppState {
     terminal_sessions: Mutex<HashMap<String, TerminalSession>>,
+    upload_processes: Mutex<HashMap<String, Arc<Mutex<std::process::Child>>>>,
+    cancelled_uploads: Mutex<HashSet<String>>,
 }
 
 fn storage_dir() -> Result<PathBuf, String> {
@@ -1039,6 +1054,8 @@ fn run_sftp_batch(
             .map_err(|error| error.to_string())?;
     }
 
+    drop(child.stdin.take());
+
     child.wait_with_output().map_err(|error| error.to_string())
 }
 
@@ -1053,6 +1070,199 @@ fn ensure_sftp_success(output: &std::process::Output, fallback: &str) -> Result<
     } else {
         stderr
     })
+}
+
+// author: BrianXiong
+// time: 2026/04/08/10:26:00
+fn run_sftp_batch_with_job(
+    state: &AppState,
+    job_id: &str,
+    host: &HostRecord,
+    ssh_options: &SshConnectionOptions,
+    batch: &str,
+) -> Result<std::process::Output, String> {
+    let destination = format!("{}@{}", host.username, host.address);
+    let mut child = build_sftp_command(host, ssh_options)
+        .arg("-b")
+        .arg("-")
+        .arg(destination)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(batch.as_bytes())
+            .and_then(|_| stdin.flush())
+            .map_err(|error| error.to_string())?;
+    }
+
+    drop(child.stdin.take());
+
+    let stdout = child.stdout.take().ok_or_else(|| "Cannot capture upload stdout".to_string())?;
+    let stderr = child.stderr.take().ok_or_else(|| "Cannot capture upload stderr".to_string())?;
+    let child_handle = Arc::new(Mutex::new(child));
+
+    state
+        .upload_processes
+        .lock()
+        .map_err(|_| "Upload process state lock poisoned".to_string())?
+        .insert(job_id.to_string(), child_handle.clone());
+
+    let stdout_reader = std::thread::spawn(move || -> Result<Vec<u8>, String> {
+        let mut reader = stdout;
+        let mut buffer = Vec::new();
+        reader.read_to_end(&mut buffer).map_err(|error| error.to_string())?;
+        Ok(buffer)
+    });
+
+    let stderr_reader = std::thread::spawn(move || -> Result<Vec<u8>, String> {
+        let mut reader = stderr;
+        let mut buffer = Vec::new();
+        reader.read_to_end(&mut buffer).map_err(|error| error.to_string())?;
+        Ok(buffer)
+    });
+
+    let exit_status = loop {
+        let status = {
+            let mut child = child_handle
+                .lock()
+                .map_err(|_| "Upload process lock poisoned".to_string())?;
+            child.try_wait().map_err(|error| error.to_string())?
+        };
+
+        if let Some(status) = status {
+            break status;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(120));
+    };
+
+    state
+        .upload_processes
+        .lock()
+        .map_err(|_| "Upload process state lock poisoned".to_string())?
+        .remove(job_id);
+
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| "Failed to join upload stdout reader".to_string())??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| "Failed to join upload stderr reader".to_string())??;
+
+    Ok(std::process::Output {
+        status: exit_status,
+        stdout,
+        stderr,
+    })
+}
+
+// author: BrianXiong
+// time: 2026/04/08/09:58:00
+fn upload_to_remote_blocking(
+    host: &HostRecord,
+    local_path: &str,
+    remote_dir: &str,
+    ssh_options: &SshConnectionOptions,
+) -> Result<bool, String> {
+    let local_path_buf = expand_path(local_path);
+    let local_path_str = local_path_buf.to_string_lossy().into_owned();
+    let is_dir = local_path_buf.is_dir();
+    let remote_target = if remote_dir.trim().is_empty() {
+        "."
+    } else {
+        remote_dir.trim()
+    };
+    let batch = if is_dir {
+        format!(
+            "cd {}\nput -r {}\nbye\n",
+            escape_sftp_path(remote_target),
+            escape_sftp_path(&local_path_str)
+        )
+    } else {
+        format!(
+            "cd {}\nput {}\nbye\n",
+            escape_sftp_path(remote_target),
+            escape_sftp_path(&local_path_str)
+        )
+    };
+
+    let output = run_sftp_batch(host, ssh_options, &batch)?;
+    ensure_sftp_success(&output, "Upload failed")?;
+    Ok(true)
+}
+
+// author: BrianXiong
+// time: 2026/04/08/10:26:00
+fn upload_to_remote_with_job(
+    state: &AppState,
+    job_id: &str,
+    host: &HostRecord,
+    local_path: &str,
+    remote_dir: &str,
+    ssh_options: &SshConnectionOptions,
+) -> Result<bool, String> {
+    let local_path_buf = expand_path(local_path);
+    let local_path_str = local_path_buf.to_string_lossy().into_owned();
+    let is_dir = local_path_buf.is_dir();
+    let remote_target = if remote_dir.trim().is_empty() {
+        "."
+    } else {
+        remote_dir.trim()
+    };
+    let batch = if is_dir {
+        format!(
+            "cd {}\nput -r {}\nbye\n",
+            escape_sftp_path(remote_target),
+            escape_sftp_path(&local_path_str)
+        )
+    } else {
+        format!(
+            "cd {}\nput {}\nbye\n",
+            escape_sftp_path(remote_target),
+            escape_sftp_path(&local_path_str)
+        )
+    };
+
+    let output = run_sftp_batch_with_job(state, job_id, host, ssh_options, &batch)?;
+    ensure_sftp_success(&output, "Upload failed")?;
+    Ok(true)
+}
+
+// author: BrianXiong
+// time: 2026/04/07/22:28:00
+fn emit_transfer_update(app: &AppHandle, payload: TransferUpdatePayload) {
+    let _ = app.emit("transfer-update", payload);
+}
+
+// author: BrianXiong
+// time: 2026/04/08/10:26:00
+fn take_cancelled_upload(state: &AppState, job_id: &str) -> Result<bool, String> {
+    Ok(state
+        .cancelled_uploads
+        .lock()
+        .map_err(|_| "Cancelled upload state lock poisoned".to_string())?
+        .remove(job_id))
+}
+
+// author: BrianXiong
+// time: 2026/04/07/23:02:00
+fn collect_local_transfer_size(path: &Path) -> Result<u64, String> {
+    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
+    if metadata.is_file() {
+        return Ok(metadata.len());
+    }
+
+    let mut total_size = 0_u64;
+    let read_dir = fs::read_dir(path).map_err(|error| error.to_string())?;
+    for entry in read_dir {
+        let entry = entry.map_err(|error| error.to_string())?;
+        total_size = total_size.saturating_add(collect_local_transfer_size(&entry.path())?);
+    }
+    Ok(total_size)
 }
 
 // author: BrianXiong
@@ -1420,85 +1630,187 @@ fn read_local_file_preview(path: String) -> Result<LocalFilePreviewPayload, Stri
     }
 }
 
+// author: BrianXiong
+// time: 2026/04/07/22:11:00
 #[tauri::command]
-fn list_remote_directory(
+async fn list_remote_directory(
     host: HostRecord,
     path: String,
     ssh_options: SshConnectionOptions,
 ) -> Result<Vec<FileEntry>, String> {
-    let remote_path = if path.trim().is_empty() || path.trim() == "~" {
-        "."
-    } else {
-        path.trim()
-    };
-    let batch = format!("cd {}\nls -la\nbye\n", escape_sftp_path(remote_path));
-    let output = run_sftp_batch(&host, &ssh_options, &batch)?;
+    async_runtime::spawn_blocking(move || {
+        let remote_path = if path.trim().is_empty() || path.trim() == "~" {
+            "."
+        } else {
+            path.trim()
+        };
+        let batch = format!("cd {}\nls -la\nbye\n", escape_sftp_path(remote_path));
+        let output = run_sftp_batch(&host, &ssh_options, &batch)?;
 
-    ensure_sftp_success(&output, "Remote SFTP command failed")?;
+        ensure_sftp_success(&output, "Remote SFTP command failed")?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let mut entries = stdout.lines().filter_map(parse_sftp_ls_line).collect::<Vec<_>>();
-    entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-    Ok(entries)
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let mut entries = stdout.lines().filter_map(parse_sftp_ls_line).collect::<Vec<_>>();
+        entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(entries)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
+// author: BrianXiong
+// time: 2026/04/07/22:11:00
 #[tauri::command]
-fn upload_to_remote(
+async fn upload_to_remote(
     host: HostRecord,
     local_path: String,
     remote_dir: String,
     ssh_options: SshConnectionOptions,
 ) -> Result<bool, String> {
-    let local_path_buf = expand_path(&local_path);
-    let local_path_str = local_path_buf.to_string_lossy().into_owned();
-    let is_dir = local_path_buf.is_dir();
-    let remote_target = if remote_dir.trim().is_empty() { "." } else { remote_dir.trim() };
-    let batch = if is_dir {
-        format!(
-            "cd {}\nput -r {}\nbye\n",
-            escape_sftp_path(remote_target),
-            escape_sftp_path(&local_path_str)
-        )
-    } else {
-        format!(
-            "cd {}\nput {}\nbye\n",
-            escape_sftp_path(remote_target),
-            escape_sftp_path(&local_path_str)
-        )
-    };
+    async_runtime::spawn_blocking(move || upload_to_remote_blocking(&host, &local_path, &remote_dir, &ssh_options))
+    .await
+    .map_err(|error| error.to_string())?
+}
 
-    let output = run_sftp_batch(&host, &ssh_options, &batch)?;
-    ensure_sftp_success(&output, "Upload failed")?;
+// author: BrianXiong
+// time: 2026/04/07/22:28:00
+#[tauri::command]
+fn start_upload_to_remote(
+    app: AppHandle,
+    job_id: String,
+    host: HostRecord,
+    local_path: String,
+    remote_dir: String,
+    ssh_options: SshConnectionOptions,
+) -> Result<bool, String> {
+    let name = Path::new(&local_path)
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| local_path.clone());
+    let total_bytes = collect_local_transfer_size(&expand_path(&local_path)).ok();
+
+    let app_handle = app.clone();
+    async_runtime::spawn(async move {
+        let remote_dir_for_upload = remote_dir.clone();
+        let app_for_upload = app_handle.clone();
+        let job_id_for_upload = job_id.clone();
+        let result = async_runtime::spawn_blocking(move || {
+            let state = app_for_upload.state::<AppState>();
+            upload_to_remote_with_job(&state, &job_id_for_upload, &host, &local_path, &remote_dir_for_upload, &ssh_options)
+        })
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|value| value);
+
+        let state = app_handle.state::<AppState>();
+        let is_cancelled = take_cancelled_upload(&state, &job_id).unwrap_or(false);
+
+        match result {
+            Ok(_) => emit_transfer_update(
+                &app_handle,
+                TransferUpdatePayload {
+                    job_id,
+                    direction: "upload".to_string(),
+                    name,
+                    status: "success".to_string(),
+                    detail: remote_dir,
+                    progress_percent: Some(100.0),
+                    transferred_bytes: total_bytes,
+                    total_bytes,
+                },
+            ),
+            Err(error) => {
+                let status = if is_cancelled { "cancelled" } else { "error" };
+                let detail = if is_cancelled {
+                    "Upload cancelled".to_string()
+                } else {
+                    error
+                };
+
+                emit_transfer_update(
+                    &app_handle,
+                    TransferUpdatePayload {
+                        job_id,
+                        direction: "upload".to_string(),
+                        name,
+                        status: status.to_string(),
+                        detail,
+                        progress_percent: None,
+                        transferred_bytes: None,
+                        total_bytes: None,
+                    },
+                )
+            }
+        }
+    });
+
     Ok(true)
 }
 
+// author: BrianXiong
+// time: 2026/04/08/10:26:00
 #[tauri::command]
-fn download_from_remote(
+fn cancel_upload_to_remote(state: State<AppState>, job_id: String) -> Result<bool, String> {
+    let child = {
+        let processes = state
+            .upload_processes
+            .lock()
+            .map_err(|_| "Upload process state lock poisoned".to_string())?;
+        processes.get(&job_id).cloned()
+    };
+
+    let Some(child) = child else {
+        return Ok(false);
+    };
+
+    state
+        .cancelled_uploads
+        .lock()
+        .map_err(|_| "Cancelled upload state lock poisoned".to_string())?
+        .insert(job_id);
+
+    child
+        .lock()
+        .map_err(|_| "Upload process lock poisoned".to_string())?
+        .kill()
+        .map_err(|error| error.to_string())?;
+
+    Ok(true)
+}
+
+// author: BrianXiong
+// time: 2026/04/07/22:11:00
+#[tauri::command]
+async fn download_from_remote(
     host: HostRecord,
     remote_path: String,
     local_dir: String,
     is_dir: bool,
     ssh_options: SshConnectionOptions,
 ) -> Result<bool, String> {
-    let local_dir_buf = expand_path(&local_dir);
-    let local_dir_str = local_dir_buf.to_string_lossy().into_owned();
-    let batch = if is_dir {
-        format!(
-            "lcd {}\nget -r {}\nbye\n",
-            escape_sftp_path(&local_dir_str),
-            escape_sftp_path(&remote_path)
-        )
-    } else {
-        format!(
-            "lcd {}\nget {}\nbye\n",
-            escape_sftp_path(&local_dir_str),
-            escape_sftp_path(&remote_path)
-        )
-    };
+    async_runtime::spawn_blocking(move || {
+        let local_dir_buf = expand_path(&local_dir);
+        let local_dir_str = local_dir_buf.to_string_lossy().into_owned();
+        let batch = if is_dir {
+            format!(
+                "lcd {}\nget -r {}\nbye\n",
+                escape_sftp_path(&local_dir_str),
+                escape_sftp_path(&remote_path)
+            )
+        } else {
+            format!(
+                "lcd {}\nget {}\nbye\n",
+                escape_sftp_path(&local_dir_str),
+                escape_sftp_path(&remote_path)
+            )
+        };
 
-    let output = run_sftp_batch(&host, &ssh_options, &batch)?;
-    ensure_sftp_success(&output, "Download failed")?;
-    Ok(true)
+        let output = run_sftp_batch(&host, &ssh_options, &batch)?;
+        ensure_sftp_success(&output, "Download failed")?;
+        Ok(true)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1512,22 +1824,28 @@ fn delete_local_entry(path: String, is_dir: bool) -> Result<bool, String> {
     Ok(true)
 }
 
+// author: BrianXiong
+// time: 2026/04/07/22:11:00
 #[tauri::command]
-fn delete_remote_entry(
+async fn delete_remote_entry(
     host: HostRecord,
     remote_path: String,
     is_dir: bool,
     ssh_options: SshConnectionOptions,
 ) -> Result<bool, String> {
-    let batch = if is_dir {
-        format!("rmdir {}\nbye\n", escape_sftp_path(&remote_path))
-    } else {
-        format!("rm {}\nbye\n", escape_sftp_path(&remote_path))
-    };
+    async_runtime::spawn_blocking(move || {
+        let batch = if is_dir {
+            format!("rmdir {}\nbye\n", escape_sftp_path(&remote_path))
+        } else {
+            format!("rm {}\nbye\n", escape_sftp_path(&remote_path))
+        };
 
-    let output = run_sftp_batch(&host, &ssh_options, &batch)?;
-    ensure_sftp_success(&output, "Delete failed")?;
-    Ok(true)
+        let output = run_sftp_batch(&host, &ssh_options, &batch)?;
+        ensure_sftp_success(&output, "Delete failed")?;
+        Ok(true)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
@@ -1926,6 +2244,8 @@ fn main() {
         })
         .manage(AppState {
             terminal_sessions: Mutex::new(HashMap::new()),
+            upload_processes: Mutex::new(HashMap::new()),
+            cancelled_uploads: Mutex::new(HashSet::new()),
         })
         .invoke_handler(tauri::generate_handler![
             clear_app_data,
@@ -1942,6 +2262,8 @@ fn main() {
             read_local_file_preview,
             list_remote_directory,
             upload_to_remote,
+            start_upload_to_remote,
+            cancel_upload_to_remote,
             download_from_remote,
             delete_local_entry,
             delete_remote_entry,
