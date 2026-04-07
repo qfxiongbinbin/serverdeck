@@ -231,6 +231,8 @@ select {
   display: grid;
   gap: 12px;
   padding: 14px;
+  max-height: min(560px, calc(100vh - 96px));
+  overflow-y: auto;
   border: 1px solid var(--line-soft);
   border-radius: 18px;
   background: var(--chrome-bg);
@@ -261,7 +263,7 @@ select {
 .topbar-popover__list {
   display: grid;
   gap: 8px;
-  max-height: 280px;
+  max-height: 168px;
   overflow: auto;
   padding-right: 4px;
 }

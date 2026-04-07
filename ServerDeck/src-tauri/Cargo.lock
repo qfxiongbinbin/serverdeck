@@ -3412,7 +3412,7 @@ dependencies = [
 
 [[package]]
 name = "serverdeck"
-version = "0.0.7"
+version = "0.0.12"
 dependencies = [
  "dirs",
  "portable-pty",
