@@ -189,6 +189,8 @@ struct AppState {
     terminal_sessions: Mutex<HashMap<String, TerminalSession>>,
     upload_processes: Mutex<HashMap<String, Arc<Mutex<std::process::Child>>>>,
     cancelled_uploads: Mutex<HashSet<String>>,
+    download_processes: Mutex<HashMap<String, Arc<Mutex<std::process::Child>>>>,
+    cancelled_downloads: Mutex<HashSet<String>>,
 }
 
 fn storage_dir() -> Result<PathBuf, String> {
@@ -1249,6 +1251,142 @@ fn take_cancelled_upload(state: &AppState, job_id: &str) -> Result<bool, String>
 }
 
 // author: BrianXiong
+// time: 2026/04/08/11:42:00
+fn run_sftp_batch_with_download_job(
+    state: &AppState,
+    job_id: &str,
+    host: &HostRecord,
+    ssh_options: &SshConnectionOptions,
+    batch: &str,
+) -> Result<std::process::Output, String> {
+    let destination = format!("{}@{}", host.username, host.address);
+    let mut child = build_sftp_command(host, ssh_options)
+        .arg("-b")
+        .arg("-")
+        .arg(destination)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(batch.as_bytes())
+            .and_then(|_| stdin.flush())
+            .map_err(|error| error.to_string())?;
+    }
+
+    drop(child.stdin.take());
+
+    let stdout = child.stdout.take().ok_or_else(|| "Cannot capture download stdout".to_string())?;
+    let stderr = child.stderr.take().ok_or_else(|| "Cannot capture download stderr".to_string())?;
+    let child_handle = Arc::new(Mutex::new(child));
+
+    state
+        .download_processes
+        .lock()
+        .map_err(|_| "Download process state lock poisoned".to_string())?
+        .insert(job_id.to_string(), child_handle.clone());
+
+    let stdout_reader = std::thread::spawn(move || -> Result<Vec<u8>, String> {
+        let mut reader = stdout;
+        let mut buffer = Vec::new();
+        reader.read_to_end(&mut buffer).map_err(|error| error.to_string())?;
+        Ok(buffer)
+    });
+
+    let stderr_reader = std::thread::spawn(move || -> Result<Vec<u8>, String> {
+        let mut reader = stderr;
+        let mut buffer = Vec::new();
+        reader.read_to_end(&mut buffer).map_err(|error| error.to_string())?;
+        Ok(buffer)
+    });
+
+    let exit_status = loop {
+        let status = {
+            let mut child = child_handle
+                .lock()
+                .map_err(|_| "Download process lock poisoned".to_string())?;
+            child.try_wait().map_err(|error| error.to_string())?
+        };
+
+        if let Some(status) = status {
+            break status;
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(120));
+    };
+
+    state
+        .download_processes
+        .lock()
+        .map_err(|_| "Download process state lock poisoned".to_string())?
+        .remove(job_id);
+
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| "Failed to join download stdout reader".to_string())??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| "Failed to join download stderr reader".to_string())??;
+
+    Ok(std::process::Output {
+        status: exit_status,
+        stdout,
+        stderr,
+    })
+}
+
+// author: BrianXiong
+// time: 2026/04/08/11:42:00
+fn take_cancelled_download(state: &AppState, job_id: &str) -> Result<bool, String> {
+    Ok(state
+        .cancelled_downloads
+        .lock()
+        .map_err(|_| "Cancelled download state lock poisoned".to_string())?
+        .remove(job_id))
+}
+
+// author: BrianXiong
+// time: 2026/04/08/11:42:00
+fn query_local_entry_size_internal(path: &Path) -> Result<u64, String> {
+    collect_local_transfer_size(path)
+}
+
+// author: BrianXiong
+// time: 2026/04/08/11:42:00
+fn download_from_remote_with_job(
+    state: &AppState,
+    job_id: &str,
+    host: &HostRecord,
+    remote_path: &str,
+    local_dir: &str,
+    is_dir: bool,
+    ssh_options: &SshConnectionOptions,
+) -> Result<bool, String> {
+    let local_dir_buf = expand_path(local_dir);
+    let local_dir_str = local_dir_buf.to_string_lossy().into_owned();
+    let batch = if is_dir {
+        format!(
+            "lcd {}\nget -r {}\nbye\n",
+            escape_sftp_path(&local_dir_str),
+            escape_sftp_path(remote_path)
+        )
+    } else {
+        format!(
+            "lcd {}\nget {}\nbye\n",
+            escape_sftp_path(&local_dir_str),
+            escape_sftp_path(remote_path)
+        )
+    };
+
+    let output = run_sftp_batch_with_download_job(state, job_id, host, ssh_options, &batch)?;
+    ensure_sftp_success(&output, "Download failed")?;
+    Ok(true)
+}
+
+// author: BrianXiong
 // time: 2026/04/07/23:02:00
 fn collect_local_transfer_size(path: &Path) -> Result<u64, String> {
     let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
@@ -1813,6 +1951,128 @@ async fn download_from_remote(
     .map_err(|error| error.to_string())?
 }
 
+// author: BrianXiong
+// time: 2026/04/08/11:42:00
+#[tauri::command]
+fn start_download_from_remote(
+    app: AppHandle,
+    job_id: String,
+    host: HostRecord,
+    remote_path: String,
+    local_dir: String,
+    is_dir: bool,
+    ssh_options: SshConnectionOptions,
+) -> Result<bool, String> {
+    let name = Path::new(&remote_path)
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_else(|| remote_path.clone());
+
+    let app_handle = app.clone();
+    async_runtime::spawn(async move {
+        let remote_path_for_download = remote_path.clone();
+        let local_dir_for_download = local_dir.clone();
+        let app_for_download = app_handle.clone();
+        let job_id_for_download = job_id.clone();
+        let result = async_runtime::spawn_blocking(move || {
+            let state = app_for_download.state::<AppState>();
+            download_from_remote_with_job(
+                &state,
+                &job_id_for_download,
+                &host,
+                &remote_path_for_download,
+                &local_dir_for_download,
+                is_dir,
+                &ssh_options,
+            )
+        })
+            .await
+            .map_err(|error| error.to_string())
+            .and_then(|value| value);
+
+        let state = app_handle.state::<AppState>();
+        let is_cancelled = take_cancelled_download(&state, &job_id).unwrap_or(false);
+
+        match result {
+            Ok(_) => emit_transfer_update(
+                &app_handle,
+                TransferUpdatePayload {
+                    job_id,
+                    direction: "download".to_string(),
+                    name,
+                    status: "success".to_string(),
+                    detail: local_dir,
+                    progress_percent: Some(100.0),
+                    transferred_bytes: None,
+                    total_bytes: None,
+                },
+            ),
+            Err(error) => {
+                let status = if is_cancelled { "cancelled" } else { "error" };
+                let detail = if is_cancelled {
+                    "Download cancelled".to_string()
+                } else {
+                    error
+                };
+
+                emit_transfer_update(
+                    &app_handle,
+                    TransferUpdatePayload {
+                        job_id,
+                        direction: "download".to_string(),
+                        name,
+                        status: status.to_string(),
+                        detail,
+                        progress_percent: None,
+                        transferred_bytes: None,
+                        total_bytes: None,
+                    },
+                )
+            }
+        }
+    });
+
+    Ok(true)
+}
+
+// author: BrianXiong
+// time: 2026/04/08/11:42:00
+#[tauri::command]
+fn cancel_download_from_remote(state: State<AppState>, job_id: String) -> Result<bool, String> {
+    let child = {
+        let processes = state
+            .download_processes
+            .lock()
+            .map_err(|_| "Download process state lock poisoned".to_string())?;
+        processes.get(&job_id).cloned()
+    };
+
+    let Some(child) = child else {
+        return Ok(false);
+    };
+
+    state
+        .cancelled_downloads
+        .lock()
+        .map_err(|_| "Cancelled download state lock poisoned".to_string())?
+        .insert(job_id);
+
+    child
+        .lock()
+        .map_err(|_| "Download process lock poisoned".to_string())?
+        .kill()
+        .map_err(|error| error.to_string())?;
+
+    Ok(true)
+}
+
+// author: BrianXiong
+// time: 2026/04/08/11:42:00
+#[tauri::command]
+fn query_local_entry_size(path: String) -> Result<u64, String> {
+    query_local_entry_size_internal(&expand_path(&path))
+}
+
 #[tauri::command]
 fn delete_local_entry(path: String, is_dir: bool) -> Result<bool, String> {
     let expanded = expand_path(&path);
@@ -2246,6 +2506,8 @@ fn main() {
             terminal_sessions: Mutex::new(HashMap::new()),
             upload_processes: Mutex::new(HashMap::new()),
             cancelled_uploads: Mutex::new(HashSet::new()),
+            download_processes: Mutex::new(HashMap::new()),
+            cancelled_downloads: Mutex::new(HashSet::new()),
         })
         .invoke_handler(tauri::generate_handler![
             clear_app_data,
@@ -2265,6 +2527,9 @@ fn main() {
             start_upload_to_remote,
             cancel_upload_to_remote,
             download_from_remote,
+            start_download_from_remote,
+            cancel_download_from_remote,
+            query_local_entry_size,
             delete_local_entry,
             delete_remote_entry,
             start_terminal_session,
