@@ -2639,14 +2639,16 @@ export default function App() {
                 {recentLocalProjects.length ? (
                   <div className="topbar-popover__section">
                     <div className="topbar-popover__label">{messages.recentProjects}</div>
-                    {recentLocalProjects.map((project) => (
-                      <button key={project.id} type="button" className="topbar-popover__item" onClick={() => void handleOpenProjectLocalTerminal(project)}>
-                        <div>
-                          <strong>{project.name}</strong>
-                          <span>{project.path}</span>
-                        </div>
-                      </button>
-                    ))}
+                    <div className="topbar-popover__list">
+                      {recentLocalProjects.map((project) => (
+                        <button key={project.id} type="button" className="topbar-popover__item" onClick={() => void handleOpenProjectLocalTerminal(project)}>
+                          <div>
+                            <strong>{project.name}</strong>
+                            <span>{project.path}</span>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
 
@@ -2655,12 +2657,12 @@ export default function App() {
                   {filteredLocalTerminalProjects.length ? (
                     <div className="topbar-popover__list">
                       {filteredLocalTerminalProjects.map((project) => (
-                      <button key={project.id} type="button" className="topbar-popover__item" onClick={() => void handleOpenProjectLocalTerminal(project)}>
-                        <div>
-                          <strong>{project.name}</strong>
-                          <span>{project.path}</span>
-                        </div>
-                      </button>
+                        <button key={project.id} type="button" className="topbar-popover__item" onClick={() => void handleOpenProjectLocalTerminal(project)}>
+                          <div>
+                            <strong>{project.name}</strong>
+                            <span>{project.path}</span>
+                          </div>
+                        </button>
                       ))}
                     </div>
                   ) : (
