@@ -95,6 +95,48 @@ struct AppSettingsRecord {
     terminal_charset: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentSessionRecord {
+    id: String,
+    project_id: String,
+    title: String,
+    goal: String,
+    status: String,
+    provider_id: String,
+    model: String,
+    root_path: String,
+    created_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentMessageRecord {
+    id: String,
+    session_id: String,
+    role: String,
+    content: String,
+    created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentSessionCreateRequest {
+    project_id: String,
+    root_path: String,
+    provider_id: String,
+    model: String,
+    goal: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentSessionDetailPayload {
+    session: AgentSessionRecord,
+    messages: Vec<AgentMessageRecord>,
+}
+
 fn default_project_id() -> String {
     "default".to_string()
 }
@@ -282,6 +324,33 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           project_id TEXT PRIMARY KEY,
           used_at INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS agent_sessions (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT '',
+          goal TEXT NOT NULL DEFAULT '',
+          status TEXT NOT NULL,
+          provider_id TEXT NOT NULL DEFAULT '',
+          model TEXT NOT NULL DEFAULT '',
+          root_path TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_messages (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          role TEXT NOT NULL,
+          content TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated_at
+          ON agent_sessions(updated_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_agent_messages_session_id_created_at
+          ON agent_messages(session_id, created_at);
         "#,
     )
     .map_err(|error| error.to_string())?;
@@ -421,6 +490,30 @@ fn now_millis() -> String {
         .unwrap_or_else(|_| "0".into())
 }
 
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn now_millis_i64() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn build_agent_session_title(goal: &str) -> String {
+    let trimmed = goal.trim();
+    if trimmed.is_empty() {
+        return "New Agent Session".to_string();
+    }
+
+    let mut title = trimmed.chars().take(48).collect::<String>();
+    if trimmed.chars().count() > 48 {
+        title.push('…');
+    }
+    title
+}
+
 fn read_hosts() -> Result<Vec<HostRecord>, String> {
     let path = hosts_file()?;
     if !path.exists() {
@@ -515,6 +608,90 @@ fn load_projects_from_db(conn: &Connection) -> Result<Vec<ManagedProjectRecord>,
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn load_agent_sessions_from_db(conn: &Connection) -> Result<Vec<AgentSessionRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, project_id, title, goal, status, provider_id, model, root_path, created_at, updated_at FROM agent_sessions ORDER BY updated_at DESC, created_at DESC",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(AgentSessionRecord {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                title: row.get(2)?,
+                goal: row.get(3)?,
+                status: row.get(4)?,
+                provider_id: row.get(5)?,
+                model: row.get(6)?,
+                root_path: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn load_agent_session_by_id(conn: &Connection, session_id: &str) -> Result<AgentSessionRecord, String> {
+    conn.query_row(
+        "SELECT id, project_id, title, goal, status, provider_id, model, root_path, created_at, updated_at FROM agent_sessions WHERE id = ?1",
+        params![session_id],
+        |row| {
+            Ok(AgentSessionRecord {
+                id: row.get(0)?,
+                project_id: row.get(1)?,
+                title: row.get(2)?,
+                goal: row.get(3)?,
+                status: row.get(4)?,
+                provider_id: row.get(5)?,
+                model: row.get(6)?,
+                root_path: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|error| error.to_string())?
+    .ok_or_else(|| "Agent session not found".to_string())
+}
+
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn load_agent_messages_from_db(conn: &Connection, session_id: &str) -> Result<Vec<AgentMessageRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, session_id, role, content, created_at FROM agent_messages WHERE session_id = ?1 ORDER BY created_at, id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map(params![session_id], |row| {
+            Ok(AgentMessageRecord {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                role: row.get(2)?,
+                content: row.get(3)?,
+                created_at: row.get(4)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn build_agent_session_detail(conn: &Connection, session_id: &str) -> Result<AgentSessionDetailPayload, String> {
+    Ok(AgentSessionDetailPayload {
+        session: load_agent_session_by_id(conn, session_id)?,
+        messages: load_agent_messages_from_db(conn, session_id)?,
+    })
+}
+
 fn load_ai_providers_from_db(conn: &Connection) -> Result<Vec<AiProviderRecord>, String> {
     let mut stmt = conn
         .prepare(
@@ -579,6 +756,22 @@ fn expand_path(path: &str) -> PathBuf {
     }
 
     PathBuf::from(path)
+}
+
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn validate_agent_root_path(root_path: &str) -> Result<String, String> {
+    let trimmed = root_path.trim();
+    if trimmed.is_empty() {
+        return Err("Agent project path is required".to_string());
+    }
+
+    let resolved = expand_path(trimmed);
+    if !resolved.is_dir() {
+        return Err(format!("Agent project path not found: {}", resolved.display()));
+    }
+
+    Ok(resolved.display().to_string())
 }
 
 fn resolve_binary(name: &str) -> Result<PathBuf, String> {
@@ -1578,6 +1771,94 @@ fn wire_terminal_pty_exit(
 }
 
 #[tauri::command]
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn list_agent_sessions() -> Result<Vec<AgentSessionRecord>, String> {
+    let conn = open_db()?;
+    load_agent_sessions_from_db(&conn)
+}
+
+#[tauri::command]
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn get_agent_session_detail(session_id: String) -> Result<AgentSessionDetailPayload, String> {
+    let conn = open_db()?;
+    build_agent_session_detail(&conn, &session_id)
+}
+
+#[tauri::command]
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn create_agent_session(request: AgentSessionCreateRequest) -> Result<AgentSessionDetailPayload, String> {
+    if request.goal.trim().is_empty() {
+        return Err("Agent task is required".to_string());
+    }
+
+    let root_path = validate_agent_root_path(&request.root_path)?;
+    let session_id = Uuid::new_v4().to_string();
+    let message_id = Uuid::new_v4().to_string();
+    let created_at = now_millis_i64();
+    let title = build_agent_session_title(&request.goal);
+
+    let mut conn = open_db()?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    tx.execute(
+        "INSERT INTO agent_sessions (id, project_id, title, goal, status, provider_id, model, root_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        params![
+            session_id,
+            request.project_id.trim(),
+            title,
+            request.goal.trim(),
+            "idle",
+            request.provider_id.trim(),
+            request.model.trim(),
+            root_path,
+            created_at,
+            created_at,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    tx.execute(
+        "INSERT INTO agent_messages (id, session_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![message_id, session_id, "user", request.goal.trim(), created_at],
+    )
+    .map_err(|error| error.to_string())?;
+    tx.commit().map_err(|error| error.to_string())?;
+
+    let conn = open_db()?;
+    build_agent_session_detail(&conn, &session_id)
+}
+
+#[tauri::command]
+// author: BrianXiong
+// time: 2026/04/08/16:24:00
+fn append_agent_user_message(session_id: String, content: String) -> Result<AgentSessionDetailPayload, String> {
+    if content.trim().is_empty() {
+        return Err("Agent message is required".to_string());
+    }
+
+    let created_at = now_millis_i64();
+    let message_id = Uuid::new_v4().to_string();
+    let mut conn = open_db()?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    load_agent_session_by_id(&tx, &session_id)?;
+    tx.execute(
+        "INSERT INTO agent_messages (id, session_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![message_id, session_id, "user", content.trim(), created_at],
+    )
+    .map_err(|error| error.to_string())?;
+    tx.execute(
+        "UPDATE agent_sessions SET updated_at = ?2 WHERE id = ?1",
+        params![session_id, created_at],
+    )
+    .map_err(|error| error.to_string())?;
+    tx.commit().map_err(|error| error.to_string())?;
+
+    let conn = open_db()?;
+    build_agent_session_detail(&conn, &session_id)
+}
+
+#[tauri::command]
 fn list_hosts() -> Result<Vec<HostRecord>, String> {
     let conn = open_db()?;
     load_hosts_from_db(&conn)
@@ -2513,6 +2794,10 @@ fn main() {
             clear_app_data,
             load_app_preferences,
             save_app_preferences,
+            list_agent_sessions,
+            get_agent_session_detail,
+            create_agent_session,
+            append_agent_user_message,
             fetch_ai_provider_models,
             detect_ai_provider_imports,
             list_hosts,

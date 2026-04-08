@@ -78,9 +78,18 @@ import {
   type TransferUpdatePayload
 } from "./lib/api";
 import { FileBrowserPane } from "./components/files/FileBrowserPane";
+import { AgentWorkspace } from "./components/agent/AgentWorkspace";
 import { AiProviderEditorModal } from "./components/ai/AiProviderEditorModal";
 import { ProjectEditorModal } from "./components/projects/ProjectEditorModal";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
+import {
+  appendAgentUserMessage,
+  createAgentSession,
+  getAgentSessionDetail,
+  listAgentSessions,
+  type AgentSession,
+  type AgentSessionDetail
+} from "./lib/agentApi";
 import {
   getDocumentLanguageTag,
   languageOptions,
@@ -97,6 +106,7 @@ import {
 
 const HOSTS_TAB_ID = "hosts";
 const SFTP_TAB_ID = "sftp";
+const AGENT_TAB_ID = "agent";
 const SETTINGS_TAB_ID = "settings";
 const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 const LOCAL_TERMINAL_RECENT_PROJECTS_KEY = "serverdeck.localTerminalRecentProjects";
@@ -776,6 +786,16 @@ export default function App() {
   const [localPreview, setLocalPreview] = useState<LocalFilePreview | null>(null);
   const [localPreviewLoading, setLocalPreviewLoading] = useState(false);
   const [localPreviewError, setLocalPreviewError] = useState("");
+  const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
+  const [agentSessionsLoading, setAgentSessionsLoading] = useState(false);
+  const [activeAgentSessionId, setActiveAgentSessionId] = useState("");
+  const [activeAgentSessionDetail, setActiveAgentSessionDetail] = useState<AgentSessionDetail | null>(null);
+  const [agentSessionDetailLoading, setAgentSessionDetailLoading] = useState(false);
+  const [agentSelectedProjectId, setAgentSelectedProjectId] = useState("");
+  const [agentTaskInput, setAgentTaskInput] = useState("");
+  const [agentFollowUpInput, setAgentFollowUpInput] = useState("");
+  const [agentCreateBusy, setAgentCreateBusy] = useState(false);
+  const [agentSendBusy, setAgentSendBusy] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
 
   const terminalEl = useRef<HTMLDivElement | null>(null);
@@ -791,6 +811,7 @@ export default function App() {
 
   const isHostsView = activeTabId === HOSTS_TAB_ID;
   const isSftpView = activeTabId === SFTP_TAB_ID;
+  const isAgentView = activeTabId === AGENT_TAB_ID;
   const isSettingsView = activeTabId === SETTINGS_TAB_ID;
 
   const selectedHost = useMemo(
@@ -909,6 +930,11 @@ export default function App() {
     [settings.projects]
   );
 
+  const agentProjects = useMemo(
+    () => localTerminalProjects,
+    [localTerminalProjects]
+  );
+
   const recentLocalProjects = useMemo(
     () => recentLocalProjectIds
       .map((projectId) => localTerminalProjects.find((project) => project.id === projectId) ?? null)
@@ -938,6 +964,112 @@ export default function App() {
     ],
     [messages.about, messages.ai, messages.dangerZone, messages.general, messages.projects, messages.terminal]
   );
+
+  // author: BrianXiong
+  // time: 2026/04/08/16:24:00
+  const refreshAgentSessions = useCallback(async () => {
+    setAgentSessionsLoading(true);
+
+    try {
+      const sessions = await listAgentSessions();
+      setAgentSessions(sessions);
+      setActiveAgentSessionId((current) => {
+        if (current && sessions.some((session) => session.id === current)) {
+          return current;
+        }
+
+        return sessions[0]?.id ?? "";
+      });
+    } catch (error) {
+      setStatus(getErrorMessage(error, "Failed to load agent sessions"));
+      setStatusTone("error");
+    } finally {
+      setAgentSessionsLoading(false);
+    }
+  }, []);
+
+  // author: BrianXiong
+  // time: 2026/04/08/16:24:00
+  const handleCreateAgentSession = useCallback(async () => {
+    const project = agentProjects.find((item) => item.id === agentSelectedProjectId) ?? null;
+    if (!project) {
+      setStatus(messages.agentProjectRequired);
+      setStatusTone("error");
+      return;
+    }
+
+    if (!agentTaskInput.trim()) {
+      setStatus(messages.agentTaskRequired);
+      setStatusTone("error");
+      return;
+    }
+
+    setAgentCreateBusy(true);
+    setStatusTone("neutral");
+
+    try {
+      const detail = await createAgentSession({
+        projectId: project.id,
+        rootPath: project.path,
+        providerId: "",
+        model: "",
+        goal: agentTaskInput.trim()
+      });
+
+      const nextSessions = [detail.session, ...agentSessions.filter((session) => session.id !== detail.session.id)]
+        .sort((left, right) => right.updatedAt - left.updatedAt);
+      setAgentSessions(nextSessions);
+      setActiveAgentSessionId(detail.session.id);
+      setActiveAgentSessionDetail(detail);
+      setAgentTaskInput("");
+      setAgentFollowUpInput("");
+      setActiveTabId(AGENT_TAB_ID);
+      setStatus(messages.agentStartSession);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.agentTaskRequired));
+      setStatusTone("error");
+    } finally {
+      setAgentCreateBusy(false);
+    }
+  }, [agentProjects, agentSelectedProjectId, agentSessions, agentTaskInput, messages]);
+
+  // author: BrianXiong
+  // time: 2026/04/08/16:24:00
+  const handleSendAgentFollowUp = useCallback(async () => {
+    if (!activeAgentSessionId) {
+      return;
+    }
+
+    if (!agentFollowUpInput.trim()) {
+      setStatus(messages.agentTaskRequired);
+      setStatusTone("error");
+      return;
+    }
+
+    setAgentSendBusy(true);
+    setStatusTone("neutral");
+
+    try {
+      const detail = await appendAgentUserMessage(activeAgentSessionId, agentFollowUpInput.trim());
+      setActiveAgentSessionDetail(detail);
+      setAgentSessions((current) => {
+        const nextSessions = current.some((session) => session.id === detail.session.id)
+          ? current.map((session) => (session.id === detail.session.id ? detail.session : session))
+          : [detail.session, ...current];
+
+        return [...nextSessions].sort((left, right) => right.updatedAt - left.updatedAt);
+      });
+      setAgentFollowUpInput("");
+      setStatus(messages.agentSend);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.agentTaskRequired));
+      setStatusTone("error");
+    } finally {
+      setAgentSendBusy(false);
+    }
+  }, [activeAgentSessionId, agentFollowUpInput, messages]);
 
   const filteredHosts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -1009,6 +1141,55 @@ export default function App() {
   useEffect(() => {
     void refreshHosts();
   }, []);
+
+  useEffect(() => {
+    void refreshAgentSessions();
+  }, [refreshAgentSessions]);
+
+  useEffect(() => {
+    if (!agentProjects.length) {
+      if (agentSelectedProjectId) {
+        setAgentSelectedProjectId("");
+      }
+      return;
+    }
+
+    if (!agentProjects.some((project) => project.id === agentSelectedProjectId)) {
+      setAgentSelectedProjectId(agentProjects[0]?.id ?? "");
+    }
+  }, [agentProjects, agentSelectedProjectId]);
+
+  useEffect(() => {
+    if (!activeAgentSessionId) {
+      setActiveAgentSessionDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+    setAgentSessionDetailLoading(true);
+
+    void getAgentSessionDetail(activeAgentSessionId)
+      .then((detail) => {
+        if (!cancelled) {
+          setActiveAgentSessionDetail(detail);
+        }
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setStatus(getErrorMessage(error, "Failed to load agent session"));
+          setStatusTone("error");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAgentSessionDetailLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAgentSessionId]);
 
   const checkForUpdates = useCallback(async (options?: { silent?: boolean }) => {
     if (!hasTauriRuntime()) {
@@ -2903,6 +3084,15 @@ export default function App() {
             {messages.sftp}
           </button>
 
+          <button
+            type="button"
+            className={`top-tab ${isAgentView ? "top-tab--active" : ""}`}
+            onClick={() => setActiveTabId(AGENT_TAB_ID)}
+          >
+            <Bot size={16} />
+            {messages.agent}
+          </button>
+
           {terminalTabs.map((tab) => (
             <div
               key={tab.id}
@@ -3044,6 +3234,15 @@ export default function App() {
             >
               <Server size={18} />
               <span>Hosts</span>
+            </button>
+
+            <button
+              type="button"
+              className={`side-nav ${isAgentView ? "side-nav--active" : ""}`}
+              onClick={() => setActiveTabId(AGENT_TAB_ID)}
+            >
+              <Bot size={18} />
+              <span>{messages.agent}</span>
             </button>
           </div>
 
@@ -3399,6 +3598,9 @@ export default function App() {
                   refreshLabel={messages.refresh}
                   upLabel={messages.up}
                   loadingText={messages.loading}
+                  nameColumnLabel={messages.fileNameColumn}
+                  modifiedColumnLabel={messages.fileModifiedDateColumn}
+                  sizeColumnLabel={messages.fileSizeColumn}
                   path={localPath}
                   items={localEntries}
                   loading={localLoading}
@@ -3420,6 +3622,9 @@ export default function App() {
                   refreshLabel={messages.refresh}
                   upLabel={messages.up}
                   loadingText={messages.loading}
+                  nameColumnLabel={messages.fileNameColumn}
+                  modifiedColumnLabel={messages.fileModifiedDateColumn}
+                  sizeColumnLabel={messages.fileSizeColumn}
                   path={remotePath}
                   items={remoteEntries}
                   loading={remoteLoading}
@@ -3474,6 +3679,40 @@ export default function App() {
                 </div>
               </div> : null}
             </section>
+          ) : isAgentView ? (
+            <AgentWorkspace
+              title={messages.agent}
+              description={messages.agentDescription}
+              sessionsLabel={messages.agentSessions}
+              projectLabel={messages.agentProject}
+              taskLabel={messages.agentTask}
+              taskPlaceholder={messages.agentTaskPlaceholder}
+              startLabel={messages.agentStartSession}
+              conversationLabel={messages.agentConversation}
+              messagePlaceholder={messages.agentMessagePlaceholder}
+              sendLabel={messages.agentSend}
+              noSessionsLabel={messages.noAgentSessions}
+              noSessionsDescription={messages.noAgentSessionsDescription}
+              noProjectsLabel={messages.noProjectPaths}
+              loadingLabel={messages.loading}
+              projects={agentProjects}
+              selectedProjectId={agentSelectedProjectId}
+              taskInput={agentTaskInput}
+              followUpInput={agentFollowUpInput}
+              sessions={agentSessions}
+              activeSessionId={activeAgentSessionId}
+              activeSessionDetail={activeAgentSessionDetail}
+              sessionsLoading={agentSessionsLoading}
+              detailLoading={agentSessionDetailLoading}
+              createBusy={agentCreateBusy}
+              sendBusy={agentSendBusy}
+              onSelectProject={setAgentSelectedProjectId}
+              onTaskInputChange={setAgentTaskInput}
+              onCreateSession={() => void handleCreateAgentSession()}
+              onSelectSession={setActiveAgentSessionId}
+              onFollowUpInputChange={setAgentFollowUpInput}
+              onSendFollowUp={() => void handleSendAgentFollowUp()}
+            />
           ) : isSettingsView ? (
             <section className="settings-screen">
               <div className="settings-layout">

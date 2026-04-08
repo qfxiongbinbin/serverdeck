@@ -12,12 +12,76 @@ export function formatFileSize(size: number) {
   return `${value.toFixed(value >= 10 || unitIndex === 0 ? 0 : 1)} ${units[unitIndex]}`;
 }
 
+const SFTP_MONTH_MAP: Record<string, number> = {
+  jan: 0,
+  feb: 1,
+  mar: 2,
+  apr: 3,
+  may: 4,
+  jun: 5,
+  jul: 6,
+  aug: 7,
+  sep: 8,
+  oct: 9,
+  nov: 10,
+  dec: 11
+};
+
+// author: BrianXiong
+// time: 2026/04/08/16:53:15
+export function parseModifiedTimestamp(value: string) {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return null;
+  }
+
+  const numericValue = Number(trimmedValue);
+  if (!Number.isNaN(numericValue)) {
+    const timestamp = numericValue < 1_000_000_000_000 ? numericValue * 1000 : numericValue;
+    return Number.isNaN(new Date(timestamp).getTime()) ? null : timestamp;
+  }
+
+  const sftpMatch = trimmedValue.match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{4}|\d{1,2}:\d{2})$/);
+  if (sftpMatch) {
+    const [, monthLabel, dayValue, yearOrTime] = sftpMatch;
+    const month = SFTP_MONTH_MAP[monthLabel.toLowerCase()];
+    const day = Number(dayValue);
+
+    if (month !== undefined && !Number.isNaN(day)) {
+      if (yearOrTime.includes(":")) {
+        const [hoursValue, minutesValue] = yearOrTime.split(":");
+        const hours = Number(hoursValue);
+        const minutes = Number(minutesValue);
+
+        if (!Number.isNaN(hours) && !Number.isNaN(minutes)) {
+          const now = new Date();
+          const candidate = new Date(now.getFullYear(), month, day, hours, minutes, 0, 0);
+          if (candidate.getTime() > now.getTime() + 24 * 60 * 60 * 1000) {
+            candidate.setFullYear(candidate.getFullYear() - 1);
+          }
+          return candidate.getTime();
+        }
+      }
+
+      const year = Number(yearOrTime);
+      if (!Number.isNaN(year)) {
+        return new Date(year, month, day, 0, 0, 0, 0).getTime();
+      }
+    }
+  }
+
+  const nativeTimestamp = new Date(trimmedValue).getTime();
+  return Number.isNaN(nativeTimestamp) ? null : nativeTimestamp;
+}
+
 // author: BrianXiong
 // time: 2026/04/05/12:19:04
 export function formatModified(value: string) {
   if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
+  const timestamp = parseModifiedTimestamp(value);
+  if (timestamp === null) return value;
+
+  const date = new Date(timestamp);
   return new Intl.DateTimeFormat(undefined, {
     year: "numeric",
     month: "numeric",

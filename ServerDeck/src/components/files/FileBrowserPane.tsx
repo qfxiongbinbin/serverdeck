@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, MouseEvent } from "react";
 import {
   File,
@@ -10,13 +10,18 @@ import {
   Folder
 } from "lucide-react";
 import type { FileEntry } from "../../lib/api";
-import { formatFileSize, formatModified } from "../../lib/fileBrowser";
+import { formatFileSize, formatModified, parseModifiedTimestamp } from "../../lib/fileBrowser";
+
+type SortField = "name" | "modified" | "size";
 
 type FileBrowserPaneProps = {
   title: string;
   refreshLabel: string;
   upLabel: string;
   loadingText: string;
+  nameColumnLabel: string;
+  modifiedColumnLabel: string;
+  sizeColumnLabel: string;
   path: string;
   items: FileEntry[];
   loading: boolean;
@@ -73,6 +78,9 @@ export function FileBrowserPane({
   refreshLabel,
   upLabel,
   loadingText,
+  nameColumnLabel,
+  modifiedColumnLabel,
+  sizeColumnLabel,
   path,
   items,
   loading,
@@ -91,9 +99,36 @@ export function FileBrowserPane({
   onGoUp
 }: FileBrowserPaneProps) {
   const paneRef = useRef<HTMLElement | null>(null);
+  const [sortField, setSortField] = useState<SortField>("name");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+
+  const orderedItems = useMemo(() => {
+    const entries = [...items];
+
+    entries.sort((left, right) => {
+      const direction = sortDirection === "asc" ? 1 : -1;
+
+      if (left.is_dir !== right.is_dir) {
+        return left.is_dir ? -1 : 1;
+      }
+
+      if (sortField === "size") {
+        return (left.size - right.size) * direction || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
+      }
+
+      if (sortField === "modified") {
+        return ((parseModifiedTimestamp(left.modified) ?? 0) - (parseModifiedTimestamp(right.modified) ?? 0)) * direction || left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" });
+      }
+
+      return left.name.localeCompare(right.name, undefined, { numeric: true, sensitivity: "base" }) * direction;
+    });
+
+    return entries;
+  }, [items, sortDirection, sortField]);
+
   const selectedIndex = useMemo(
-    () => items.findIndex((entry) => entry.path === selectedPath),
-    [items, selectedPath]
+    () => orderedItems.findIndex((entry) => entry.path === selectedPath),
+    [orderedItems, selectedPath]
   );
 
   useEffect(() => {
@@ -114,7 +149,7 @@ export function FileBrowserPane({
   // author: BrianXiong
   // time: 2026/04/05/12:19:04
   function selectEntryAt(index: number) {
-    const nextEntry = items[index];
+    const nextEntry = orderedItems[index];
     if (!nextEntry) {
       return;
     }
@@ -125,7 +160,7 @@ export function FileBrowserPane({
   // author: BrianXiong
   // time: 2026/04/05/12:19:04
   function handlePaneKeyDown(event: KeyboardEvent<HTMLElement>) {
-    if (!enableKeyboardNavigation || disabled || items.length === 0) {
+    if (!enableKeyboardNavigation || disabled || orderedItems.length === 0) {
       return;
     }
 
@@ -133,7 +168,7 @@ export function FileBrowserPane({
 
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      selectEntryAt(Math.min(baseIndex + 1, items.length - 1));
+      selectEntryAt(Math.min(baseIndex + 1, orderedItems.length - 1));
       return;
     }
 
@@ -150,13 +185,35 @@ export function FileBrowserPane({
     }
 
     if (event.key === "ArrowRight" || event.key === "Enter") {
-      const entry = items[Math.max(baseIndex, 0)];
+      const entry = orderedItems[Math.max(baseIndex, 0)];
       if (entry?.is_dir) {
         event.preventDefault();
         onOpenDir(entry);
       }
       return;
     }
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/08/16:49:48
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+
+    setSortField(field);
+    setSortDirection(field === "modified" || field === "size" ? "desc" : "asc");
+  }
+
+  // author: BrianXiong
+  // time: 2026/04/08/16:49:48
+  function renderSortArrow(field: SortField) {
+    if (sortField !== field) {
+      return null;
+    }
+
+    return <span>{sortDirection === "asc" ? "⌃" : "⌄"}</span>;
   }
 
   return (
@@ -181,11 +238,26 @@ export function FileBrowserPane({
       </div>
 
       <div className="browser-list">
+        <div className="browser-column-header">
+          <button type="button" className="browser-column-button browser-column-button--name" onClick={() => handleSort("name")} disabled={disabled}>
+            <span>{nameColumnLabel}</span>
+            {renderSortArrow("name")}
+          </button>
+          <button type="button" className="browser-column-button browser-column-button--modified" onClick={() => handleSort("modified")} disabled={disabled}>
+            <span>{modifiedColumnLabel}</span>
+            {renderSortArrow("modified")}
+          </button>
+          <button type="button" className="browser-column-button browser-column-button--size" onClick={() => handleSort("size")} disabled={disabled}>
+            <span>{sizeColumnLabel}</span>
+            {renderSortArrow("size")}
+          </button>
+        </div>
+
         {loading ? <div className="browser-empty">{loadingText}</div> : null}
         {!loading && error ? <div className="browser-error">{error}</div> : null}
-        {!loading && !error && items.length === 0 ? <div className="browser-empty">{emptyText}</div> : null}
+        {!loading && !error && orderedItems.length === 0 ? <div className="browser-empty">{emptyText}</div> : null}
         {!loading && !error &&
-          items.map((entry) => {
+          orderedItems.map((entry) => {
             const { icon: FileIcon, className } = getFileIcon(entry);
             const isNavigable = entry.is_dir;
             const isSelected = selectedPath === entry.path;
@@ -221,8 +293,8 @@ export function FileBrowserPane({
                   </span>
                   <span>{entry.name}</span>
                 </div>
-                <span>{formatModified(entry.modified)}</span>
-                <span>{entry.is_dir ? "-" : formatFileSize(entry.size)}</span>
+                <span className="browser-row__meta browser-row__meta--modified">{formatModified(entry.modified)}</span>
+                <span className="browser-row__meta browser-row__meta--size">{entry.is_dir ? "-" : formatFileSize(entry.size)}</span>
               </button>
             );
           })}
