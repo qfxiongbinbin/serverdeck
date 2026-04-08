@@ -42,6 +42,7 @@
 - Match the existing commit style: `feat: ...`, `refactor: ...`, `chore: ...`.
 - Keep commit messages short, imperative, and scoped to one change.
 - PRs should include: purpose, affected areas, validation steps, and screenshots for UI updates.
+- Every version upgrade must also include release notes that compare against the previous version and explicitly list `Added`, `Changed`, and `Fixed` items.
 - Branch from `main` for all work:
   - new features use `feature/<name>`
   - bug fixes use `fix/<name>`
