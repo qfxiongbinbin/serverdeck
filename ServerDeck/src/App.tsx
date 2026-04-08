@@ -3706,12 +3706,16 @@ export default function App() {
               detailLoading={agentSessionDetailLoading}
               createBusy={agentCreateBusy}
               sendBusy={agentSendBusy}
+              availableModels={[]}
+              selectedModel=""
+              modelLabel={messages.agentModel}
               onSelectProject={setAgentSelectedProjectId}
               onTaskInputChange={setAgentTaskInput}
               onCreateSession={() => void handleCreateAgentSession()}
               onSelectSession={setActiveAgentSessionId}
               onFollowUpInputChange={setAgentFollowUpInput}
               onSendFollowUp={() => void handleSendAgentFollowUp()}
+              onSelectModel={() => {}}
             />
           ) : isSettingsView ? (
             <section className="settings-screen">

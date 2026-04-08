@@ -1,6 +1,12 @@
-import { ArrowUp, Bot, MessageSquare, Plus, Sparkles } from "lucide-react";
+import { ArrowUp, Bot, ChevronDown, MessageSquare, Plus, Sparkles } from "lucide-react";
 import type { ManagedProject } from "../../lib/api";
 import type { AgentSession, AgentSessionDetail } from "../../lib/agentApi";
+
+export type ModelOption = {
+  providerId: string;
+  providerName: string;
+  model: string;
+};
 
 type AgentWorkspaceProps = {
   title: string;
@@ -17,6 +23,7 @@ type AgentWorkspaceProps = {
   noSessionsDescription: string;
   noProjectsLabel: string;
   loadingLabel: string;
+  modelLabel: string;
   projects: ManagedProject[];
   selectedProjectId: string;
   taskInput: string;
@@ -28,12 +35,15 @@ type AgentWorkspaceProps = {
   detailLoading: boolean;
   createBusy: boolean;
   sendBusy: boolean;
+  availableModels: ModelOption[];
+  selectedModel: string;
   onSelectProject: (projectId: string) => void;
   onTaskInputChange: (value: string) => void;
   onCreateSession: () => void;
   onSelectSession: (sessionId: string) => void;
   onFollowUpInputChange: (value: string) => void;
   onSendFollowUp: () => void;
+  onSelectModel: (model: string) => void;
 };
 
 // author: BrianXiong
@@ -63,6 +73,7 @@ export function AgentWorkspace({
   noSessionsDescription,
   noProjectsLabel,
   loadingLabel,
+  modelLabel,
   projects,
   selectedProjectId,
   taskInput,
@@ -74,12 +85,15 @@ export function AgentWorkspace({
   detailLoading,
   createBusy,
   sendBusy,
+  availableModels,
+  selectedModel,
   onSelectProject,
   onTaskInputChange,
   onCreateSession,
   onSelectSession,
   onFollowUpInputChange,
-  onSendFollowUp
+  onSendFollowUp,
+  onSelectModel
 }: AgentWorkspaceProps) {
   const composerValue = activeSessionDetail ? followUpInput : taskInput;
   const composerPlaceholder = activeSessionDetail ? messagePlaceholder : taskPlaceholder;
@@ -216,6 +230,24 @@ export function AgentWorkspace({
               />
 
               <div className="agent-composer__footer">
+                <label className="agent-model-selector">
+                  <select
+                    value={selectedModel}
+                    onChange={(event) => onSelectModel(event.target.value)}
+                    disabled={availableModels.length === 0}
+                  >
+                    {availableModels.length === 0 ? (
+                      <option value="">{modelLabel}</option>
+                    ) : (
+                      availableModels.map((option) => (
+                        <option key={`${option.providerId}:${option.model}`} value={`${option.providerId}:${option.model}`}>
+                          {option.providerName} / {option.model}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                  <ChevronDown size={14} className="agent-model-selector__icon" />
+                </label>
                 <div className="agent-composer__actions">
                   <span className="agent-composer__caption">{activeSessionDetail ? conversationLabel : taskLabel}</span>
                   <button

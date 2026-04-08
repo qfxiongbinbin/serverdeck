@@ -2968,7 +2968,7 @@ select {
 .agent-composer__footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   gap: 12px;
   padding-top: 2px;
 }
@@ -3042,6 +3042,48 @@ select {
 
 .agent-composer__send:disabled {
   opacity: 0.55;
+}
+
+.agent-model-selector {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.agent-model-selector select {
+  appearance: none;
+  min-width: 120px;
+  max-width: 200px;
+  padding: 6px 28px 6px 12px;
+  border: 1px solid var(--content-subtle-bg);
+  border-radius: 8px;
+  background: var(--content-subtle-bg);
+  color: var(--content-muted);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.agent-model-selector select:hover:not(:disabled) {
+  border-color: var(--blue-soft);
+}
+
+.agent-model-selector select:focus {
+  outline: none;
+  border-color: var(--blue);
+}
+
+.agent-model-selector select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.agent-model-selector__icon {
+  position: absolute;
+  right: 8px;
+  pointer-events: none;
+  color: var(--content-muted);
 }
 
 .monitor-grid {
