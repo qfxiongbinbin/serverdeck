@@ -2653,14 +2653,14 @@ select {
   background: var(--content-subtle-bg);
 }
 
-.agent-sidebar__empty strong {
-  color: var(--text);
-}
-
 .agent-sidebar__empty--compact {
   gap: 0;
   padding: 10px 12px;
   border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--content-muted);
+  font-size: 12px;
 }
 
 .agent-sidebar__empty--inline {
@@ -2706,8 +2706,12 @@ select {
   text-align: left;
 }
 
-.agent-session-item__delete {
+.agent-session-item__menu-wrapper {
+  position: relative;
   flex-shrink: 0;
+}
+
+.agent-session-item__menu-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -2721,14 +2725,55 @@ select {
   transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
 }
 
-.agent-session-item:hover .agent-session-item__delete,
-.agent-session-item--active .agent-session-item__delete {
+.agent-session-item:hover .agent-session-item__menu-trigger,
+.agent-session-item--active .agent-session-item__menu-trigger {
   opacity: 1;
 }
 
-.agent-session-item__delete:hover {
-  background: rgba(255, 100, 100, 0.12);
+.agent-session-item__menu-trigger:hover {
+  background: var(--content-subtle-bg);
+  color: var(--text);
+}
+
+.agent-session-item__menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 100;
+  min-width: 120px;
+  margin-top: 4px;
+  padding: 4px;
+  border: 1px solid var(--content-border);
+  border-radius: 8px;
+  background: var(--agent-composer-bg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.agent-session-item__menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  transition: background 140ms ease;
+}
+
+.agent-session-item__menu button:hover {
+  background: var(--content-subtle-bg);
+}
+
+.agent-session-item__menu button:last-child {
   color: #ff6464;
+}
+
+.agent-session-item__menu button:last-child:hover {
+  background: rgba(255, 100, 100, 0.1);
 }
 
 .agent-session-item--active {

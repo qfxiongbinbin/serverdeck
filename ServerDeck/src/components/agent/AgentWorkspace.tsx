@@ -1,4 +1,4 @@
-import { ArrowUp, Bot, ChevronDown, MessageSquare, Plus, Sparkles, Trash2 } from "lucide-react";
+import { Archive, ArrowUp, Bot, ChevronDown, MessageSquare, MoreHorizontal, Plus, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -31,6 +31,7 @@ type AgentWorkspaceProps = {
   noMessagesLabel: string;
   modelLabel: string;
   deleteLabel: string;
+  archiveLabel: string;
   projects: ManagedProject[];
   selectedProjectId: string;
   taskInput: string;
@@ -50,6 +51,7 @@ type AgentWorkspaceProps = {
   onCreateSession: () => void;
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => void;
+  onArchiveSession: (sessionId: string) => void;
   onFollowUpInputChange: (value: string) => void;
   onSendFollowUp: () => void;
   onSelectModel: (model: string) => void;
@@ -96,6 +98,7 @@ export function AgentWorkspace({
   noMessagesLabel,
   modelLabel,
   deleteLabel,
+  archiveLabel,
   projects,
   selectedProjectId,
   taskInput,
@@ -115,6 +118,7 @@ export function AgentWorkspace({
   onCreateSession,
   onSelectSession,
   onDeleteSession,
+  onArchiveSession,
   onFollowUpInputChange,
   onSendFollowUp,
   onSelectModel
@@ -128,6 +132,7 @@ export function AgentWorkspace({
   const hasSelectedModelOption = availableModels.some((option) => buildModelValue(option.providerId, option.model) === modelValue);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
+  const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
   const streamStateLabel = useMemo(() => {
     if (!activeSessionDetail) {
       return "";
@@ -156,6 +161,19 @@ export function AgentWorkspace({
     const node = messageListRef.current;
     node.scrollTop = node.scrollHeight;
   }, [latestMessageSignature, stickToBottom]);
+
+  useEffect(() => {
+    if (!openMenuSessionId) {
+      return;
+    }
+
+    function handleClickOutside() {
+      setOpenMenuSessionId(null);
+    }
+
+    document.addEventListener("click", handleClickOutside);
+    return () => document.removeEventListener("click", handleClickOutside);
+  }, [openMenuSessionId]);
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.nativeEvent.isComposing) {
@@ -194,7 +212,6 @@ export function AgentWorkspace({
               <Bot size={18} />
               <strong>{title}</strong>
             </div>
-            <span>{description}</span>
           </div>
 
           <button
@@ -215,7 +232,7 @@ export function AgentWorkspace({
 
           {!sessionsLoading && sessions.length === 0 ? (
             <div className="agent-sidebar__empty agent-sidebar__empty--compact">
-              <strong>{noSessionsLabel}</strong>
+              <span>{noSessionsLabel}</span>
             </div>
           ) : null}
 
@@ -223,6 +240,7 @@ export function AgentWorkspace({
             <div className="agent-session-list">
               {sessions.map((session) => {
                 const active = session.id === activeSessionId;
+                const menuOpen = openMenuSessionId === session.id;
 
                 return (
                   <div key={session.id} className={`agent-session-item ${active ? "agent-session-item--active" : ""}`}>
@@ -232,17 +250,45 @@ export function AgentWorkspace({
                       onClick={() => onSelectSession(session.id)}
                     >
                       <div className="agent-session-item__title">{session.title}</div>
-                      <div className="agent-session-item__time">{formatSessionTime(session.updatedAt)}</div>
                     </button>
-                    <button
-                      type="button"
-                      className="agent-session-item__delete"
-                      onClick={() => onDeleteSession(session.id)}
-                      aria-label={deleteLabel}
-                      title={deleteLabel}
-                    >
-                      <Trash2 size={14} />
-                    </button>
+                    <div className="agent-session-item__menu-wrapper">
+                      <button
+                        type="button"
+                        className="agent-session-item__menu-trigger"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setOpenMenuSessionId(menuOpen ? null : session.id);
+                        }}
+                      >
+                        <MoreHorizontal size={14} />
+                      </button>
+                      {menuOpen ? (
+                        <div className="agent-session-item__menu">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onArchiveSession(session.id);
+                              setOpenMenuSessionId(null);
+                            }}
+                          >
+                            <Archive size={14} />
+                            <span>{archiveLabel}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeleteSession(session.id);
+                              setOpenMenuSessionId(null);
+                            }}
+                          >
+                            <Trash2 size={14} />
+                            <span>{deleteLabel}</span>
+                          </button>
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 );
               })}
@@ -322,7 +368,6 @@ export function AgentWorkspace({
                 <Sparkles size={28} />
               </div>
               <strong>{title}</strong>
-              <span>{description}</span>
               {projects.length ? (
                 <label className="agent-project-selector">
                   <select value={selectedProjectId} onChange={(event) => onSelectProject(event.target.value)}>

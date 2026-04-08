@@ -3992,6 +3992,7 @@ export default function App() {
               thinkingLabel={messages.agentThinking}
               noMessagesLabel={messages.agentNoMessages}
               deleteLabel={messages.delete}
+              archiveLabel={messages.agentArchive}
               projects={agentProjects}
               selectedProjectId={agentSelectedProjectId}
               taskInput={agentTaskInput}
@@ -4012,6 +4013,7 @@ export default function App() {
               onCreateSession={() => void handleCreateAgentSession()}
               onSelectSession={setActiveAgentSessionId}
               onDeleteSession={(sessionId) => void handleDeleteAgentSession(sessionId)}
+              onArchiveSession={(sessionId) => console.log("Archive session:", sessionId)}
               onFollowUpInputChange={setAgentFollowUpInput}
               onSendFollowUp={() => void handleSendAgentFollowUp()}
               onSelectModel={setAgentSelectedModelValue}
