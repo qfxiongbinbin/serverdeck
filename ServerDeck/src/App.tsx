@@ -1426,14 +1426,13 @@ export default function App() {
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: settings.terminalFontSize,
+      lineHeight: 1.12,
       theme: activeTerminalTheme.theme
     });
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(terminalEl.current);
-    fitAddon.fit();
-    void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
     terminal.focus();
     terminal.attachCustomKeyEventHandler((event) => {
       const sequence = getTerminalControlSequence(event);
@@ -1457,14 +1456,32 @@ export default function App() {
       sendActiveTerminalInput(data);
     });
 
-    const onResize = () => {
-      fitAddon.fit();
-      void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
+    let frameId: number | null = null;
+    const syncTerminalViewport = () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        fitAddon.fit();
+        terminal.refresh(0, Math.max(terminal.rows - 1, 0));
+        void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
+        frameId = null;
+      });
     };
-    window.addEventListener("resize", onResize);
+
+    syncTerminalViewport();
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncTerminalViewport();
+    });
+    resizeObserver.observe(terminalEl.current);
 
     return () => {
-      window.removeEventListener("resize", onResize);
+      resizeObserver.disconnect();
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
       disposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
