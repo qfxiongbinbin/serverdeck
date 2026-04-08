@@ -13,6 +13,8 @@ Update the version in all three files so they stay aligned:
 Example: `0.1.1`
 
 Every version upgrade must also add release notes for the new version in `docs/changelog.md`.
+The same notes must also appear in the GitHub Release body, not only in the repository changelog, so users can read the changes directly on the Releases page.
+
 The note must compare against the previous version and explicitly list:
 
 - `Added`
@@ -20,6 +22,8 @@ The note must compare against the previous version and explicitly list:
 - `Fixed`
 
 If a section has no items, write `None` instead of leaving it out.
+
+The release workflow reads the matching version section from `docs/changelog.md` and publishes it into the GitHub Release body automatically.
 
 ## 2. Merge to `main`
 
@@ -43,6 +47,7 @@ The workflow at `.github/workflows/release.yml` runs on tags matching `v*`.
 It will:
 
 - install Node and Rust
+- read the current version notes from `docs/changelog.md`
 - run the Tauri build in `ServerDeck/`
 - create or update the GitHub Release
 - upload macOS assets, including `.dmg`

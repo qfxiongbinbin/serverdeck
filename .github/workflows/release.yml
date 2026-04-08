@@ -18,6 +18,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          node ServerDeck/scripts/generate-release-notes.mjs "${{ github.ref_name }}" > release-notes.md
+          {
+            echo 'body<<EOF'
+            cat release-notes.md
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
       - name: Setup Node.js
         uses: actions/setup-node@v5
         with:
@@ -42,9 +52,6 @@ jobs:
           projectPath: ServerDeck
           tagName: ${{ github.ref_name }}
           releaseName: ServerDeck ${{ github.ref_name }}
-          releaseBody: |
-            Automated GitHub Release for ServerDeck.
-
-            Assets include the macOS `.app` bundle, `.dmg` installer, and signed updater metadata.
+          releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: false
           prerelease: false

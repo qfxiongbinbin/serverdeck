@@ -43,6 +43,7 @@
 - Keep commit messages short, imperative, and scoped to one change.
 - PRs should include: purpose, affected areas, validation steps, and screenshots for UI updates.
 - Every version upgrade must also include release notes that compare against the previous version and explicitly list `Added`, `Changed`, and `Fixed` items.
+- Those release notes must be reflected in both `docs/changelog.md` and the GitHub Release body so users can see the changes directly on the release page.
 - Branch from `main` for all work:
   - new features use `feature/<name>`
   - bug fixes use `fix/<name>`
