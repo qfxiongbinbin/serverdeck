@@ -8,12 +8,12 @@ Compared with `v0.0.13`.
 
 ### Added
 
-- Added a repository release-note rule requiring every version upgrade to include a changelog entry with `Added`, `Changed`, and `Fixed` sections.
+- Added support for opening Settings in a separate window, so preferences can be adjusted without taking over the main workspace.
 
 ### Changed
 
-- Bumped the application version from `0.0.13` to `0.0.14` across release-related configuration files.
+- Improved Settings window behavior and preference synchronization between the main window and the detached Settings window.
 
 ### Fixed
 
-- None.
+- Stabilized terminal cursor and layout fitting behavior to reduce misalignment after resize and terminal font-size changes.

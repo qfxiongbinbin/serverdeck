@@ -25,6 +25,9 @@ If a section has no items, write `None` instead of leaving it out.
 
 The release workflow reads the matching version section from `docs/changelog.md` and publishes it into the GitHub Release body automatically.
 
+Release notes should describe the real changes shipped in that version, such as user-facing features, behavior changes, bug fixes, or meaningful engineering updates that affect the delivered app.
+Do not fill release notes with release mechanics like version bumping, tag creation, changelog maintenance, or workflow-only adjustments unless those are the actual changes being shipped to users.
+
 ## 2. Merge to `main`
 
 Release changes should land in `main` through a pull request.

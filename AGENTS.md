@@ -44,6 +44,8 @@
 - PRs should include: purpose, affected areas, validation steps, and screenshots for UI updates.
 - Every version upgrade must also include release notes that compare against the previous version and explicitly list `Added`, `Changed`, and `Fixed` items.
 - Those release notes must be reflected in both `docs/changelog.md` and the GitHub Release body so users can see the changes directly on the release page.
+- Release notes must describe the actual product, behavior, UI, or engineering changes included in that version compared with the previous version.
+- Do not use release notes to describe the act of bumping the version, creating the tag, maintaining the changelog, or adjusting the release workflow unless those changes are themselves part of the shipped version users should care about.
 - Branch from `main` for all work:
   - new features use `feature/<name>`
   - bug fixes use `fix/<name>`
