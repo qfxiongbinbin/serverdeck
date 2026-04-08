@@ -172,6 +172,23 @@ select {
   overflow: hidden;
 }
 
+.app-shell--settings-window {
+  background: var(--settings-page-bg);
+}
+
+.app-shell--settings-window .topbar,
+.app-shell--settings-window .sidebar {
+  display: none;
+}
+
+.app-shell--settings-window .workspace {
+  grid-template-columns: 1fr;
+}
+
+.app-shell--settings-window .mainpane {
+  overflow: auto;
+}
+
 .topbar {
   height: 62px;
   display: flex;
@@ -2174,6 +2191,106 @@ select {
   background: var(--settings-page-bg);
 }
 
+.settings-screen--dialog {
+  height: 100%;
+  padding: 0;
+  background: transparent;
+}
+
+.settings-modal-shell {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.24), transparent 38%),
+    rgba(12, 18, 28, 0.28);
+}
+
+.settings-modal-window {
+  width: min(1380px, 100%);
+  height: min(920px, 100%);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.46);
+  border-radius: 30px;
+  background: var(--settings-page-bg);
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.24);
+  backdrop-filter: blur(24px);
+  transition: box-shadow 160ms ease;
+}
+
+.settings-modal-window__header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--settings-border);
+  background: var(--settings-card-bg);
+}
+
+.settings-modal-window__header--draggable {
+  cursor: grab;
+  user-select: none;
+}
+
+.settings-modal-window__header--draggable:active {
+  cursor: grabbing;
+}
+
+.settings-modal-window__traffic-lights {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-modal-window__traffic-lights span {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+.settings-modal-window__traffic-lights span:nth-child(1) {
+  background: #ff5f57;
+}
+
+.settings-modal-window__traffic-lights span:nth-child(2) {
+  background: #febc2e;
+}
+
+.settings-modal-window__traffic-lights span:nth-child(3) {
+  background: #28c840;
+}
+
+.settings-modal-window__title {
+  min-width: 0;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  text-align: center;
+}
+
+.settings-modal-window__title h2 {
+  margin: 0;
+  font-size: 20px;
+  color: var(--settings-text);
+}
+
+.settings-modal-window__title span {
+  color: var(--settings-muted);
+  font-size: 12px;
+}
+
+.settings-modal-window__body {
+  min-height: 0;
+  padding: 20px;
+}
+
 .settings-layout {
   height: 100%;
   display: grid;
@@ -2208,7 +2325,7 @@ select {
 }
 
 .settings-screen__header h2 {
-  font-size: 22px;
+  font-size: 18px;
   line-height: 1.2;
 }
 
@@ -2220,7 +2337,7 @@ select {
 .settings-screen__header span {
   display: inline-block;
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .settings-nav {
@@ -2229,16 +2346,16 @@ select {
 }
 
 .settings-nav__item {
-  min-height: 46px;
+  min-height: 42px;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 14px;
+  gap: 10px;
+  padding: 0 12px;
   border: 1px solid transparent;
   border-radius: 14px;
   background: transparent;
   color: var(--settings-text);
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   text-align: left;
 }
@@ -2280,14 +2397,14 @@ select {
 }
 
 .settings-panel__header h3 {
-  font-size: 26px;
+  font-size: 22px;
   line-height: 1.15;
 }
 
 .settings-panel__header span {
   display: inline-block;
   margin-top: 4px;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--settings-muted);
 }
 
@@ -2297,7 +2414,7 @@ select {
 
 .settings-panel__subheading {
   padding: 6px 4px 0;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--settings-text);
 }
@@ -2318,7 +2435,7 @@ select {
 }
 
 .settings-panel__toolbar-label {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 700;
   color: var(--settings-text);
 }
@@ -2811,7 +2928,7 @@ select {
   width: 240px;
   min-width: 180px;
   max-width: 280px;
-  height: 42px;
+  height: 40px;
   padding: 0 40px 0 14px;
   border-radius: 14px;
   border: 1px solid var(--settings-control-border);
@@ -2824,7 +2941,7 @@ select {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   color: var(--settings-control-text);
   cursor: pointer;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   appearance: none;
   -webkit-appearance: none;
@@ -2834,12 +2951,13 @@ select {
 
 .settings-input {
   width: 100%;
-  height: 42px;
+  height: 40px;
   padding: 0 14px;
   border-radius: 14px;
   border: 1px solid var(--settings-control-border);
   background: var(--settings-control-bg);
   color: var(--settings-control-text);
+  font-size: 12px;
 }
 
 .settings-input::placeholder {

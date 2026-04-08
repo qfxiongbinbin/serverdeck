@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update as AppUpdate } from "@tauri-apps/plugin-updater";
 import packageJson from "../package.json";
@@ -88,6 +88,7 @@ import {
   type AppLanguage
 } from "./lib/i18n";
 import { formatFileSize, getParentPath, joinChildPath } from "./lib/fileBrowser";
+import { isSettingsWindowView, openSettingsWindow } from "./lib/appWindow";
 import {
   defaultTerminalThemeId,
   terminalThemePresets,
@@ -150,6 +151,12 @@ type MonitorTab = {
   }>;
   loading: boolean;
   error: string;
+};
+
+type PreferencesSyncPayload = {
+  source: "main" | "settings";
+  settings: AppPreferences["settings"];
+  recentProjectIds: string[];
 };
 
 type ContextMenuState = {
@@ -705,7 +712,10 @@ function ProcessBarChart({
 // author: BrianXiong
 // time: 2026/04/05/11:21:34
 export default function App() {
-  const [activeTabId, setActiveTabId] = useState(HOSTS_TAB_ID);
+  const detachedSettingsWindow = isSettingsWindowView();
+  const preferenceSyncSource = detachedSettingsWindow ? "settings" : "main";
+
+  const [activeTabId, setActiveTabId] = useState(() => (detachedSettingsWindow ? SETTINGS_TAB_ID : HOSTS_TAB_ID));
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
   const [monitorTabs, setMonitorTabs] = useState<MonitorTab[]>([]);
   const [hosts, setHosts] = useState<SavedHost[]>([]);
@@ -774,8 +784,10 @@ export default function App() {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalDecodersRef = useRef<Map<string, TextDecoder>>(new Map());
   const activeTabIdRef = useRef(HOSTS_TAB_ID);
+  const previousTabIdRef = useRef(HOSTS_TAB_ID);
   const terminalTabsRef = useRef<TerminalTab[]>([]);
   const monitorTabsRef = useRef<MonitorTab[]>([]);
+  const skipPreferenceSyncRef = useRef(false);
 
   const isHostsView = activeTabId === HOSTS_TAB_ID;
   const isSftpView = activeTabId === SFTP_TAB_ID;
@@ -1166,13 +1178,24 @@ export default function App() {
       return;
     }
 
+    if (skipPreferenceSyncRef.current) {
+      skipPreferenceSyncRef.current = false;
+      return;
+    }
+
     if (hasTauriRuntime()) {
-      void saveAppPreferences({ settings: settings as AppPreferences["settings"], recentProjectIds: recentLocalProjectIds });
+      void saveAppPreferences({ settings: settings as AppPreferences["settings"], recentProjectIds: recentLocalProjectIds }).then(() =>
+        emit("preferences-updated", {
+          source: preferenceSyncSource,
+          settings: settings as AppPreferences["settings"],
+          recentProjectIds: recentLocalProjectIds
+        } satisfies PreferencesSyncPayload)
+      );
       return;
     }
 
     window.localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(settings));
-  }, [preferencesHydrated, recentLocalProjectIds, settings]);
+  }, [preferenceSyncSource, preferencesHydrated, recentLocalProjectIds, settings]);
 
   useEffect(() => {
     if (!preferencesHydrated || hasTauriRuntime()) {
@@ -1181,6 +1204,38 @@ export default function App() {
 
     window.localStorage.setItem(LOCAL_TERMINAL_RECENT_PROJECTS_KEY, JSON.stringify(recentLocalProjectIds));
   }, [preferencesHydrated, recentLocalProjectIds]);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) {
+      return;
+    }
+
+    let cleanup: null | (() => void) = null;
+    let disposed = false;
+
+    void listen<PreferencesSyncPayload>("preferences-updated", (event) => {
+      if (event.payload.source === preferenceSyncSource) {
+        return;
+      }
+
+      skipPreferenceSyncRef.current = true;
+      setSettings(normalizeAppSettings(event.payload.settings as Partial<AppSettings>));
+      setRecentLocalProjectIds(event.payload.recentProjectIds);
+    })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        cleanup = unlisten;
+      })
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [preferenceSyncSource]);
 
   useEffect(() => {
     if (!localTerminalMenuOpen) {
@@ -1426,14 +1481,13 @@ export default function App() {
     const terminal = new Terminal({
       cursorBlink: true,
       fontSize: settings.terminalFontSize,
+      lineHeight: 1.12,
       theme: activeTerminalTheme.theme
     });
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(terminalEl.current);
-    fitAddon.fit();
-    void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
     terminal.focus();
     terminal.attachCustomKeyEventHandler((event) => {
       const sequence = getTerminalControlSequence(event);
@@ -1457,14 +1511,32 @@ export default function App() {
       sendActiveTerminalInput(data);
     });
 
-    const onResize = () => {
-      fitAddon.fit();
-      void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
+    let frameId: number | null = null;
+    const syncTerminalViewport = () => {
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
+
+      frameId = window.requestAnimationFrame(() => {
+        fitAddon.fit();
+        terminal.refresh(0, Math.max(terminal.rows - 1, 0));
+        void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
+        frameId = null;
+      });
     };
-    window.addEventListener("resize", onResize);
+
+    syncTerminalViewport();
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncTerminalViewport();
+    });
+    resizeObserver.observe(terminalEl.current);
 
     return () => {
-      window.removeEventListener("resize", onResize);
+      resizeObserver.disconnect();
+      if (frameId !== null) {
+        window.cancelAnimationFrame(frameId);
+      }
       disposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
@@ -1488,6 +1560,26 @@ export default function App() {
     terminalRef.current.options.fontSize = settings.terminalFontSize;
     fitAddonRef.current?.fit();
   }, [settings.terminalFontSize]);
+
+  useEffect(() => {
+    if (!isSettingsView || detachedSettingsWindow) {
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+
+      event.preventDefault();
+      closeSettings();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [detachedSettingsWindow, isSettingsView]);
 
   useEffect(() => {
     let cleanup: null | (() => void) = null;
@@ -1749,7 +1841,23 @@ export default function App() {
     setContextMenu(null);
     setFileMenu(null);
     setDrawerOpen(false);
+    if (hasTauriRuntime()) {
+      void openSettingsWindow(messages.settings).catch((error) => {
+        setStatus(getErrorMessage(error, messages.saveFailed));
+        setStatusTone("error");
+      });
+      return;
+    }
+
+    if (activeTabId !== SETTINGS_TAB_ID) {
+      previousTabIdRef.current = activeTabId;
+    }
     setActiveTabId(SETTINGS_TAB_ID);
+  }
+
+  function closeSettings() {
+    const fallbackTabId = previousTabIdRef.current === SETTINGS_TAB_ID ? HOSTS_TAB_ID : previousTabIdRef.current;
+    setActiveTabId(fallbackTabId);
   }
 
   function handleUpdateClick() {
@@ -2759,7 +2867,7 @@ export default function App() {
   }, [fileMenu]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${detachedSettingsWindow ? "app-shell--settings-window" : ""}`}>
       <header className="topbar">
         <div className="topbar__brand">
           <div className="topbar__logo">SD</div>
