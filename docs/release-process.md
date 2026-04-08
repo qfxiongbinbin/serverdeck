@@ -12,6 +12,15 @@ Update the version in all three files so they stay aligned:
 
 Example: `0.1.1`
 
+Every version upgrade must also add release notes for the new version in `docs/changelog.md`.
+The note must compare against the previous version and explicitly list:
+
+- `Added`
+- `Changed`
+- `Fixed`
+
+If a section has no items, write `None` instead of leaving it out.
+
 ## 2. Merge to `main`
 
 Release changes should land in `main` through a pull request.
