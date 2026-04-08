@@ -1,4 +1,5 @@
-import { ArrowUp, Bot, ChevronDown, MessageSquare, Plus, Sparkles } from "lucide-react";
+import { ArrowUp, Bot, ChevronDown, MessageSquare, Plus, Sparkles, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
@@ -26,7 +27,10 @@ type AgentWorkspaceProps = {
   noSessionsDescription: string;
   noProjectsLabel: string;
   loadingLabel: string;
+  thinkingLabel: string;
+  noMessagesLabel: string;
   modelLabel: string;
+  deleteLabel: string;
   projects: ManagedProject[];
   selectedProjectId: string;
   taskInput: string;
@@ -42,8 +46,10 @@ type AgentWorkspaceProps = {
   selectedModel: string;
   onSelectProject: (projectId: string) => void;
   onTaskInputChange: (value: string) => void;
+  onStartNewSession: () => void;
   onCreateSession: () => void;
   onSelectSession: (sessionId: string) => void;
+  onDeleteSession: (sessionId: string) => void;
   onFollowUpInputChange: (value: string) => void;
   onSendFollowUp: () => void;
   onSelectModel: (model: string) => void;
@@ -86,7 +92,10 @@ export function AgentWorkspace({
   noSessionsDescription,
   noProjectsLabel,
   loadingLabel,
+  thinkingLabel,
+  noMessagesLabel,
   modelLabel,
+  deleteLabel,
   projects,
   selectedProjectId,
   taskInput,
@@ -102,8 +111,10 @@ export function AgentWorkspace({
   selectedModel,
   onSelectProject,
   onTaskInputChange,
+  onStartNewSession,
   onCreateSession,
   onSelectSession,
+  onDeleteSession,
   onFollowUpInputChange,
   onSendFollowUp,
   onSelectModel
@@ -115,6 +126,64 @@ export function AgentWorkspace({
     ? buildModelValue(activeSessionDetail.session.providerId, activeSessionDetail.session.model)
     : selectedModel;
   const hasSelectedModelOption = availableModels.some((option) => buildModelValue(option.providerId, option.model) === modelValue);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const [stickToBottom, setStickToBottom] = useState(true);
+  const streamStateLabel = useMemo(() => {
+    if (!activeSessionDetail) {
+      return "";
+    }
+
+    return activeSessionDetail.session.status === "streaming" ? thinkingLabel : "";
+  }, [activeSessionDetail, thinkingLabel]);
+  const latestMessageSignature = useMemo(() => {
+    if (!activeSessionDetail) {
+      return "";
+    }
+
+    const latestMessage = activeSessionDetail.messages[activeSessionDetail.messages.length - 1];
+    return `${activeSessionDetail.session.id}:${activeSessionDetail.session.status}:${latestMessage?.id ?? ""}:${latestMessage?.content.length ?? 0}`;
+  }, [activeSessionDetail]);
+
+  useEffect(() => {
+    setStickToBottom(true);
+  }, [activeSessionId]);
+
+  useEffect(() => {
+    if (!stickToBottom || !messageListRef.current) {
+      return;
+    }
+
+    const node = messageListRef.current;
+    node.scrollTop = node.scrollHeight;
+  }, [latestMessageSignature, stickToBottom]);
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
+
+    if (event.key !== "Enter" || event.shiftKey) {
+      return;
+    }
+
+    event.preventDefault();
+    if (activeSessionDetail) {
+      onSendFollowUp();
+      return;
+    }
+
+    onCreateSession();
+  }
+
+  function handleMessageListScroll() {
+    const node = messageListRef.current;
+    if (!node) {
+      return;
+    }
+
+    const nearBottom = node.scrollHeight - node.scrollTop - node.clientHeight < 48;
+    setStickToBottom(nearBottom);
+  }
 
   return (
     <section className="agent-screen">
@@ -131,10 +200,7 @@ export function AgentWorkspace({
           <button
             type="button"
             className="agent-new-session"
-            onClick={() => {
-              onTaskInputChange("");
-              onFollowUpInputChange("");
-            }}
+            onClick={onStartNewSession}
           >
             <Plus size={16} />
             {startLabel}
@@ -148,9 +214,8 @@ export function AgentWorkspace({
           {sessionsLoading ? <div className="agent-sidebar__empty">{loadingLabel}</div> : null}
 
           {!sessionsLoading && sessions.length === 0 ? (
-            <div className="agent-sidebar__empty">
+            <div className="agent-sidebar__empty agent-sidebar__empty--compact">
               <strong>{noSessionsLabel}</strong>
-              <span>{noSessionsDescription}</span>
             </div>
           ) : null}
 
@@ -160,15 +225,25 @@ export function AgentWorkspace({
                 const active = session.id === activeSessionId;
 
                 return (
-                  <button
-                    key={session.id}
-                    type="button"
-                    className={`agent-session-item ${active ? "agent-session-item--active" : ""}`}
-                    onClick={() => onSelectSession(session.id)}
-                  >
-                    <div className="agent-session-item__title">{session.title}</div>
-                    <div className="agent-session-item__time">{formatSessionTime(session.updatedAt)}</div>
-                  </button>
+                  <div key={session.id} className={`agent-session-item ${active ? "agent-session-item--active" : ""}`}>
+                    <button
+                      type="button"
+                      className="agent-session-item__button"
+                      onClick={() => onSelectSession(session.id)}
+                    >
+                      <div className="agent-session-item__title">{session.title}</div>
+                      <div className="agent-session-item__time">{formatSessionTime(session.updatedAt)}</div>
+                    </button>
+                    <button
+                      type="button"
+                      className="agent-session-item__delete"
+                      onClick={() => onDeleteSession(session.id)}
+                      aria-label={deleteLabel}
+                      title={deleteLabel}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -177,44 +252,70 @@ export function AgentWorkspace({
 
         <section className="agent-main">
           {activeSessionDetail ? (
-            <>
-              <div className="agent-main__header">
-                <div className="agent-main__header-content">
-                  <strong>{activeSessionDetail.session.title}</strong>
-                  <span>{activeSessionDetail.session.rootPath}</span>
-                </div>
-                <span className="agent-status-pill">{activeSessionDetail.session.status}</span>
+            <div className="agent-main__header">
+              <div className="agent-main__header-content">
+                <strong>{activeSessionDetail.session.title}</strong>
+                <span>{activeSessionDetail.session.rootPath}</span>
               </div>
+              <span className="agent-status-pill">{activeSessionDetail.session.status}</span>
+            </div>
+          ) : null}
 
-              <div className="agent-message-list agent-message-list--conversation">
-                {detailLoading ? <div className="project-empty-state"><span>{loadingLabel}</span></div> : null}
-                {!detailLoading && activeSessionDetail.messages.map((message) => {
-                  const isUserMessage = message.role === "user";
+          {activeSessionDetail ? (
+            <div ref={messageListRef} className="agent-message-list agent-message-list--conversation" onScroll={handleMessageListScroll}>
+              {detailLoading ? <div className="agent-messages-empty"><span>{loadingLabel}</span></div> : null}
+              {!detailLoading && activeSessionDetail.messages.length === 0 && activeSessionDetail.session.status !== "streaming" ? (
+                <div className="agent-messages-empty">
+                  <MessageSquare size={24} strokeWidth={1.5} />
+                  <span>{noMessagesLabel}</span>
+                </div>
+              ) : null}
+              {!detailLoading && activeSessionDetail.messages.length === 0 && activeSessionDetail.session.status === "streaming" ? (
+                <div className="agent-messages-empty">
+                  <span className="agent-message__status">{streamStateLabel}</span>
+                </div>
+              ) : null}
+              {!detailLoading && activeSessionDetail.messages.map((message) => {
+                const isUserMessage = message.role === "user";
+                const showStreamingState = !isUserMessage && activeSessionDetail.session.status === "streaming" && !message.content.trim();
 
-                  return (
-                    <article key={message.id} className={`agent-message agent-message--${isUserMessage ? "user" : "assistant"}`}>
-                      <div className="agent-message__inner">
-                        {!isUserMessage ? <div className="agent-message__role">{message.role}</div> : null}
-                        <div className="agent-message__bubble">
-                          <div className="agent-message__content">
-                            {isUserMessage ? (
-                              message.content
-                            ) : (
-                              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-                                {message.content}
-                              </ReactMarkdown>
-                            )}
-                          </div>
-                        </div>
-                        <div className="agent-message__meta">
-                          <span className="agent-message__time">{formatSessionTime(message.createdAt)}</span>
+                return (
+                  <article key={message.id} className={`agent-message agent-message--${isUserMessage ? "user" : "assistant"}`}>
+                    <div className="agent-message__inner">
+                      {!isUserMessage ? <div className="agent-message__role">{message.role}</div> : null}
+                      <div className="agent-message__bubble">
+                        <div className="agent-message__content">
+                          {showStreamingState ? (
+                            <span className="agent-message__status">{streamStateLabel}</span>
+                          ) : isUserMessage ? (
+                            message.content
+                          ) : (
+                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                              {message.content}
+                            </ReactMarkdown>
+                          )}
                         </div>
                       </div>
-                    </article>
-                  );
-                })}
-              </div>
-            </>
+                      <div className="agent-message__meta">
+                        <span className="agent-message__time">{formatSessionTime(message.createdAt)}</span>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+              {!detailLoading && activeSessionDetail.session.status === "streaming" && activeSessionDetail.messages.length > 0 && activeSessionDetail.messages[activeSessionDetail.messages.length - 1].role === "user" ? (
+                <article className="agent-message agent-message--assistant">
+                  <div className="agent-message__inner">
+                    <div className="agent-message__role">assistant</div>
+                    <div className="agent-message__bubble">
+                      <div className="agent-message__content">
+                        <span className="agent-message__status">{streamStateLabel}</span>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ) : null}
+            </div>
           ) : (
             <div className="agent-empty-state">
               <div className="agent-empty-state__icon">
@@ -243,6 +344,7 @@ export function AgentWorkspace({
               <textarea
                 rows={3}
                 value={composerValue}
+                onKeyDown={handleComposerKeyDown}
                 onChange={(event) => {
                   if (activeSessionDetail) {
                     onFollowUpInputChange(event.target.value);

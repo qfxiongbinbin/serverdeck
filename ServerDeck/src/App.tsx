@@ -85,6 +85,7 @@ import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorks
 import {
   appendAgentUserMessage,
   createAgentSession,
+  deleteAgentSession,
   getAgentSessionDetail,
   listAgentSessions,
   runAgentTurn,
@@ -1234,6 +1235,35 @@ export default function App() {
       setAgentCreateBusy(false);
     }
   }, [agentProjects, agentSelectedProjectId, agentSelectedModelValue, agentSessions, agentTaskInput, defaultAgentModelValue, handleAgentStreamEvent, messages]);
+
+  const handleStartNewAgentSession = useCallback(() => {
+    setActiveAgentSessionId("");
+    setActiveAgentSessionDetail(null);
+    setAgentTaskInput("");
+    setAgentFollowUpInput("");
+  }, []);
+
+  const handleDeleteAgentSession = useCallback(async (sessionId: string) => {
+    try {
+      await deleteAgentSession(sessionId);
+      setAgentSessions((current) => {
+        const nextSessions = current.filter((session) => session.id !== sessionId);
+
+        if (activeAgentSessionId === sessionId) {
+          setActiveAgentSessionId(nextSessions[0]?.id ?? "");
+          setActiveAgentSessionDetail(null);
+          setAgentFollowUpInput("");
+        }
+
+        return nextSessions;
+      });
+      setStatus(messages.delete);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.delete));
+      setStatusTone("error");
+    }
+  }, [activeAgentSessionId, messages.delete]);
 
   // author: BrianXiong
   // time: 2026/04/08/16:24:00
@@ -3959,6 +3989,9 @@ export default function App() {
               noSessionsDescription={messages.noAgentSessionsDescription}
               noProjectsLabel={messages.noProjectPaths}
               loadingLabel={messages.loading}
+              thinkingLabel={messages.agentThinking}
+              noMessagesLabel={messages.agentNoMessages}
+              deleteLabel={messages.delete}
               projects={agentProjects}
               selectedProjectId={agentSelectedProjectId}
               taskInput={agentTaskInput}
@@ -3975,8 +4008,10 @@ export default function App() {
               modelLabel={messages.agentModel}
               onSelectProject={setAgentSelectedProjectId}
               onTaskInputChange={setAgentTaskInput}
+              onStartNewSession={handleStartNewAgentSession}
               onCreateSession={() => void handleCreateAgentSession()}
               onSelectSession={setActiveAgentSessionId}
+              onDeleteSession={(sessionId) => void handleDeleteAgentSession(sessionId)}
               onFollowUpInputChange={setAgentFollowUpInput}
               onSendFollowUp={() => void handleSendAgentFollowUp()}
               onSelectModel={setAgentSelectedModelValue}

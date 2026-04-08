@@ -135,6 +135,18 @@ export async function getAgentSessionDetail(sessionId: string) {
   };
 }
 
+export async function deleteAgentSession(sessionId: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("delete_agent_session", { sessionId });
+  }
+
+  const store = loadBrowserStore();
+  store.sessions = store.sessions.filter((item) => item.id !== sessionId);
+  delete store.messagesBySessionId[sessionId];
+  saveBrowserStore(store);
+  return true;
+}
+
 export async function createAgentSession(request: CreateAgentSessionRequest) {
   if (hasTauri()) {
     return tauriInvoke<AgentSessionDetail>("create_agent_session", { request });

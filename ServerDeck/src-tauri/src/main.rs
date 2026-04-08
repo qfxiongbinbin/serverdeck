@@ -2517,6 +2517,20 @@ fn append_agent_user_message(session_id: String, content: String) -> Result<Agen
 
 #[tauri::command]
 // author: BrianXiong
+// time: 2026/04/08/20:22:00
+fn delete_agent_session(session_id: String) -> Result<bool, String> {
+    let mut conn = open_db()?;
+    let tx = conn.transaction().map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM agent_messages WHERE session_id = ?1", params![session_id])
+        .map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM agent_sessions WHERE id = ?1", params![session_id])
+        .map_err(|error| error.to_string())?;
+    tx.commit().map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
+// author: BrianXiong
 // time: 2026/04/08/19:20:00
 fn run_agent_turn(app: AppHandle, request: AgentTurnRequest) -> Result<bool, String> {
     let conn = open_db()?;
@@ -3597,6 +3611,7 @@ fn main() {
             get_agent_session_detail,
             create_agent_session,
             append_agent_user_message,
+            delete_agent_session,
             run_agent_turn,
             fetch_ai_provider_models,
             detect_ai_provider_imports,

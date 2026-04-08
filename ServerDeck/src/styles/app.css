@@ -2644,6 +2644,7 @@ select {
 }
 
 .agent-sidebar__empty {
+  align-self: start;
   display: grid;
   gap: 6px;
   padding: 12px;
@@ -2654,6 +2655,12 @@ select {
 
 .agent-sidebar__empty strong {
   color: var(--text);
+}
+
+.agent-sidebar__empty--compact {
+  gap: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
 }
 
 .agent-sidebar__empty--inline {
@@ -2685,6 +2692,45 @@ select {
   transition: background 140ms ease, border-color 140ms ease;
 }
 
+.agent-session-item__button {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.agent-session-item__delete {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--content-muted);
+  opacity: 0;
+  transition: background 140ms ease, color 140ms ease, opacity 140ms ease;
+}
+
+.agent-session-item:hover .agent-session-item__delete,
+.agent-session-item--active .agent-session-item__delete {
+  opacity: 1;
+}
+
+.agent-session-item__delete:hover {
+  background: rgba(255, 100, 100, 0.12);
+  color: #ff6464;
+}
+
 .agent-session-item--active {
   background: var(--agent-session-active-bg);
   border-left-color: var(--blue);
@@ -2714,9 +2760,10 @@ select {
 }
 
 .agent-main {
+  height: 100%;
   min-height: 0;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   background: var(--agent-main-bg);
 }
 
@@ -2760,6 +2807,7 @@ select {
 }
 
 .agent-message-list {
+  flex: 1;
   min-height: 0;
   overflow: auto;
 }
@@ -2769,6 +2817,21 @@ select {
   flex-direction: column;
   gap: 4px;
   padding: 16px 20px 20px;
+}
+
+.agent-messages-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--content-muted);
+  font-size: 14px;
+}
+
+.agent-messages-empty svg {
+  opacity: 0.5;
 }
 
 .agent-message {
@@ -2824,10 +2887,74 @@ select {
 
 .agent-message__content {
   color: var(--text);
-  line-height: 1.5;
+  line-height: 1.6;
   font-size: 13px;
-  white-space: pre-wrap;
+  white-space: normal;
   word-break: break-word;
+}
+
+.agent-message__content p {
+  margin: 0.4em 0;
+}
+
+.agent-message__content ul,
+.agent-message__content ol {
+  margin: 0.4em 0;
+  padding-left: 1.5em;
+}
+
+.agent-message__content li {
+  margin: 0.2em 0;
+}
+
+.agent-message__content li > p {
+  margin: 0;
+}
+
+.agent-message__content h1,
+.agent-message__content h2,
+.agent-message__content h3,
+.agent-message__content h4,
+.agent-message__content h5,
+.agent-message__content h6 {
+  margin: 0.6em 0 0.3em;
+  line-height: 1.3;
+}
+
+.agent-message__content blockquote {
+  margin: 0.4em 0;
+  padding-left: 1em;
+  border-left: 3px solid var(--content-border);
+  color: var(--content-muted);
+}
+
+.agent-message__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--content-muted);
+}
+
+.agent-message__status::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--blue);
+  animation: agent-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes agent-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.9);
+  }
+
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .agent-message__content > *:first-child {
@@ -2869,12 +2996,14 @@ select {
 }
 
 .agent-empty-state {
-  align-self: center;
-  justify-self: center;
+  flex: 1;
   max-width: 520px;
-  display: grid;
-  justify-items: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 10px;
+  margin: 0 auto;
   padding: 20px;
   text-align: center;
 }
@@ -2943,8 +3072,12 @@ select {
 }
 
 .agent-composer-shell {
-  padding: 8px 18px 16px;
-  background: var(--agent-main-bg);
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  padding: 10px 18px 16px;
+  background: color-mix(in srgb, var(--agent-main-bg) 88%, transparent);
+  backdrop-filter: blur(14px);
 }
 
 .agent-composer__project {
