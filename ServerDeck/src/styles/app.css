@@ -2830,6 +2830,30 @@ select {
   word-break: break-word;
 }
 
+.agent-message__content > *:first-child {
+  margin-top: 0;
+}
+
+.agent-message__content > *:last-child {
+  margin-bottom: 0;
+}
+
+.agent-message__content pre {
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(15, 23, 42, 0.08);
+}
+
+:root[data-app-theme="dark"] .agent-message__content pre {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.agent-message__content code {
+  font-family: ui-monospace, SFMono-Regular, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+}
+
 .agent-message__meta {
   display: inline-flex;
   align-items: center;

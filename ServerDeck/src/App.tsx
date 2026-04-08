@@ -78,7 +78,7 @@ import {
   type TransferUpdatePayload
 } from "./lib/api";
 import { FileBrowserPane } from "./components/files/FileBrowserPane";
-import { AgentWorkspace } from "./components/agent/AgentWorkspace";
+import { AgentWorkspace, type ModelOption } from "./components/agent/AgentWorkspace";
 import { AiProviderEditorModal } from "./components/ai/AiProviderEditorModal";
 import { ProjectEditorModal } from "./components/projects/ProjectEditorModal";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
@@ -87,6 +87,8 @@ import {
   createAgentSession,
   getAgentSessionDetail,
   listAgentSessions,
+  runAgentTurn,
+  type AgentStreamEvent,
   type AgentSession,
   type AgentSessionDetail
 } from "./lib/agentApi";
@@ -377,6 +379,26 @@ function getHostBadge(host: SavedHost, fallback = "Untitled Host") {
 
 function hasTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
+}
+
+function buildAgentModelValue(providerId: string, model: string) {
+  if (!providerId || !model) {
+    return "";
+  }
+
+  return `${providerId}:${model}`;
+}
+
+function parseAgentModelValue(value: string) {
+  const separatorIndex = value.indexOf(":");
+  if (separatorIndex <= 0 || separatorIndex >= value.length - 1) {
+    return null;
+  }
+
+  return {
+    providerId: value.slice(0, separatorIndex),
+    model: value.slice(separatorIndex + 1)
+  };
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -792,6 +814,7 @@ export default function App() {
   const [activeAgentSessionDetail, setActiveAgentSessionDetail] = useState<AgentSessionDetail | null>(null);
   const [agentSessionDetailLoading, setAgentSessionDetailLoading] = useState(false);
   const [agentSelectedProjectId, setAgentSelectedProjectId] = useState("");
+  const [agentSelectedModelValue, setAgentSelectedModelValue] = useState("");
   const [agentTaskInput, setAgentTaskInput] = useState("");
   const [agentFollowUpInput, setAgentFollowUpInput] = useState("");
   const [agentCreateBusy, setAgentCreateBusy] = useState(false);
@@ -935,6 +958,47 @@ export default function App() {
     [localTerminalProjects]
   );
 
+  const agentAvailableModels = useMemo<ModelOption[]>(() => {
+    return settings.aiProviders
+      .filter((provider) => provider.enabled)
+      .flatMap((provider) => {
+        const sourceModels = provider.enabledModels.length
+          ? provider.enabledModels
+          : provider.availableModels.length
+            ? provider.availableModels
+            : provider.model
+              ? [provider.model]
+              : [];
+        const models = [...new Set(sourceModels.filter((item) => item.trim()))];
+
+        return models.map((model) => ({
+          providerId: provider.id,
+          providerName: provider.name.trim() || provider.providerType,
+          model
+        }));
+      });
+  }, [settings.aiProviders]);
+
+  const defaultAgentModelValue = useMemo(() => {
+    const defaultProvider = settings.aiProviders.find((provider) => provider.enabled && provider.isDefault);
+    if (defaultProvider) {
+      const sourceModels = defaultProvider.enabledModels.length
+        ? defaultProvider.enabledModels
+        : defaultProvider.availableModels.length
+          ? defaultProvider.availableModels
+          : defaultProvider.model
+            ? [defaultProvider.model]
+            : [];
+      const defaultModel = sourceModels.find((item) => item.trim()) ?? "";
+      if (defaultModel) {
+        return buildAgentModelValue(defaultProvider.id, defaultModel);
+      }
+    }
+
+    const firstOption = agentAvailableModels[0];
+    return firstOption ? buildAgentModelValue(firstOption.providerId, firstOption.model) : "";
+  }, [agentAvailableModels, settings.aiProviders]);
+
   const recentLocalProjects = useMemo(
     () => recentLocalProjectIds
       .map((projectId) => localTerminalProjects.find((project) => project.id === projectId) ?? null)
@@ -988,6 +1052,124 @@ export default function App() {
     }
   }, []);
 
+  const syncAgentSessionFromStore = useCallback(async (sessionId: string) => {
+    const detail = await getAgentSessionDetail(sessionId);
+    setAgentSessions((current) => {
+      const nextSessions = current.some((session) => session.id === detail.session.id)
+        ? current.map((session) => (session.id === detail.session.id ? detail.session : session))
+        : [detail.session, ...current];
+
+      return [...nextSessions].sort((left, right) => right.updatedAt - left.updatedAt);
+    });
+    setActiveAgentSessionDetail((current) => (current?.session.id === sessionId ? detail : current));
+    return detail;
+  }, []);
+
+  const handleAgentStreamEvent = useCallback((event: AgentStreamEvent) => {
+    console.info("[AGENT] stream event", {
+      sessionId: event.sessionId,
+      phase: event.phase,
+      messageId: event.messageId,
+      createdAt: event.createdAt,
+      deltaLength: event.delta?.length ?? 0,
+      hasContent: Boolean(event.content),
+      error: event.error ?? ""
+    });
+
+    if (event.phase === "start") {
+      setAgentSessions((current) => current.map((session) => (
+        session.id === event.sessionId
+          ? { ...session, status: "streaming", updatedAt: event.createdAt }
+          : session
+      )));
+      setActiveAgentSessionDetail((current) => {
+        if (!current || current.session.id !== event.sessionId) {
+          return current;
+        }
+
+        const alreadyExists = current.messages.some((message) => message.id === event.messageId);
+        if (alreadyExists) {
+          return {
+            ...current,
+            session: { ...current.session, status: "streaming", updatedAt: event.createdAt }
+          };
+        }
+
+        return {
+          ...current,
+          session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
+          messages: [
+            ...current.messages,
+            {
+              id: event.messageId,
+              sessionId: event.sessionId,
+              role: "assistant",
+              content: "",
+              createdAt: event.createdAt
+            }
+          ]
+        };
+      });
+      return;
+    }
+
+    if (event.phase === "delta") {
+      setActiveAgentSessionDetail((current) => {
+        if (!current || current.session.id !== event.sessionId) {
+          return current;
+        }
+
+        return {
+          ...current,
+          messages: current.messages.map((message) => (
+            message.id === event.messageId
+              ? { ...message, content: `${message.content}${event.delta ?? ""}` }
+              : message
+          ))
+        };
+      });
+      return;
+    }
+
+    if (event.phase === "done") {
+      void syncAgentSessionFromStore(event.sessionId).catch((error) => {
+        setStatus(getErrorMessage(error, "Failed to load agent session"));
+        setStatusTone("error");
+      });
+      return;
+    }
+
+    setActiveAgentSessionDetail((current) => {
+      if (!current || current.session.id !== event.sessionId) {
+        return current;
+      }
+
+      const alreadyExists = current.messages.some((message) => message.id === event.messageId);
+      if (alreadyExists) {
+        return current;
+      }
+
+      return {
+        ...current,
+        session: { ...current.session, status: "error" },
+        messages: [
+          ...current.messages,
+          {
+            id: event.messageId,
+            sessionId: event.sessionId,
+            role: "assistant",
+            content: `Request failed:\n\n${event.error || "Agent request failed"}`,
+            createdAt: event.createdAt
+          }
+        ]
+      };
+    });
+
+    setStatus(event.error || "Agent request failed");
+    setStatusTone("error");
+    void syncAgentSessionFromStore(event.sessionId).catch(() => {});
+  }, [syncAgentSessionFromStore]);
+
   // author: BrianXiong
   // time: 2026/04/08/16:24:00
   const handleCreateAgentSession = useCallback(async () => {
@@ -1004,15 +1186,27 @@ export default function App() {
       return;
     }
 
+    const selectedModel = parseAgentModelValue(agentSelectedModelValue || defaultAgentModelValue);
+    if (!selectedModel) {
+      setStatus(messages.agentModelRequired);
+      setStatusTone("error");
+      return;
+    }
+
     setAgentCreateBusy(true);
     setStatusTone("neutral");
 
     try {
+      console.info("[AGENT] create session", {
+        projectId: project.id,
+        selectedModel: selectedModel,
+        taskLength: agentTaskInput.trim().length
+      });
       const detail = await createAgentSession({
         projectId: project.id,
         rootPath: project.path,
-        providerId: "",
-        model: "",
+        providerId: selectedModel.providerId,
+        model: selectedModel.model,
         goal: agentTaskInput.trim()
       });
 
@@ -1026,13 +1220,20 @@ export default function App() {
       setActiveTabId(AGENT_TAB_ID);
       setStatus(messages.agentStartSession);
       setStatusTone("success");
+      console.info("[AGENT] run first turn", { sessionId: detail.session.id });
+      await runAgentTurn(detail.session.id, {
+        onEvent: handleAgentStreamEvent,
+        providerId: selectedModel.providerId,
+        model: selectedModel.model
+      });
     } catch (error) {
+      console.error("[AGENT] create session failed", error);
       setStatus(getErrorMessage(error, messages.agentTaskRequired));
       setStatusTone("error");
     } finally {
       setAgentCreateBusy(false);
     }
-  }, [agentProjects, agentSelectedProjectId, agentSessions, agentTaskInput, messages]);
+  }, [agentProjects, agentSelectedProjectId, agentSelectedModelValue, agentSessions, agentTaskInput, defaultAgentModelValue, handleAgentStreamEvent, messages]);
 
   // author: BrianXiong
   // time: 2026/04/08/16:24:00
@@ -1047,10 +1248,21 @@ export default function App() {
       return;
     }
 
+    const selectedModel = parseAgentModelValue(agentSelectedModelValue || defaultAgentModelValue);
+    if (!selectedModel) {
+      setStatus(messages.agentModelRequired);
+      setStatusTone("error");
+      return;
+    }
+
     setAgentSendBusy(true);
     setStatusTone("neutral");
 
     try {
+      console.info("[AGENT] append follow-up", {
+        sessionId: activeAgentSessionId,
+        messageLength: agentFollowUpInput.trim().length
+      });
       const detail = await appendAgentUserMessage(activeAgentSessionId, agentFollowUpInput.trim());
       setActiveAgentSessionDetail(detail);
       setAgentSessions((current) => {
@@ -1063,13 +1275,20 @@ export default function App() {
       setAgentFollowUpInput("");
       setStatus(messages.agentSend);
       setStatusTone("success");
+      console.info("[AGENT] run follow-up turn", { sessionId: detail.session.id });
+      await runAgentTurn(detail.session.id, {
+        onEvent: handleAgentStreamEvent,
+        providerId: detail.session.providerId || selectedModel.providerId,
+        model: detail.session.model || selectedModel.model
+      });
     } catch (error) {
+      console.error("[AGENT] send follow-up failed", error);
       setStatus(getErrorMessage(error, messages.agentTaskRequired));
       setStatusTone("error");
     } finally {
       setAgentSendBusy(false);
     }
-  }, [activeAgentSessionId, agentFollowUpInput, messages]);
+  }, [activeAgentSessionId, agentFollowUpInput, agentSelectedModelValue, defaultAgentModelValue, handleAgentStreamEvent, messages]);
 
   const filteredHosts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -1160,6 +1379,25 @@ export default function App() {
   }, [agentProjects, agentSelectedProjectId]);
 
   useEffect(() => {
+    if (!agentAvailableModels.length) {
+      if (agentSelectedModelValue) {
+        setAgentSelectedModelValue("");
+      }
+      return;
+    }
+
+    const targetValue = agentSelectedModelValue || defaultAgentModelValue;
+    if (!targetValue) {
+      return;
+    }
+
+    const exists = agentAvailableModels.some((option) => buildAgentModelValue(option.providerId, option.model) === targetValue);
+    if (!exists || !agentSelectedModelValue) {
+      setAgentSelectedModelValue(defaultAgentModelValue);
+    }
+  }, [agentAvailableModels, agentSelectedModelValue, defaultAgentModelValue]);
+
+  useEffect(() => {
     if (!activeAgentSessionId) {
       setActiveAgentSessionDetail(null);
       return;
@@ -1190,6 +1428,32 @@ export default function App() {
       cancelled = true;
     };
   }, [activeAgentSessionId]);
+
+  useEffect(() => {
+    if (!hasTauriRuntime()) {
+      return;
+    }
+
+    let cleanup: null | (() => void) = null;
+    let disposed = false;
+
+    void listen<AgentStreamEvent>("agent-stream", (event) => {
+      handleAgentStreamEvent(event.payload);
+    })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        cleanup = unlisten;
+      })
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [handleAgentStreamEvent]);
 
   const checkForUpdates = useCallback(async (options?: { silent?: boolean }) => {
     if (!hasTauriRuntime()) {
@@ -3706,8 +3970,8 @@ export default function App() {
               detailLoading={agentSessionDetailLoading}
               createBusy={agentCreateBusy}
               sendBusy={agentSendBusy}
-              availableModels={[]}
-              selectedModel=""
+              availableModels={agentAvailableModels}
+              selectedModel={agentSelectedModelValue || defaultAgentModelValue}
               modelLabel={messages.agentModel}
               onSelectProject={setAgentSelectedProjectId}
               onTaskInputChange={setAgentTaskInput}
@@ -3715,7 +3979,7 @@ export default function App() {
               onSelectSession={setActiveAgentSessionId}
               onFollowUpInputChange={setAgentFollowUpInput}
               onSendFollowUp={() => void handleSendAgentFollowUp()}
-              onSelectModel={() => {}}
+              onSelectModel={setAgentSelectedModelValue}
             />
           ) : isSettingsView ? (
             <section className="settings-screen">

@@ -24,6 +24,16 @@ export type AgentSessionDetail = {
   messages: AgentMessage[];
 };
 
+export type AgentStreamEvent = {
+  sessionId: string;
+  phase: "start" | "delta" | "done" | "error";
+  messageId: string;
+  createdAt: number;
+  delta?: string;
+  content?: string;
+  error?: string;
+};
+
 export type CreateAgentSessionRequest = {
   projectId: string;
   rootPath: string;
@@ -35,6 +45,12 @@ export type CreateAgentSessionRequest = {
 type BrowserAgentStore = {
   sessions: AgentSession[];
   messagesBySessionId: Record<string, AgentMessage[]>;
+};
+
+type RunAgentTurnOptions = {
+  onEvent?: (event: AgentStreamEvent) => void;
+  providerId?: string;
+  model?: string;
 };
 
 declare global {
@@ -196,4 +212,102 @@ export async function appendAgentUserMessage(sessionId: string, content: string)
     session,
     messages: store.messagesBySessionId[sessionId]
   };
+}
+
+// author: BrianXiong
+// time: 2026/04/08/19:20:00
+function delay(ms: number) {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
+// author: BrianXiong
+// time: 2026/04/08/19:20:00
+function buildBrowserAssistantReply(session: AgentSession, messages: AgentMessage[]) {
+  const latestUserMessage = [...messages].reverse().find((message) => message.role === "user")?.content ?? session.goal;
+  return [
+    "Browser preview mode is active, so this is a mocked streaming reply.",
+    `Project scope: ${session.rootPath}`,
+    `Selected model: ${session.model || "not configured"}`,
+    "",
+    `Latest request: ${latestUserMessage}`,
+    "",
+    "Run the Tauri desktop app to connect a real AI Provider and receive actual streamed completions."
+  ].join("\n");
+}
+
+export async function runAgentTurn(sessionId: string, options?: RunAgentTurnOptions) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("run_agent_turn", {
+      request: {
+        sessionId,
+        providerId: options?.providerId,
+        model: options?.model
+      }
+    });
+  }
+
+  const store = loadBrowserStore();
+  const session = store.sessions.find((item) => item.id === sessionId);
+  if (!session) {
+    throw new Error("Agent session not found");
+  }
+
+  if (!session.providerId && options?.providerId) {
+    session.providerId = options.providerId;
+  }
+
+  if (!session.model && options?.model) {
+    session.model = options.model;
+  }
+
+  const createdAt = Date.now();
+  const messageId = crypto.randomUUID();
+  const content = buildBrowserAssistantReply(session, store.messagesBySessionId[sessionId] ?? []);
+  const chunks = content.match(/.{1,36}(\s|$)/g)?.map((item) => item) ?? [content];
+
+  session.status = "streaming";
+  session.updatedAt = createdAt;
+  options?.onEvent?.({
+    sessionId,
+    phase: "start",
+    messageId,
+    createdAt
+  });
+
+  for (const chunk of chunks) {
+    await delay(45);
+    options?.onEvent?.({
+      sessionId,
+      phase: "delta",
+      messageId,
+      createdAt,
+      delta: chunk
+    });
+  }
+
+  const assistantMessage: AgentMessage = {
+    id: messageId,
+    sessionId,
+    role: "assistant",
+    content,
+    createdAt
+  };
+
+  session.status = "idle";
+  session.updatedAt = Date.now();
+  store.messagesBySessionId[sessionId] = [...(store.messagesBySessionId[sessionId] ?? []), assistantMessage];
+  store.sessions = [...store.sessions].sort((left, right) => right.updatedAt - left.updatedAt);
+  saveBrowserStore(store);
+
+  options?.onEvent?.({
+    sessionId,
+    phase: "done",
+    messageId,
+    createdAt,
+    content
+  });
+
+  return true;
 }

@@ -1,4 +1,7 @@
 import { ArrowUp, Bot, ChevronDown, MessageSquare, Plus, Sparkles } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
+import remarkGfm from "remark-gfm";
 import type { ManagedProject } from "../../lib/api";
 import type { AgentSession, AgentSessionDetail } from "../../lib/agentApi";
 
@@ -57,6 +60,16 @@ function formatSessionTime(value: number) {
 }
 
 // author: BrianXiong
+// time: 2026/04/08/19:20:00
+function buildModelValue(providerId: string, model: string) {
+  if (!providerId || !model) {
+    return "";
+  }
+
+  return `${providerId}:${model}`;
+}
+
+// author: BrianXiong
 // time: 2026/04/08/16:24:00
 export function AgentWorkspace({
   title,
@@ -98,6 +111,10 @@ export function AgentWorkspace({
   const composerValue = activeSessionDetail ? followUpInput : taskInput;
   const composerPlaceholder = activeSessionDetail ? messagePlaceholder : taskPlaceholder;
   const composerDisabled = activeSessionDetail ? sendBusy : createBusy;
+  const modelValue = activeSessionDetail
+    ? buildModelValue(activeSessionDetail.session.providerId, activeSessionDetail.session.model)
+    : selectedModel;
+  const hasSelectedModelOption = availableModels.some((option) => buildModelValue(option.providerId, option.model) === modelValue);
 
   return (
     <section className="agent-screen">
@@ -179,7 +196,15 @@ export function AgentWorkspace({
                       <div className="agent-message__inner">
                         {!isUserMessage ? <div className="agent-message__role">{message.role}</div> : null}
                         <div className="agent-message__bubble">
-                          <div className="agent-message__content">{message.content}</div>
+                          <div className="agent-message__content">
+                            {isUserMessage ? (
+                              message.content
+                            ) : (
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                                {message.content}
+                              </ReactMarkdown>
+                            )}
+                          </div>
                         </div>
                         <div className="agent-message__meta">
                           <span className="agent-message__time">{formatSessionTime(message.createdAt)}</span>
@@ -232,18 +257,25 @@ export function AgentWorkspace({
               <div className="agent-composer__footer">
                 <label className="agent-model-selector">
                   <select
-                    value={selectedModel}
+                    value={modelValue}
                     onChange={(event) => onSelectModel(event.target.value)}
-                    disabled={availableModels.length === 0}
+                    disabled={Boolean(activeSessionDetail) || availableModels.length === 0}
                   >
                     {availableModels.length === 0 ? (
                       <option value="">{modelLabel}</option>
                     ) : (
-                      availableModels.map((option) => (
-                        <option key={`${option.providerId}:${option.model}`} value={`${option.providerId}:${option.model}`}>
-                          {option.providerName} / {option.model}
-                        </option>
-                      ))
+                      <>
+                        {activeSessionDetail && modelValue && !hasSelectedModelOption ? (
+                          <option value={modelValue}>
+                            {activeSessionDetail.session.providerId} / {activeSessionDetail.session.model}
+                          </option>
+                        ) : null}
+                        {availableModels.map((option) => (
+                          <option key={`${option.providerId}:${option.model}`} value={`${option.providerId}:${option.model}`}>
+                            {option.providerName} / {option.model}
+                          </option>
+                        ))}
+                      </>
                     )}
                   </select>
                   <ChevronDown size={14} className="agent-model-selector__icon" />

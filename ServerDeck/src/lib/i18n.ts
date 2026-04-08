@@ -242,6 +242,7 @@ type Messages = {
   agentMessagePlaceholder: string;
   agentSend: string;
   agentModel: string;
+  agentModelRequired: string;
   agentProjectRequired: string;
   agentTaskRequired: string;
   aiProviders: string;
@@ -561,6 +562,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     agentMessagePlaceholder: "Add a follow-up question for this session...",
     agentSend: "Send",
     agentModel: "Select Model",
+    agentModelRequired: "Select an AI model first",
     agentProjectRequired: "Choose a local project first",
     agentTaskRequired: "Agent task is required",
     aiProviders: "AI Providers",
@@ -878,6 +880,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     agentMessagePlaceholder: "继续补充这个会话的问题...",
     agentSend: "发送",
     agentModel: "选择模型",
+    agentModelRequired: "请先选择一个 AI 模型",
     agentProjectRequired: "请先选择一个本地项目",
     agentTaskRequired: "请输入 agent 任务",
     aiProviders: "AI Providers",
@@ -1195,6 +1198,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     agentMessagePlaceholder: "このセッションに追記したい質問を入力してください...",
     agentSend: "送信",
     agentModel: "モデル選択",
+    agentModelRequired: "先に AI モデルを選択してください",
     agentProjectRequired: "先にローカルプロジェクトを選択してください",
     agentTaskRequired: "agent タスクを入力してください",
     aiProviders: "AI Provider",
