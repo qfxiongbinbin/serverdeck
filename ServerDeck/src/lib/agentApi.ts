@@ -21,9 +21,31 @@ export type AgentMessage = {
   createdAt: number;
 };
 
+export type AgentPlanItem = {
+  id: string;
+  sessionId: string;
+  title: string;
+  status: string;
+  position: number;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type AgentToolCall = {
+  id: string;
+  sessionId: string;
+  toolName: string;
+  argumentsSummary: string;
+  resultSummary: string;
+  status: string;
+  createdAt: number;
+};
+
 export type AgentSessionDetail = {
   session: AgentSession;
   messages: AgentMessage[];
+  planItems: AgentPlanItem[];
+  toolCalls: AgentToolCall[];
 };
 
 export type AgentProjectContext = {
@@ -69,6 +91,8 @@ export type CreateAgentSessionRequest = {
 type BrowserAgentStore = {
   sessions: AgentSession[];
   messagesBySessionId: Record<string, AgentMessage[]>;
+  planItemsBySessionId: Record<string, AgentPlanItem[]>;
+  toolCallsBySessionId: Record<string, AgentToolCall[]>;
 };
 
 type RunAgentTurnOptions = {
@@ -118,7 +142,7 @@ function hasTauri() {
 function loadBrowserStore(): BrowserAgentStore {
   const raw = window.localStorage.getItem(STORAGE_KEY);
   if (!raw) {
-    return { sessions: [], messagesBySessionId: {} };
+    return { sessions: [], messagesBySessionId: {}, planItemsBySessionId: {}, toolCallsBySessionId: {} };
   }
 
   try {
@@ -127,10 +151,16 @@ function loadBrowserStore(): BrowserAgentStore {
       sessions: Array.isArray(parsed.sessions) ? parsed.sessions as AgentSession[] : [],
       messagesBySessionId: parsed.messagesBySessionId && typeof parsed.messagesBySessionId === "object"
         ? parsed.messagesBySessionId as Record<string, AgentMessage[]>
+        : {},
+      planItemsBySessionId: parsed.planItemsBySessionId && typeof parsed.planItemsBySessionId === "object"
+        ? parsed.planItemsBySessionId as Record<string, AgentPlanItem[]>
+        : {},
+      toolCallsBySessionId: parsed.toolCallsBySessionId && typeof parsed.toolCallsBySessionId === "object"
+        ? parsed.toolCallsBySessionId as Record<string, AgentToolCall[]>
         : {}
     };
   } catch {
-    return { sessions: [], messagesBySessionId: {} };
+    return { sessions: [], messagesBySessionId: {}, planItemsBySessionId: {}, toolCallsBySessionId: {} };
   }
 }
 
@@ -196,7 +226,9 @@ export async function getAgentSessionDetail(sessionId: string) {
 
   return {
     session,
-    messages: store.messagesBySessionId[sessionId] ?? []
+    messages: store.messagesBySessionId[sessionId] ?? [],
+    planItems: store.planItemsBySessionId[sessionId] ?? [],
+    toolCalls: store.toolCallsBySessionId[sessionId] ?? []
   };
 }
 
@@ -208,6 +240,8 @@ export async function deleteAgentSession(sessionId: string) {
   const store = loadBrowserStore();
   store.sessions = store.sessions.filter((item) => item.id !== sessionId);
   delete store.messagesBySessionId[sessionId];
+  delete store.planItemsBySessionId[sessionId];
+  delete store.toolCallsBySessionId[sessionId];
   saveBrowserStore(store);
   return true;
 }
@@ -299,11 +333,15 @@ export async function createAgentSession(request: CreateAgentSessionRequest) {
   const store = loadBrowserStore();
   store.sessions = [session, ...store.sessions].sort((left, right) => right.updatedAt - left.updatedAt);
   store.messagesBySessionId[sessionId] = [message];
+  store.planItemsBySessionId[sessionId] = [];
+  store.toolCallsBySessionId[sessionId] = [];
   saveBrowserStore(store);
 
   return {
     session,
-    messages: [message]
+    messages: [message],
+    planItems: [],
+    toolCalls: []
   };
 }
 
@@ -339,7 +377,9 @@ export async function appendAgentUserMessage(sessionId: string, content: string)
 
   return {
     session,
-    messages: store.messagesBySessionId[sessionId]
+    messages: store.messagesBySessionId[sessionId],
+    planItems: store.planItemsBySessionId[sessionId] ?? [],
+    toolCalls: store.toolCallsBySessionId[sessionId] ?? []
   };
 }
 
@@ -395,6 +435,44 @@ export async function runAgentTurn(sessionId: string, options?: RunAgentTurnOpti
   const messageId = crypto.randomUUID();
   const content = buildBrowserAssistantReply(session, store.messagesBySessionId[sessionId] ?? []);
   const chunks = content.match(/.{1,36}(\s|$)/g)?.map((item) => item) ?? [content];
+  const planItems: AgentPlanItem[] = [
+    {
+      id: crypto.randomUUID(),
+      sessionId,
+      title: "Review project context",
+      status: "completed",
+      position: 0,
+      createdAt,
+      updatedAt: createdAt
+    },
+    {
+      id: crypto.randomUUID(),
+      sessionId,
+      title: "Summarize findings",
+      status: "completed",
+      position: 1,
+      createdAt,
+      updatedAt: createdAt
+    }
+  ];
+  const toolCalls: AgentToolCall[] = [{
+    id: crypto.randomUUID(),
+    sessionId,
+    toolName: "get_project_context",
+    argumentsSummary: ".",
+    resultSummary: `Project root ${session.rootPath}`,
+    status: "completed",
+    createdAt
+  }];
+
+  // Insert tool messages for inline display in conversation
+  const toolMessages: AgentMessage[] = toolCalls.map((call) => ({
+    id: crypto.randomUUID(),
+    sessionId,
+    role: "tool" as const,
+    content: `${call.toolName}\nArguments: ${call.argumentsSummary}\nResult: ${call.resultSummary}`,
+    createdAt
+  }));
 
   session.status = "streaming";
   session.updatedAt = createdAt;
@@ -426,7 +504,9 @@ export async function runAgentTurn(sessionId: string, options?: RunAgentTurnOpti
 
   session.status = "idle";
   session.updatedAt = Date.now();
-  store.messagesBySessionId[sessionId] = [...(store.messagesBySessionId[sessionId] ?? []), assistantMessage];
+  store.messagesBySessionId[sessionId] = [...(store.messagesBySessionId[sessionId] ?? []), ...toolMessages, assistantMessage];
+  store.planItemsBySessionId[sessionId] = planItems;
+  store.toolCallsBySessionId[sessionId] = [...(store.toolCallsBySessionId[sessionId] ?? []), ...toolCalls];
   store.sessions = [...store.sessions].sort((left, right) => right.updatedAt - left.updatedAt);
   saveBrowserStore(store);
 

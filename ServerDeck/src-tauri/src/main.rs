@@ -312,11 +312,37 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           created_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS agent_plan_items (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          status TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_tool_calls (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          arguments_summary TEXT NOT NULL,
+          result_summary TEXT NOT NULL,
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated_at
           ON agent_sessions(updated_at DESC);
 
         CREATE INDEX IF NOT EXISTS idx_agent_messages_session_id_created_at
           ON agent_messages(session_id, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_agent_plan_items_session_id_position
+          ON agent_plan_items(session_id, position, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_session_id_created_at
+          ON agent_tool_calls(session_id, created_at);
         "#,
     )
     .map_err(|error| error.to_string())?;

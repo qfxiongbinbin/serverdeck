@@ -60,6 +60,32 @@ pub(crate) struct AgentTurnRequest {
 pub(crate) struct AgentSessionDetailPayload {
     session: AgentSessionRecord,
     messages: Vec<AgentMessageRecord>,
+    plan_items: Vec<AgentPlanItemRecord>,
+    tool_calls: Vec<AgentToolCallRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentPlanItemRecord {
+    id: String,
+    session_id: String,
+    title: String,
+    status: String,
+    position: i64,
+    created_at: i64,
+    updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentToolCallRecord {
+    id: String,
+    session_id: String,
+    tool_name: String,
+    arguments_summary: String,
+    result_summary: String,
+    status: String,
+    created_at: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -219,7 +245,57 @@ fn build_agent_session_detail(conn: &Connection, session_id: &str) -> Result<Age
     Ok(AgentSessionDetailPayload {
         session: load_agent_session_by_id(conn, session_id)?,
         messages: load_agent_messages_from_db(conn, session_id)?,
+        plan_items: load_agent_plan_items_from_db(conn, session_id)?,
+        tool_calls: load_agent_tool_calls_from_db(conn, session_id)?,
     })
+}
+
+// author: BrianXiong
+// time: 2026/04/09/11:10:00
+fn load_agent_plan_items_from_db(conn: &Connection, session_id: &str) -> Result<Vec<AgentPlanItemRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, session_id, title, status, position, created_at, updated_at FROM agent_plan_items WHERE session_id = ?1 ORDER BY position, created_at, id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map(params![session_id], |row| {
+            Ok(AgentPlanItemRecord {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                title: row.get(2)?,
+                status: row.get(3)?,
+                position: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+// author: BrianXiong
+// time: 2026/04/09/11:10:00
+fn load_agent_tool_calls_from_db(conn: &Connection, session_id: &str) -> Result<Vec<AgentToolCallRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, session_id, tool_name, arguments_summary, result_summary, status, created_at FROM agent_tool_calls WHERE session_id = ?1 ORDER BY created_at, id",
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map(params![session_id], |row| {
+            Ok(AgentToolCallRecord {
+                id: row.get(0)?,
+                session_id: row.get(1)?,
+                tool_name: row.get(2)?,
+                arguments_summary: row.get(3)?,
+                result_summary: row.get(4)?,
+                status: row.get(5)?,
+                created_at: row.get(6)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
 fn load_ai_provider_by_id(conn: &Connection, provider_id: &str) -> Result<AiProviderRecord, String> {
@@ -618,12 +694,325 @@ fn insert_agent_message(conn: &Connection, message: &AgentMessageRecord) -> Resu
 }
 
 // author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn build_agent_system_prompt(session: &AgentSessionRecord) -> String {
-    format!(
-        "You are ServerDeck's project-scoped AI assistant. The current project root is: {}. This first version only supports streamed conversation, so answer directly in concise Markdown and stay grounded in the user messages.",
-        session.root_path
+// time: 2026/04/09/11:10:00
+fn replace_agent_plan_items(conn: &Connection, session_id: &str, items: &[AgentPlanItemRecord]) -> Result<(), String> {
+    conn.execute("DELETE FROM agent_plan_items WHERE session_id = ?1", params![session_id])
+        .map_err(|error| error.to_string())?;
+
+    for item in items {
+        conn.execute(
+            "INSERT INTO agent_plan_items (id, session_id, title, status, position, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                item.id,
+                item.session_id,
+                item.title,
+                item.status,
+                item.position,
+                item.created_at,
+                item.updated_at,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    Ok(())
+}
+
+// author: BrianXiong
+// time: 2026/04/09/11:10:00
+fn append_agent_tool_call(conn: &Connection, call: &AgentToolCallRecord) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO agent_tool_calls (id, session_id, tool_name, arguments_summary, result_summary, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            call.id,
+            call.session_id,
+            call.tool_name,
+            call.arguments_summary,
+            call.result_summary,
+            call.status,
+            call.created_at,
+        ],
     )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+// author: BrianXiong
+// time: 2026/04/09/11:10:00
+fn append_agent_tool_log(
+    conn: &Connection,
+    session_id: &str,
+    tool_name: &str,
+    arguments_summary: &str,
+    result_summary: &str,
+    status: &str,
+) -> Result<(), String> {
+    let created_at = now_millis_i64();
+
+    // Insert into agent_tool_calls table
+    append_agent_tool_call(
+        conn,
+        &AgentToolCallRecord {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            tool_name: tool_name.to_string(),
+            arguments_summary: arguments_summary.to_string(),
+            result_summary: result_summary.to_string(),
+            status: status.to_string(),
+            created_at,
+        },
+    )?;
+
+    // Also insert as a tool message for inline display in conversation
+    let tool_message_content = format!(
+        "{}\nArguments: {}\nResult: {}",
+        tool_name,
+        arguments_summary,
+        result_summary
+    );
+    insert_agent_message(
+        conn,
+        &AgentMessageRecord {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_string(),
+            role: "tool".to_string(),
+            content: tool_message_content,
+            created_at,
+        },
+    )
+}
+
+// author: BrianXiong
+// time: 2026/04/08/19:20:00
+fn build_agent_system_prompt(session: &AgentSessionRecord, runtime_context: &str) -> String {
+    format!(
+        "You are ServerDeck's project-scoped AI assistant. The current project root is: {}. This phase supports read-only project inspection. You must answer with concrete findings from the provided context and must not say that you will inspect later if the context already includes the inspection results. Respond in concise Markdown.\n\nProject inspection context:\n{}",
+        session.root_path,
+        runtime_context
+    )
+}
+
+// author: BrianXiong
+// time: 2026/04/09/10:45:00
+fn latest_user_message<'a>(messages: &'a [AgentMessageRecord], session: &'a AgentSessionRecord) -> &'a str {
+    messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user")
+        .map(|message| message.content.as_str())
+        .unwrap_or(session.goal.as_str())
+}
+
+// author: BrianXiong
+// time: 2026/04/09/10:45:00
+fn looks_like_structure_request(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    ["结构", "目录", "项目结构", "文件结构", "tree", "structure", "folder", "目录树", "看下结构"]
+        .iter()
+        .any(|keyword| lower.contains(keyword))
+}
+
+// author: BrianXiong
+// time: 2026/04/09/10:45:00
+fn format_agent_entries(root: &Path, entries: &[FileEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| {
+            let path = PathBuf::from(&entry.path);
+            let relative = agent_relative_path(root, &path);
+            if entry.is_dir {
+                format!("- [dir] {}", relative)
+            } else {
+                format!("- [file] {}", relative)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+// author: BrianXiong
+// time: 2026/04/09/10:45:00
+fn extract_search_query(message: &str) -> Option<String> {
+    for delimiter in ['`', '"', '“', '”', '\'', '‘', '’'] {
+        let parts = message.split(delimiter).collect::<Vec<_>>();
+        if parts.len() >= 3 {
+            let candidate = parts[1].trim();
+            if !candidate.is_empty() {
+                return Some(candidate.to_string());
+            }
+        }
+    }
+
+    None
+}
+
+// author: BrianXiong
+// time: 2026/04/09/11:10:00
+fn build_agent_plan_items(session: &AgentSessionRecord, latest_message: &str, search_query: Option<&str>) -> Vec<AgentPlanItemRecord> {
+    let created_at = now_millis_i64();
+    let mut items = vec![AgentPlanItemRecord {
+        id: Uuid::new_v4().to_string(),
+        session_id: session.id.clone(),
+        title: "Review project context and key files".to_string(),
+        status: "completed".to_string(),
+        position: 0,
+        created_at,
+        updated_at: created_at,
+    }];
+
+    if looks_like_structure_request(latest_message) {
+        items.push(AgentPlanItemRecord {
+            id: Uuid::new_v4().to_string(),
+            session_id: session.id.clone(),
+            title: "Inspect top-level project structure".to_string(),
+            status: "completed".to_string(),
+            position: 1,
+            created_at,
+            updated_at: created_at,
+        });
+    }
+
+    if let Some(query) = search_query {
+        items.push(AgentPlanItemRecord {
+            id: Uuid::new_v4().to_string(),
+            session_id: session.id.clone(),
+            title: format!("Search project files for `{}`", query),
+            status: "completed".to_string(),
+            position: items.len() as i64,
+            created_at,
+            updated_at: created_at,
+        });
+    }
+
+    items.push(AgentPlanItemRecord {
+        id: Uuid::new_v4().to_string(),
+        session_id: session.id.clone(),
+        title: "Summarize findings for the user".to_string(),
+        status: "in_progress".to_string(),
+        position: items.len() as i64,
+        created_at,
+        updated_at: created_at,
+    });
+
+    items
+}
+
+struct AgentTurnArtifacts {
+    runtime_context: String,
+    plan_items: Vec<AgentPlanItemRecord>,
+}
+
+// author: BrianXiong
+// time: 2026/04/09/11:10:00
+fn with_final_plan_status(items: &[AgentPlanItemRecord], status: &str) -> Vec<AgentPlanItemRecord> {
+    items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| {
+            if index + 1 == items.len() {
+                let mut next = item.clone();
+                next.status = status.to_string();
+                next.updated_at = now_millis_i64();
+                next
+            } else {
+                item.clone()
+            }
+        })
+        .collect()
+}
+
+// author: BrianXiong
+// time: 2026/04/09/10:45:00
+fn build_agent_turn_artifacts(
+    conn: &Connection,
+    session: &AgentSessionRecord,
+    messages: &[AgentMessageRecord],
+) -> AgentTurnArtifacts {
+    let root = match PathBuf::from(&session.root_path).canonicalize() {
+        Ok(path) => path,
+        Err(error) => {
+            return AgentTurnArtifacts {
+                runtime_context: format!("Project root is unavailable: {}", error),
+                plan_items: build_agent_plan_items(session, latest_user_message(messages, session), None),
+            };
+        }
+    };
+
+    let latest_message = latest_user_message(messages, session);
+    let search_query = extract_search_query(latest_message);
+    let plan_items = build_agent_plan_items(session, latest_message, search_query.as_deref());
+    let mut sections = Vec::new();
+
+    match build_agent_project_context(&root) {
+        Ok(context) => {
+            let _ = append_agent_tool_log(
+                conn,
+                &session.id,
+                "get_project_context",
+                ".",
+                &context.summary,
+                "completed",
+            );
+            sections.push(format!("Summary:\n{}", context.summary));
+            if !context.key_files.is_empty() {
+                sections.push(format!("Key files:\n- {}", context.key_files.join("\n- ")));
+            }
+
+            if looks_like_structure_request(latest_message) {
+                let top_level_summary = format_agent_entries(&root, &context.top_level_entries);
+                let _ = append_agent_tool_log(
+                    conn,
+                    &session.id,
+                    "list_dir",
+                    ".",
+                    &format!("{} top-level entries", context.top_level_entries.len()),
+                    "completed",
+                );
+                sections.push(format!(
+                    "Top-level structure:\n{}",
+                    top_level_summary
+                ));
+            }
+        }
+        Err(error) => {
+            let _ = append_agent_tool_log(conn, &session.id, "get_project_context", ".", &error, "error");
+            sections.push(format!("Project context error:\n{}", error));
+        }
+    }
+
+    if let Some(query) = search_query.as_deref() {
+        match search_agent_files(&root, &root, query, 8) {
+            Ok(matches) if !matches.is_empty() => {
+                let formatted = matches
+                    .iter()
+                    .map(|item| format!("- {}:{} -> {}", item.path, item.line, item.snippet))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let _ = append_agent_tool_log(
+                    conn,
+                    &session.id,
+                    "search_in_files",
+                    query,
+                    &format!("{} matches", matches.len()),
+                    "completed",
+                );
+                sections.push(format!("Search results for `{}`:\n{}", query, formatted));
+            }
+            Ok(_) => {
+                let _ = append_agent_tool_log(conn, &session.id, "search_in_files", query, "no matches", "completed");
+                sections.push(format!("Search results for `{}`:\n- no matches found", query));
+            }
+            Err(error) => {
+                let _ = append_agent_tool_log(conn, &session.id, "search_in_files", query, &error, "error");
+                sections.push(format!("Search error for `{}`:\n{}", query, error));
+            }
+        }
+    }
+
+    AgentTurnArtifacts {
+        runtime_context: sections.join("\n\n"),
+        plan_items,
+    }
 }
 
 // author: BrianXiong
@@ -1146,10 +1535,16 @@ fn run_streaming_agent_completion(
     session: &AgentSessionRecord,
     provider: &AiProviderRecord,
     messages: &[AgentMessageRecord],
+    runtime_context: &str,
     message_id: &str,
     created_at: i64,
 ) -> Result<String, String> {
-    let system_prompt = build_agent_system_prompt(session);
+    eprintln!(
+        "[AGENT] runtime context prepared session={} context_len={}",
+        session.id,
+        runtime_context.len()
+    );
+    let system_prompt = build_agent_system_prompt(session, runtime_context);
     match provider.provider_type.as_str() {
         "anthropic" => stream_anthropic_completion(app, session, provider, messages, &system_prompt, message_id, created_at),
         "gemini" => stream_gemini_completion(app, session, provider, messages, &system_prompt, message_id, created_at),
@@ -1254,6 +1649,10 @@ pub(crate) fn delete_agent_session(session_id: String) -> Result<bool, String> {
     let tx = conn.transaction().map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM agent_messages WHERE session_id = ?1", params![session_id])
         .map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM agent_plan_items WHERE session_id = ?1", params![session_id.clone()])
+        .map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM agent_tool_calls WHERE session_id = ?1", params![session_id.clone()])
+        .map_err(|error| error.to_string())?;
     tx.execute("DELETE FROM agent_sessions WHERE id = ?1", params![session_id])
         .map_err(|error| error.to_string())?;
     tx.commit().map_err(|error| error.to_string())?;
@@ -1306,14 +1705,19 @@ pub(crate) fn run_agent_turn(app: AppHandle, request: AgentTurnRequest) -> Resul
     );
     validate_agent_session_provider(&session, &provider)?;
 
+    let messages = load_agent_messages_from_db(&conn, &session.id)?;
+    let artifacts = build_agent_turn_artifacts(&conn, &session, &messages);
+    replace_agent_plan_items(&conn, &session.id, &artifacts.plan_items)?;
+
     if session.status == "streaming" {
         return Err("Agent session is already streaming".to_string());
     }
 
     let updated_at = now_millis_i64();
     update_agent_session_status(&conn, &session.id, "streaming", updated_at)?;
-    let messages = load_agent_messages_from_db(&conn, &session.id)?;
     let app_handle = app.clone();
+    let plan_items = artifacts.plan_items.clone();
+    let runtime_context = artifacts.runtime_context;
 
     std::thread::spawn(move || {
         let message_id = Uuid::new_v4().to_string();
@@ -1325,7 +1729,15 @@ pub(crate) fn run_agent_turn(app: AppHandle, request: AgentTurnRequest) -> Resul
             provider.provider_type,
             session.model
         );
-        let result = run_streaming_agent_completion(&app_handle, &session, &provider, &messages, &message_id, created_at);
+        let result = run_streaming_agent_completion(
+            &app_handle,
+            &session,
+            &provider,
+            &messages,
+            &runtime_context,
+            &message_id,
+            created_at,
+        );
 
         match result {
             Ok(content) => {
@@ -1346,6 +1758,7 @@ pub(crate) fn run_agent_turn(app: AppHandle, request: AgentTurnRequest) -> Resul
                             created_at,
                         },
                     );
+                    let _ = replace_agent_plan_items(&conn, &session.id, &with_final_plan_status(&plan_items, "completed"));
                     let _ = update_agent_session_status(&conn, &session.id, "idle", now_millis_i64());
                 }
 
@@ -1380,6 +1793,7 @@ pub(crate) fn run_agent_turn(app: AppHandle, request: AgentTurnRequest) -> Resul
                             created_at,
                         },
                     );
+                    let _ = replace_agent_plan_items(&conn, &session.id, &with_final_plan_status(&plan_items, "pending"));
                     let _ = update_agent_session_status(&conn, &session.id, "error", now_millis_i64());
                 }
 

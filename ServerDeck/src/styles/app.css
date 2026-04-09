@@ -2875,6 +2875,99 @@ select {
   font-size: 14px;
 }
 
+.agent-tool-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+  width: fit-content;
+  max-width: min(70%, 46rem);
+}
+
+.agent-tool-list--standalone {
+  margin: 8px 0;
+  padding-left: 0;
+  max-width: min(70%, 46rem);
+}
+
+.agent-tool-item {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+}
+
+.agent-tool-item__header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  color: var(--content-muted);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease;
+}
+
+.agent-tool-item__header:hover {
+  color: var(--text);
+}
+
+.agent-tool-item__icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.agent-tool-item__name {
+  font-weight: 500;
+}
+
+.agent-tool-item__check {
+  flex-shrink: 0;
+  color: #22c55e;
+}
+
+.agent-tool-item__arrow {
+  flex-shrink: 0;
+  opacity: 0.6;
+  transition: transform 200ms ease;
+}
+
+.agent-tool-item__arrow--open {
+  transform: rotate(180deg);
+}
+
+.agent-tool-item__detail {
+  margin-top: 6px;
+  margin-left: 18px;
+  width: calc(100% - 18px);
+  max-width: calc(100% - 18px);
+}
+
+.agent-tool-item__content {
+  display: block;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--content-border);
+  border-radius: 8px;
+  background: var(--content-subtle-bg);
+  color: var(--content-muted);
+  font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow: auto;
+  max-height: 200px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
 .agent-messages-empty svg {
   opacity: 0.5;
 }
@@ -2885,7 +2978,7 @@ select {
 }
 
 .agent-message__inner {
-  display: flex;
+  display: inline-flex;
   flex-direction: column;
   gap: 2px;
   max-width: 70%;

@@ -3991,6 +3991,8 @@ export default function App() {
               loadingLabel={messages.loading}
               thinkingLabel={messages.agentThinking}
               noMessagesLabel={messages.agentNoMessages}
+              runningLabel={messages.agentRunning}
+              completedLabel={messages.agentCompleted}
               deleteLabel={messages.delete}
               archiveLabel={messages.agentArchive}
               projects={agentProjects}
