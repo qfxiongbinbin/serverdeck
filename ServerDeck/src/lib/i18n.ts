@@ -124,6 +124,7 @@ type Messages = {
   renderMarkdown: string;
   showRaw: string;
   fileNameColumn: string;
+  fileModifiedDateColumn: string;
   fileSizeColumn: string;
   fileKindColumn: string;
   fileAddedDateColumn: string;
@@ -228,6 +229,25 @@ type Messages = {
   terminalTheme: string;
   ai: string;
   aiDescription: string;
+  agent: string;
+  agentDescription: string;
+  agentSessions: string;
+  agentProject: string;
+  agentTask: string;
+  agentTaskPlaceholder: string;
+  agentStartSession: string;
+  noAgentSessions: string;
+  noAgentSessionsDescription: string;
+  agentConversation: string;
+  agentMessagePlaceholder: string;
+  agentSend: string;
+  agentModel: string;
+  agentThinking: string;
+  agentNoMessages: string;
+  agentArchive: string;
+  agentModelRequired: string;
+  agentProjectRequired: string;
+  agentTaskRequired: string;
   aiProviders: string;
   aiModels: string;
   aiUsage: string;
@@ -427,6 +447,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     renderMarkdown: "Markdown",
     showRaw: "Raw",
     fileNameColumn: "Name",
+    fileModifiedDateColumn: "Modified",
     fileSizeColumn: "Size",
     fileKindColumn: "Kind",
     fileAddedDateColumn: "Added Date",
@@ -531,6 +552,25 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalTheme: "Terminal Theme",
     ai: "AI",
     aiDescription: "Manage AI providers and default model settings for future AI-native features.",
+    agent: "Agent",
+    agentDescription: "Start and organize project-scoped agent sessions before wiring execution tools.",
+    agentSessions: "Sessions",
+    agentProject: "Project",
+    agentTask: "Task",
+    agentTaskPlaceholder: "Describe what you want the agent to analyze in this project...",
+    agentStartSession: "Start Session",
+    noAgentSessions: "No agent sessions yet",
+    noAgentSessionsDescription: "Create a session to capture a project-scoped coding task.",
+    agentConversation: "Conversation",
+    agentMessagePlaceholder: "Add a follow-up question for this session...",
+    agentSend: "Send",
+    agentModel: "Select Model",
+    agentThinking: "Thinking...",
+    agentNoMessages: "No messages yet",
+    agentArchive: "Archive",
+    agentModelRequired: "Select an AI model first",
+    agentProjectRequired: "Choose a local project first",
+    agentTaskRequired: "Agent task is required",
     aiProviders: "AI Providers",
     aiModels: "Models",
     aiUsage: "Usage",
@@ -728,6 +768,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     renderMarkdown: "Markdown",
     showRaw: "原文",
     fileNameColumn: "名称",
+    fileModifiedDateColumn: "修改日期",
     fileSizeColumn: "大小",
     fileKindColumn: "种类",
     fileAddedDateColumn: "添加日期",
@@ -832,6 +873,25 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalTheme: "终端主题",
     ai: "AI",
     aiDescription: "管理 AI Provider 和默认模型设置，为后续 AI Native 能力打基础。",
+    agent: "Agent",
+    agentDescription: "先搭建项目级 agent 会话工作台，再逐步接入执行能力。",
+    agentSessions: "会话",
+    agentProject: "项目",
+    agentTask: "任务",
+    agentTaskPlaceholder: "输入你希望 agent 在当前项目里分析的任务...",
+    agentStartSession: "开始会话",
+    noAgentSessions: "还没有 agent 会话",
+    noAgentSessionsDescription: "先创建一个会话，把项目级编码任务收进来。",
+    agentConversation: "对话",
+    agentMessagePlaceholder: "继续补充这个会话的问题...",
+    agentSend: "发送",
+    agentModel: "选择模型",
+    agentThinking: "思考中...",
+    agentNoMessages: "暂无对话消息",
+    agentArchive: "归档",
+    agentModelRequired: "请先选择一个 AI 模型",
+    agentProjectRequired: "请先选择一个本地项目",
+    agentTaskRequired: "请输入 agent 任务",
     aiProviders: "AI Providers",
     aiModels: "模型",
     aiUsage: "用量",
@@ -1029,6 +1089,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     renderMarkdown: "Markdown",
     showRaw: "原文",
     fileNameColumn: "名前",
+    fileModifiedDateColumn: "更新日時",
     fileSizeColumn: "サイズ",
     fileKindColumn: "種類",
     fileAddedDateColumn: "追加日",
@@ -1133,6 +1194,25 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalTheme: "ターミナルテーマ",
     ai: "AI",
     aiDescription: "AI Provider と既定モデル設定を管理し、今後の AI Native 機能の基盤にします。",
+    agent: "Agent",
+    agentDescription: "まずはプロジェクト単位の agent セッション基盤を作り、その後で実行能力を段階的に追加します。",
+    agentSessions: "セッション",
+    agentProject: "プロジェクト",
+    agentTask: "タスク",
+    agentTaskPlaceholder: "このプロジェクトで agent に調べてほしい内容を入力してください...",
+    agentStartSession: "セッション開始",
+    noAgentSessions: "agent セッションはまだありません",
+    noAgentSessionsDescription: "まずセッションを作成して、プロジェクト単位の coding タスクを整理します。",
+    agentConversation: "会話",
+    agentMessagePlaceholder: "このセッションに追記したい質問を入力してください...",
+    agentSend: "送信",
+    agentModel: "モデル選択",
+    agentThinking: "考え中...",
+    agentNoMessages: "メッセージはまだありません",
+    agentArchive: "アーカイブ",
+    agentModelRequired: "先に AI モデルを選択してください",
+    agentProjectRequired: "先にローカルプロジェクトを選択してください",
+    agentTaskRequired: "agent タスクを入力してください",
     aiProviders: "AI Provider",
     aiModels: "モデル",
     aiUsage: "利用量",
