@@ -911,7 +911,7 @@ fn append_agent_tool_log(
 // time: 2026/04/08/19:20:00
 fn build_agent_system_prompt(session: &AgentSessionRecord, runtime_context: &str) -> String {
     format!(
-        "You are ServerDeck's project-scoped AI assistant. The current project root is: {}. This phase supports read-only project inspection. You must answer with concrete findings from the provided context and must not say that you will inspect later if the context already includes the inspection results. Respond in concise Markdown.\n\nProject inspection context:\n{}",
+        "You are ServerDeck's project-scoped AI assistant. The current project root is: {}. This phase supports read-only project inspection. You must answer with concrete findings from the provided context and must not say that you will inspect later if the context already includes inspection results. If the context contains `File excerpt from ...`, you must summarize that file content directly and must not claim the file content is unavailable. Respond in concise Markdown.\n\nProject inspection context:\n{}",
         session.root_path,
         runtime_context
     )
@@ -985,6 +985,44 @@ fn extract_search_query(message: &str) -> Option<String> {
     }
 
     None
+}
+
+fn extract_explicit_file_request(message: &str) -> Option<String> {
+    for token in message
+        .split_whitespace()
+        .map(|item| item.trim_matches(|char: char| "`'\"“”‘’，。！？、:：；;()[]{}<>".contains(char)))
+    {
+        let lower = token.to_lowercase();
+        if token.contains('/') && token.contains('.') {
+            return Some(token.to_string());
+        }
+
+        if matches!(
+            lower.rsplit('.').next(),
+            Some("md" | "java" | "kt" | "ts" | "tsx" | "js" | "jsx" | "rs" | "go" | "py" | "json" | "yaml" | "yml" | "xml" | "toml")
+        ) {
+            return Some(token.to_string());
+        }
+    }
+
+    None
+}
+
+fn resolve_agent_requested_file(root: &Path, requested: &str) -> Result<Option<String>, String> {
+    if let Ok(scoped) = resolve_agent_scoped_path(root, requested) {
+        if scoped.is_file() {
+            return Ok(Some(agent_relative_path(root, &scoped)));
+        }
+    }
+
+    let target_name = requested.rsplit('/').next().unwrap_or(requested).to_lowercase();
+    let mut matches = Vec::new();
+    find_agent_paths_recursive(root, root, &target_name, 10, &mut matches)?;
+
+    Ok(matches
+        .into_iter()
+        .find(|item| !item.is_dir && item.path.to_lowercase().ends_with(&target_name))
+        .map(|item| item.path))
 }
 
 // author: BrianXiong
@@ -1273,9 +1311,20 @@ fn build_read_targets(
     search_matches: &[AgentSearchMatchPayload],
     path_targets: &[AgentPathTarget],
     impl_files: &[String],
+    explicit_file: Option<&str>,
 ) -> Vec<AgentReadTarget> {
     let mut targets = Vec::new();
     let mut seen_paths = std::collections::HashSet::new();
+
+    if let Some(path) = explicit_file {
+        if seen_paths.insert(path.to_string()) {
+            targets.push(AgentReadTarget {
+                path: path.to_string(),
+                start_line: 1,
+                reason: "explicit file request".to_string(),
+            });
+        }
+    }
 
     for item in search_matches {
         if targets.len() >= 2 || !seen_paths.insert(item.path.clone()) {
@@ -1409,12 +1458,14 @@ fn build_agent_turn_artifacts(
 
     let latest_message = latest_user_message(messages, session);
     let search_query = extract_search_query(latest_message);
+    let explicit_file_request = extract_explicit_file_request(latest_message);
     let identifier_candidates = extract_identifier_candidates(latest_message);
     let mut sections = Vec::new();
     let mut key_files = Vec::new();
     let mut search_matches: Vec<AgentSearchMatchPayload> = Vec::new();
     let mut path_targets: Vec<AgentPathTarget> = Vec::new();
     let mut impl_files: Vec<String> = Vec::new();
+    let mut resolved_explicit_file: Option<String> = None;
 
     if should_fetch_project_context(latest_message) {
     match build_agent_project_context(&root) {
@@ -1501,6 +1552,21 @@ fn build_agent_turn_artifacts(
         }
     }
 
+    if let Some(requested_file) = explicit_file_request.as_deref() {
+        match resolve_agent_requested_file(&root, requested_file) {
+            Ok(Some(path)) => {
+                resolved_explicit_file = Some(path.clone());
+                sections.push(format!("Requested file resolved:\n- {}", path));
+            }
+            Ok(None) => {
+                sections.push(format!("Requested file `{}` was not found in the project scope.", requested_file));
+            }
+            Err(error) => {
+                sections.push(format!("Requested file resolution error for `{}`:\n{}", requested_file, error));
+            }
+        }
+    }
+
     for target in path_targets.iter().filter(|item| item.is_dir).take(2) {
         let scoped_path = match resolve_agent_scoped_path(&root, &target.path) {
             Ok(path) => path,
@@ -1552,7 +1618,14 @@ fn build_agent_turn_artifacts(
         }
     }
 
-    let read_targets = build_read_targets(latest_message, &key_files, &search_matches, &path_targets, &impl_files);
+    let read_targets = build_read_targets(
+        latest_message,
+        &key_files,
+        &search_matches,
+        &path_targets,
+        &impl_files,
+        resolved_explicit_file.as_deref(),
+    );
     for target in &read_targets {
         let scoped_path = match resolve_agent_scoped_path(&root, &target.path) {
             Ok(path) => path,
