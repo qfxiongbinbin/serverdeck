@@ -1,3 +1,5 @@
+import type { FileEntry } from "./api";
+
 export type AgentSession = {
   id: string;
   projectId: string;
@@ -22,6 +24,28 @@ export type AgentMessage = {
 export type AgentSessionDetail = {
   session: AgentSession;
   messages: AgentMessage[];
+};
+
+export type AgentProjectContext = {
+  rootPath: string;
+  topLevelEntries: FileEntry[];
+  keyFiles: string[];
+  summary: string;
+};
+
+export type AgentSearchMatch = {
+  path: string;
+  line: number;
+  snippet: string;
+};
+
+export type AgentFileReadResult = {
+  path: string;
+  content: string;
+  truncated: boolean;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
 };
 
 export type AgentStreamEvent = {
@@ -51,6 +75,25 @@ type RunAgentTurnOptions = {
   onEvent?: (event: AgentStreamEvent) => void;
   providerId?: string;
   model?: string;
+};
+
+type AgentListDirRequest = {
+  sessionId: string;
+  path: string;
+};
+
+type AgentSearchRequest = {
+  sessionId: string;
+  query: string;
+  path?: string;
+  maxResults?: number;
+};
+
+type AgentReadFileRequest = {
+  sessionId: string;
+  path: string;
+  startLine?: number;
+  lineCount?: number;
 };
 
 declare global {
@@ -109,6 +152,28 @@ function buildBrowserTitle(goal: string) {
   return Array.from(trimmed).length > 48 ? `${title}…` : title;
 }
 
+// author: BrianXiong
+// time: 2026/04/09/09:30:00
+function normalizeRelativePath(path: string) {
+  const trimmed = path.trim();
+  if (!trimmed || trimmed === ".") {
+    return "";
+  }
+
+  return trimmed.replace(/^\.\//, "");
+}
+
+// author: BrianXiong
+// time: 2026/04/09/09:30:00
+function joinAgentPath(rootPath: string, relativePath: string) {
+  const normalized = normalizeRelativePath(relativePath);
+  if (!normalized) {
+    return rootPath;
+  }
+
+  return `${rootPath.replace(/\/$/, "")}/${normalized}`;
+}
+
 export async function listAgentSessions() {
   if (hasTauri()) {
     return tauriInvoke<AgentSession[]>("list_agent_sessions");
@@ -145,6 +210,58 @@ export async function deleteAgentSession(sessionId: string) {
   delete store.messagesBySessionId[sessionId];
   saveBrowserStore(store);
   return true;
+}
+
+export async function agentGetProjectContext(sessionId: string) {
+  if (hasTauri()) {
+    return tauriInvoke<AgentProjectContext>("agent_get_project_context", { sessionId });
+  }
+
+  const detail = await getAgentSessionDetail(sessionId);
+  return {
+    rootPath: detail.session.rootPath,
+    topLevelEntries: [],
+    keyFiles: [],
+    summary: `Project root: ${detail.session.rootPath}`
+  };
+}
+
+export async function agentListDir(request: AgentListDirRequest) {
+  if (hasTauri()) {
+    return tauriInvoke<FileEntry[]>("agent_list_dir", { request });
+  }
+
+  return [];
+}
+
+export async function agentSearchInFiles(request: AgentSearchRequest) {
+  if (hasTauri()) {
+    return tauriInvoke<AgentSearchMatch[]>("agent_search_in_files", { request });
+  }
+
+  const detail = await getAgentSessionDetail(request.sessionId);
+  const latestUserMessage = detail.messages[detail.messages.length - 1]?.content ?? "";
+  return [{
+    path: normalizeRelativePath(request.path ?? ".") || ".",
+    line: 1,
+    snippet: `Mock search result for "${request.query}" in ${latestUserMessage.slice(0, 40)}`
+  }];
+}
+
+export async function agentReadFile(request: AgentReadFileRequest) {
+  if (hasTauri()) {
+    return tauriInvoke<AgentFileReadResult>("agent_read_file", { request });
+  }
+
+  const detail = await getAgentSessionDetail(request.sessionId);
+  return {
+    path: normalizeRelativePath(request.path),
+    content: `Mock read for ${joinAgentPath(detail.session.rootPath, request.path)}`,
+    truncated: false,
+    startLine: request.startLine ?? 1,
+    endLine: request.startLine ?? 1,
+    totalLines: 1
+  };
 }
 
 export async function createAgentSession(request: CreateAgentSessionRequest) {
