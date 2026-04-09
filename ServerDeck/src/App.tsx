@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { getVersion } from "@tauri-apps/api/app";
 import { emit, listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -1078,56 +1079,75 @@ export default function App() {
     });
 
     if (event.phase === "start") {
-      setAgentSessions((current) => current.map((session) => (
-        session.id === event.sessionId
-          ? { ...session, status: "streaming", updatedAt: event.createdAt }
-          : session
-      )));
-      setActiveAgentSessionDetail((current) => {
-        if (!current || current.session.id !== event.sessionId) {
-          return current;
-        }
+      flushSync(() => {
+        setAgentSessions((current) => current.map((session) => (
+          session.id === event.sessionId
+            ? { ...session, status: "streaming", updatedAt: event.createdAt }
+            : session
+        )));
+        setActiveAgentSessionDetail((current) => {
+          if (!current || current.session.id !== event.sessionId) {
+            return current;
+          }
 
-        const alreadyExists = current.messages.some((message) => message.id === event.messageId);
-        if (alreadyExists) {
+          const alreadyExists = current.messages.some((message) => message.id === event.messageId);
+          if (alreadyExists) {
+            return {
+              ...current,
+              session: { ...current.session, status: "streaming", updatedAt: event.createdAt }
+            };
+          }
+
           return {
             ...current,
-            session: { ...current.session, status: "streaming", updatedAt: event.createdAt }
+            session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
+            messages: [
+              ...current.messages,
+              {
+                id: event.messageId,
+                sessionId: event.sessionId,
+                role: "assistant",
+                content: "",
+                createdAt: event.createdAt
+              }
+            ]
           };
-        }
-
-        return {
-          ...current,
-          session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
-          messages: [
-            ...current.messages,
-            {
-              id: event.messageId,
-              sessionId: event.sessionId,
-              role: "assistant",
-              content: "",
-              createdAt: event.createdAt
-            }
-          ]
-        };
+        });
       });
       return;
     }
 
     if (event.phase === "delta") {
-      setActiveAgentSessionDetail((current) => {
-        if (!current || current.session.id !== event.sessionId) {
-          return current;
-        }
+      flushSync(() => {
+        setActiveAgentSessionDetail((current) => {
+          if (!current || current.session.id !== event.sessionId) {
+            return current;
+          }
 
-        return {
-          ...current,
-          messages: current.messages.map((message) => (
-            message.id === event.messageId
-              ? { ...message, content: `${message.content}${event.delta ?? ""}` }
-              : message
-          ))
-        };
+          const hasTargetMessage = current.messages.some((message) => message.id === event.messageId);
+          const nextMessages = hasTargetMessage
+            ? current.messages.map((message) => (
+              message.id === event.messageId
+                ? { ...message, role: "assistant", content: `${message.content}${event.delta ?? ""}` }
+                : message
+            ))
+            : [
+              ...current.messages,
+              {
+                id: event.messageId,
+                sessionId: event.sessionId,
+                role: "assistant",
+                content: event.delta ?? "",
+                createdAt: event.createdAt
+              }
+            ];
+
+          return {
+            ...current,
+            session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
+            messages: nextMessages
+          };
+        });
       });
       return;
     }
@@ -1137,45 +1157,47 @@ export default function App() {
         return;
       }
 
-      setActiveAgentSessionDetail((current) => {
-        if (!current || current.session.id !== event.sessionId) {
-          return current;
-        }
+      flushSync(() => {
+        setActiveAgentSessionDetail((current) => {
+          if (!current || current.session.id !== event.sessionId) {
+            return current;
+          }
 
-        const nextMessages = current.messages.some((message) => message.id === event.messageId)
-          ? current.messages.map((message) => (
-            message.id === event.messageId
-              ? {
-                ...message,
+          const nextMessages = current.messages.some((message) => message.id === event.messageId)
+            ? current.messages.map((message) => (
+              message.id === event.messageId
+                ? {
+                  ...message,
+                  role: "tool",
+                  content: event.content ?? message.content,
+                  createdAt: event.createdAt
+                }
+                : message
+            ))
+            : [
+              ...current.messages,
+              {
+                id: event.messageId,
+                sessionId: event.sessionId,
                 role: "tool",
-                content: event.content ?? message.content,
+                content: event.content ?? "",
                 createdAt: event.createdAt
               }
-              : message
-          ))
-          : [
-            ...current.messages,
-            {
-              id: event.messageId,
-              sessionId: event.sessionId,
-              role: "tool",
-              content: event.content ?? "",
-              createdAt: event.createdAt
-            }
-          ];
+            ];
 
-        const nextToolCalls = event.toolCall
-          ? current.toolCalls.some((call) => call.id === event.toolCall?.id)
-            ? current.toolCalls.map((call) => (call.id === event.toolCall?.id ? event.toolCall : call))
-            : [...current.toolCalls, event.toolCall]
-          : current.toolCalls;
+          const nextToolCalls = event.toolCall
+            ? current.toolCalls.some((call) => call.id === event.toolCall?.id)
+              ? current.toolCalls.map((call) => (call.id === event.toolCall?.id ? event.toolCall : call))
+              : [...current.toolCalls, event.toolCall]
+            : current.toolCalls;
 
-        return {
-          ...current,
-          session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
-          messages: nextMessages,
-          toolCalls: nextToolCalls
-        };
+          return {
+            ...current,
+            session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
+            messages: nextMessages,
+            toolCalls: nextToolCalls
+          };
+        });
       });
       return;
     }
