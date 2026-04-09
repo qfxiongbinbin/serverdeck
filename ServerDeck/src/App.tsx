@@ -1132,6 +1132,54 @@ export default function App() {
       return;
     }
 
+    if (event.phase === "tool") {
+      if (event.toolCall?.visibility === "internal") {
+        return;
+      }
+
+      setActiveAgentSessionDetail((current) => {
+        if (!current || current.session.id !== event.sessionId) {
+          return current;
+        }
+
+        const nextMessages = current.messages.some((message) => message.id === event.messageId)
+          ? current.messages.map((message) => (
+            message.id === event.messageId
+              ? {
+                ...message,
+                role: "tool",
+                content: event.content ?? message.content,
+                createdAt: event.createdAt
+              }
+              : message
+          ))
+          : [
+            ...current.messages,
+            {
+              id: event.messageId,
+              sessionId: event.sessionId,
+              role: "tool",
+              content: event.content ?? "",
+              createdAt: event.createdAt
+            }
+          ];
+
+        const nextToolCalls = event.toolCall
+          ? current.toolCalls.some((call) => call.id === event.toolCall?.id)
+            ? current.toolCalls.map((call) => (call.id === event.toolCall?.id ? event.toolCall : call))
+            : [...current.toolCalls, event.toolCall]
+          : current.toolCalls;
+
+        return {
+          ...current,
+          session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
+          messages: nextMessages,
+          toolCalls: nextToolCalls
+        };
+      });
+      return;
+    }
+
     if (event.phase === "done") {
       void syncAgentSessionFromStore(event.sessionId).catch((error) => {
         setStatus(getErrorMessage(error, "Failed to load agent session"));

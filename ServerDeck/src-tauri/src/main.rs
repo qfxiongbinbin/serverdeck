@@ -328,6 +328,7 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           tool_name TEXT NOT NULL,
           arguments_summary TEXT NOT NULL,
           result_summary TEXT NOT NULL,
+          visibility TEXT NOT NULL DEFAULT 'default',
           status TEXT NOT NULL,
           created_at INTEGER NOT NULL
         );
@@ -353,6 +354,10 @@ fn init_db(conn: &Connection) -> Result<(), String> {
     );
     let _ = conn.execute(
         "ALTER TABLE ai_providers ADD COLUMN enabled_models_json TEXT NOT NULL DEFAULT '[]'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE agent_tool_calls ADD COLUMN visibility TEXT NOT NULL DEFAULT 'default'",
         [],
     );
 

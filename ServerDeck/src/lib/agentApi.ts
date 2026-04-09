@@ -37,6 +37,7 @@ export type AgentToolCall = {
   toolName: string;
   argumentsSummary: string;
   resultSummary: string;
+  visibility: string;
   status: string;
   createdAt: number;
 };
@@ -72,12 +73,13 @@ export type AgentFileReadResult = {
 
 export type AgentStreamEvent = {
   sessionId: string;
-  phase: "start" | "delta" | "done" | "error";
+  phase: "start" | "delta" | "done" | "error" | "tool";
   messageId: string;
   createdAt: number;
   delta?: string;
   content?: string;
   error?: string;
+  toolCall?: AgentToolCall;
 };
 
 export type CreateAgentSessionRequest = {
@@ -461,6 +463,7 @@ export async function runAgentTurn(sessionId: string, options?: RunAgentTurnOpti
     toolName: "get_project_context",
     argumentsSummary: ".",
     resultSummary: `Project root ${session.rootPath}`,
+    visibility: "default",
     status: "completed",
     createdAt
   }];

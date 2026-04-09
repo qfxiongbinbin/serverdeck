@@ -84,6 +84,20 @@ pub(crate) struct AgentToolCallRecord {
     tool_name: String,
     arguments_summary: String,
     result_summary: String,
+    visibility: String,
+    status: String,
+    created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct AgentToolCallEventPayload {
+    id: String,
+    session_id: String,
+    tool_name: String,
+    arguments_summary: String,
+    result_summary: String,
+    visibility: String,
     status: String,
     created_at: i64,
 }
@@ -98,6 +112,7 @@ pub(crate) struct AgentStreamEventPayload {
     delta: Option<String>,
     content: Option<String>,
     error: Option<String>,
+    tool_call: Option<AgentToolCallEventPayload>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,7 +294,7 @@ fn load_agent_plan_items_from_db(conn: &Connection, session_id: &str) -> Result<
 fn load_agent_tool_calls_from_db(conn: &Connection, session_id: &str) -> Result<Vec<AgentToolCallRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, session_id, tool_name, arguments_summary, result_summary, status, created_at FROM agent_tool_calls WHERE session_id = ?1 ORDER BY created_at, id",
+            "SELECT id, session_id, tool_name, arguments_summary, result_summary, visibility, status, created_at FROM agent_tool_calls WHERE session_id = ?1 ORDER BY created_at, id",
         )
         .map_err(|error| error.to_string())?;
     let rows = stmt
@@ -290,8 +305,9 @@ fn load_agent_tool_calls_from_db(conn: &Connection, session_id: &str) -> Result<
                 tool_name: row.get(2)?,
                 arguments_summary: row.get(3)?,
                 result_summary: row.get(4)?,
-                status: row.get(5)?,
-                created_at: row.get(6)?,
+                visibility: row.get(5)?,
+                status: row.get(6)?,
+                created_at: row.get(7)?,
             })
         })
         .map_err(|error| error.to_string())?;
@@ -722,18 +738,131 @@ fn replace_agent_plan_items(conn: &Connection, session_id: &str, items: &[AgentP
 // time: 2026/04/09/11:10:00
 fn append_agent_tool_call(conn: &Connection, call: &AgentToolCallRecord) -> Result<(), String> {
     conn.execute(
-        "INSERT INTO agent_tool_calls (id, session_id, tool_name, arguments_summary, result_summary, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        "INSERT INTO agent_tool_calls (id, session_id, tool_name, arguments_summary, result_summary, visibility, status, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             call.id,
             call.session_id,
             call.tool_name,
             call.arguments_summary,
             call.result_summary,
+            call.visibility,
             call.status,
             call.created_at,
         ],
     )
     .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn build_tool_message_content(tool_name: &str, arguments_summary: &str, result_summary: &str) -> String {
+    format!(
+        "{}\nArguments: {}\nResult: {}",
+        tool_name,
+        arguments_summary,
+        result_summary
+    )
+}
+
+fn emit_agent_tool_event(
+    app: &AppHandle,
+    session_id: &str,
+    message_id: &str,
+    tool_call: &AgentToolCallEventPayload,
+    content: String,
+) {
+    emit_agent_stream_event(
+        app,
+        AgentStreamEventPayload {
+            session_id: session_id.to_string(),
+            phase: "tool".to_string(),
+            message_id: message_id.to_string(),
+            created_at: tool_call.created_at,
+            delta: None,
+            content: Some(content),
+            error: None,
+            tool_call: Some(tool_call.clone()),
+        },
+    );
+}
+
+fn start_agent_tool_feedback(app: &AppHandle, session_id: &str, tool_name: &str, arguments_summary: &str) -> AgentRunningTool {
+    let running = AgentRunningTool {
+        tool_call_id: Uuid::new_v4().to_string(),
+        message_id: Uuid::new_v4().to_string(),
+        created_at: now_millis_i64(),
+        tool_name: tool_name.to_string(),
+        arguments_summary: arguments_summary.to_string(),
+    };
+
+    let payload = AgentToolCallEventPayload {
+        id: running.tool_call_id.clone(),
+        session_id: session_id.to_string(),
+        tool_name: running.tool_name.clone(),
+        arguments_summary: running.arguments_summary.clone(),
+        result_summary: "Running...".to_string(),
+        visibility: "default".to_string(),
+        status: "running".to_string(),
+        created_at: running.created_at,
+    };
+    emit_agent_tool_event(
+        app,
+        session_id,
+        &running.message_id,
+        &payload,
+        build_tool_message_content(tool_name, arguments_summary, "Running..."),
+    );
+
+    running
+}
+
+fn finish_agent_tool_feedback(
+    conn: &Connection,
+    app: &AppHandle,
+    session_id: &str,
+    running: AgentRunningTool,
+    result_summary: &str,
+    status: &str,
+) -> Result<(), String> {
+    let tool_call = AgentToolCallRecord {
+        id: running.tool_call_id.clone(),
+        session_id: session_id.to_string(),
+        tool_name: running.tool_name.clone(),
+        arguments_summary: running.arguments_summary.clone(),
+        result_summary: result_summary.to_string(),
+        visibility: "default".to_string(),
+        status: status.to_string(),
+        created_at: running.created_at,
+    };
+    append_agent_tool_call(conn, &tool_call)?;
+    insert_agent_message(
+        conn,
+        &AgentMessageRecord {
+            id: running.message_id.clone(),
+            session_id: session_id.to_string(),
+            role: "tool".to_string(),
+            content: build_tool_message_content(&running.tool_name, &running.arguments_summary, result_summary),
+            created_at: running.created_at,
+        },
+    )?;
+
+    let payload = AgentToolCallEventPayload {
+        id: running.tool_call_id,
+        session_id: session_id.to_string(),
+        tool_name: running.tool_name.clone(),
+        arguments_summary: running.arguments_summary.clone(),
+        result_summary: result_summary.to_string(),
+        visibility: "default".to_string(),
+        status: status.to_string(),
+        created_at: running.created_at,
+    };
+    emit_agent_tool_event(
+        app,
+        session_id,
+        &running.message_id,
+        &payload,
+        build_tool_message_content(&running.tool_name, &running.arguments_summary, result_summary),
+    );
+
     Ok(())
 }
 
@@ -745,31 +874,27 @@ fn append_agent_tool_log(
     tool_name: &str,
     arguments_summary: &str,
     result_summary: &str,
+    visibility: &str,
     status: &str,
 ) -> Result<(), String> {
     let created_at = now_millis_i64();
+    let tool_call = AgentToolCallRecord {
+        id: Uuid::new_v4().to_string(),
+        session_id: session_id.to_string(),
+        tool_name: tool_name.to_string(),
+        arguments_summary: arguments_summary.to_string(),
+        result_summary: result_summary.to_string(),
+        visibility: visibility.to_string(),
+        status: status.to_string(),
+        created_at,
+    };
+    append_agent_tool_call(conn, &tool_call)?;
 
-    // Insert into agent_tool_calls table
-    append_agent_tool_call(
-        conn,
-        &AgentToolCallRecord {
-            id: Uuid::new_v4().to_string(),
-            session_id: session_id.to_string(),
-            tool_name: tool_name.to_string(),
-            arguments_summary: arguments_summary.to_string(),
-            result_summary: result_summary.to_string(),
-            status: status.to_string(),
-            created_at,
-        },
-    )?;
+    if visibility == "internal" {
+        return Ok(());
+    }
 
-    // Also insert as a tool message for inline display in conversation
-    let tool_message_content = format!(
-        "{}\nArguments: {}\nResult: {}",
-        tool_name,
-        arguments_summary,
-        result_summary
-    );
+    let tool_message_content = build_tool_message_content(tool_name, arguments_summary, result_summary);
     insert_agent_message(
         conn,
         &AgentMessageRecord {
@@ -812,6 +937,22 @@ fn looks_like_structure_request(message: &str) -> bool {
         .any(|keyword| lower.contains(keyword))
 }
 
+fn looks_like_code_question(message: &str) -> bool {
+    let lower = message.to_lowercase();
+    [
+        "实现", "逻辑", "代码", "函数", "类", "方法", "源码", "analyse", "analyze", "implementation",
+        "code", "function", "class", "method", "source", "detail", "details", "主要"
+    ]
+    .iter()
+    .any(|keyword| lower.contains(keyword))
+}
+
+fn should_fetch_project_context(message: &str) -> bool {
+    looks_like_structure_request(message)
+        || looks_like_code_question(message)
+        || message.trim().chars().count() > 12
+}
+
 // author: BrianXiong
 // time: 2026/04/09/10:45:00
 fn format_agent_entries(root: &Path, entries: &[FileEntry]) -> String {
@@ -847,8 +988,102 @@ fn extract_search_query(message: &str) -> Option<String> {
 }
 
 // author: BrianXiong
+// time: 2026/04/09/12:10:00
+fn extract_identifier_candidates(message: &str) -> Vec<String> {
+    let lower = message.to_lowercase();
+    let mut candidates = Vec::new();
+
+    for token in lower
+        .split(|char: char| !(char.is_ascii_alphanumeric() || char == '_' || char == '-' || char == '/'))
+        .filter(|token| token.len() >= 3)
+    {
+        if matches!(token, "help" | "look" | "check" | "what" | "which" | "show" | "there" | "inside" | "impl" | "implementation") {
+            continue;
+        }
+
+        if !candidates.iter().any(|item| item == token) {
+            candidates.push(token.to_string());
+        }
+    }
+
+    candidates
+}
+
+struct AgentPathTarget {
+    path: String,
+    is_dir: bool,
+}
+
+// author: BrianXiong
+// time: 2026/04/09/12:10:00
+fn find_agent_paths_recursive(
+    root: &Path,
+    current_dir: &Path,
+    keyword: &str,
+    max_results: usize,
+    results: &mut Vec<AgentPathTarget>,
+) -> Result<(), String> {
+    if results.len() >= max_results {
+        return Ok(());
+    }
+
+    let entries = fs::read_dir(current_dir).map_err(|error| error.to_string())?;
+    for entry in entries {
+        if results.len() >= max_results {
+            break;
+        }
+
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+
+        if name.contains(keyword) {
+          results.push(AgentPathTarget {
+              path: agent_relative_path(root, &path),
+              is_dir: file_type.is_dir(),
+          });
+        }
+
+        if file_type.is_dir() && !should_skip_agent_dir(&name) {
+            find_agent_paths_recursive(root, &path, keyword, max_results, results)?;
+        }
+    }
+
+    Ok(())
+}
+
+// author: BrianXiong
+// time: 2026/04/09/12:10:00
+fn find_agent_paths(root: &Path, keywords: &[String], max_results: usize) -> Result<Vec<AgentPathTarget>, String> {
+    let mut results = Vec::new();
+    for keyword in keywords {
+        find_agent_paths_recursive(root, root, keyword, max_results, &mut results)?;
+        if !results.is_empty() {
+            break;
+        }
+    }
+
+    let mut deduped = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for item in results {
+        if seen.insert(item.path.clone()) {
+            deduped.push(item);
+        }
+    }
+
+    Ok(deduped)
+}
+
+// author: BrianXiong
 // time: 2026/04/09/11:10:00
-fn build_agent_plan_items(session: &AgentSessionRecord, latest_message: &str, search_query: Option<&str>) -> Vec<AgentPlanItemRecord> {
+fn build_agent_plan_items(
+    session: &AgentSessionRecord,
+    latest_message: &str,
+    search_query: Option<&str>,
+    impl_file_count: usize,
+    read_count: usize,
+) -> Vec<AgentPlanItemRecord> {
     let created_at = now_millis_i64();
     let mut items = vec![AgentPlanItemRecord {
         id: Uuid::new_v4().to_string(),
@@ -884,6 +1119,30 @@ fn build_agent_plan_items(session: &AgentSessionRecord, latest_message: &str, se
         });
     }
 
+    if impl_file_count > 0 {
+        items.push(AgentPlanItemRecord {
+            id: Uuid::new_v4().to_string(),
+            session_id: session.id.clone(),
+            title: format!("Discover {} implementation file{}", impl_file_count, if impl_file_count > 1 { "s" } else { "" }),
+            status: "completed".to_string(),
+            position: items.len() as i64,
+            created_at,
+            updated_at: created_at,
+        });
+    }
+
+    if read_count > 0 {
+        items.push(AgentPlanItemRecord {
+            id: Uuid::new_v4().to_string(),
+            session_id: session.id.clone(),
+            title: format!("Read {} relevant file snippet{}", read_count, if read_count > 1 { "s" } else { "" }),
+            status: "completed".to_string(),
+            position: items.len() as i64,
+            created_at,
+            updated_at: created_at,
+        });
+    }
+
     items.push(AgentPlanItemRecord {
         id: Uuid::new_v4().to_string(),
         session_id: session.id.clone(),
@@ -900,6 +1159,91 @@ fn build_agent_plan_items(session: &AgentSessionRecord, latest_message: &str, se
 struct AgentTurnArtifacts {
     runtime_context: String,
     plan_items: Vec<AgentPlanItemRecord>,
+}
+
+struct AgentReadTarget {
+    path: String,
+    start_line: usize,
+    reason: String,
+}
+
+struct AgentRunningTool {
+    tool_call_id: String,
+    message_id: String,
+    created_at: i64,
+    tool_name: String,
+    arguments_summary: String,
+}
+
+fn looks_like_source_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(|ext| matches!(ext, "java" | "kt" | "ts" | "tsx" | "js" | "jsx" | "rs" | "go" | "py"))
+        .unwrap_or(false)
+}
+
+fn impl_file_priority(path: &Path) -> i32 {
+    let name = path.file_name().and_then(|value| value.to_str()).unwrap_or("").to_lowercase();
+    let mut score = 0;
+    for keyword in ["application", "consumer", "service", "controller", "handler", "trigger", "job", "api"] {
+        if name.contains(keyword) {
+            score += 5;
+        }
+    }
+    score
+}
+
+fn collect_impl_files_recursive(current_dir: &Path, max_results: usize, results: &mut Vec<PathBuf>) -> Result<(), String> {
+    if results.len() >= max_results {
+        return Ok(());
+    }
+
+    let entries = fs::read_dir(current_dir).map_err(|error| error.to_string())?;
+    for entry in entries {
+        if results.len() >= max_results {
+            break;
+        }
+
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|error| error.to_string())?;
+        let name = entry.file_name().to_string_lossy().to_string();
+
+        if file_type.is_dir() {
+            if should_skip_agent_dir(&name) {
+                continue;
+            }
+            collect_impl_files_recursive(&path, max_results, results)?;
+            continue;
+        }
+
+        if file_type.is_file() && looks_like_source_file(&path) {
+            results.push(path);
+        }
+    }
+
+    Ok(())
+}
+
+fn collect_impl_files_for_target(root: &Path, target: &AgentPathTarget, max_results: usize) -> Result<Vec<String>, String> {
+    let scoped_path = resolve_agent_scoped_path(root, &target.path)?;
+    let search_root = if scoped_path.is_dir() {
+        let candidate = scoped_path.join("src");
+        if candidate.is_dir() { candidate } else { scoped_path }
+    } else {
+        scoped_path.parent().unwrap_or(root).to_path_buf()
+    };
+
+    let mut files = Vec::new();
+    collect_impl_files_recursive(&search_root, max_results.saturating_mul(3), &mut files)?;
+    files.sort_by(|left, right| {
+        impl_file_priority(right)
+            .cmp(&impl_file_priority(left))
+            .then_with(|| left.cmp(right))
+    });
+    files.truncate(max_results);
+
+    Ok(files.into_iter().map(|path| agent_relative_path(root, &path)).collect())
 }
 
 // author: BrianXiong
@@ -922,8 +1266,133 @@ fn with_final_plan_status(items: &[AgentPlanItemRecord], status: &str) -> Vec<Ag
 }
 
 // author: BrianXiong
+// time: 2026/04/09/11:35:00
+fn build_read_targets(
+    latest_message: &str,
+    key_files: &[String],
+    search_matches: &[AgentSearchMatchPayload],
+    path_targets: &[AgentPathTarget],
+    impl_files: &[String],
+) -> Vec<AgentReadTarget> {
+    let mut targets = Vec::new();
+    let mut seen_paths = std::collections::HashSet::new();
+
+    for item in search_matches {
+        if targets.len() >= 2 || !seen_paths.insert(item.path.clone()) {
+            continue;
+        }
+
+        targets.push(AgentReadTarget {
+            path: item.path.clone(),
+            start_line: item.line.saturating_sub(8).max(1),
+            reason: format!("search hit near line {}", item.line),
+        });
+    }
+
+    if targets.is_empty() {
+        for path in impl_files {
+            if targets.len() >= 3 || !seen_paths.insert(path.clone()) {
+                continue;
+            }
+
+            targets.push(AgentReadTarget {
+                path: path.clone(),
+                start_line: 1,
+                reason: "implementation file".to_string(),
+            });
+        }
+    }
+
+    if targets.is_empty() {
+        for target in path_targets {
+            if targets.len() >= 2 || !seen_paths.insert(target.path.clone()) || target.is_dir {
+                continue;
+            }
+
+            targets.push(AgentReadTarget {
+                path: target.path.clone(),
+                start_line: 1,
+                reason: "path name match".to_string(),
+            });
+        }
+    }
+
+    if targets.is_empty() {
+        let lower = latest_message.to_lowercase();
+        for key_file in key_files {
+            if targets.len() >= 2 || !seen_paths.insert(key_file.clone()) {
+                continue;
+            }
+
+            if lower.contains("readme") && key_file.to_lowercase().contains("readme") {
+                targets.push(AgentReadTarget {
+                    path: key_file.clone(),
+                    start_line: 1,
+                    reason: "key project file".to_string(),
+                });
+            }
+        }
+    }
+
+    if targets.is_empty() {
+        for key_file in key_files.iter().take(2) {
+            if !seen_paths.insert(key_file.clone()) {
+                continue;
+            }
+
+            targets.push(AgentReadTarget {
+                path: key_file.clone(),
+                start_line: 1,
+                reason: "key project file".to_string(),
+            });
+        }
+    }
+
+    targets
+}
+
+// author: BrianXiong
+// time: 2026/04/09/11:35:00
+fn summarize_file_excerpt(read_result: &AgentFileReadPayload) -> String {
+    let excerpt = if read_result.content.chars().count() > 1200 {
+        format!("{}…", read_result.content.chars().take(1200).collect::<String>())
+    } else {
+        read_result.content.clone()
+    };
+
+    format!(
+        "File excerpt from {} (lines {}-{} of {}):\n```\n{}\n```",
+        read_result.path,
+        read_result.start_line,
+        read_result.end_line,
+        read_result.total_lines,
+        excerpt
+    )
+}
+
+// author: BrianXiong
+// time: 2026/04/09/12:10:00
+fn summarize_directory_entries(root: &Path, path: &Path, entries: &[FileEntry]) -> String {
+    let relative = agent_relative_path(root, path);
+    let formatted = entries
+        .iter()
+        .take(20)
+        .map(|entry| {
+            if entry.is_dir {
+                format!("- [dir] {}", entry.name)
+            } else {
+                format!("- [file] {}", entry.name)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("Directory listing for {}:\n{}", relative, formatted)
+}
+
+// author: BrianXiong
 // time: 2026/04/09/10:45:00
 fn build_agent_turn_artifacts(
+    app: &AppHandle,
     conn: &Connection,
     session: &AgentSessionRecord,
     messages: &[AgentMessageRecord],
@@ -933,38 +1402,37 @@ fn build_agent_turn_artifacts(
         Err(error) => {
             return AgentTurnArtifacts {
                 runtime_context: format!("Project root is unavailable: {}", error),
-                plan_items: build_agent_plan_items(session, latest_user_message(messages, session), None),
+                plan_items: build_agent_plan_items(session, latest_user_message(messages, session), None, 0, 0),
             };
         }
     };
 
     let latest_message = latest_user_message(messages, session);
     let search_query = extract_search_query(latest_message);
-    let plan_items = build_agent_plan_items(session, latest_message, search_query.as_deref());
+    let identifier_candidates = extract_identifier_candidates(latest_message);
     let mut sections = Vec::new();
+    let mut key_files = Vec::new();
+    let mut search_matches: Vec<AgentSearchMatchPayload> = Vec::new();
+    let mut path_targets: Vec<AgentPathTarget> = Vec::new();
+    let mut impl_files: Vec<String> = Vec::new();
 
+    if should_fetch_project_context(latest_message) {
     match build_agent_project_context(&root) {
         Ok(context) => {
-            let _ = append_agent_tool_log(
-                conn,
-                &session.id,
-                "get_project_context",
-                ".",
-                &context.summary,
-                "completed",
-            );
             sections.push(format!("Summary:\n{}", context.summary));
+            key_files = context.key_files.clone();
             if !context.key_files.is_empty() {
                 sections.push(format!("Key files:\n- {}", context.key_files.join("\n- ")));
             }
 
             if looks_like_structure_request(latest_message) {
                 let top_level_summary = format_agent_entries(&root, &context.top_level_entries);
-                let _ = append_agent_tool_log(
+                let running = start_agent_tool_feedback(app, &session.id, "list_dir", ".");
+                let _ = finish_agent_tool_feedback(
                     conn,
+                    app,
                     &session.id,
-                    "list_dir",
-                    ".",
+                    running,
                     &format!("{} top-level entries", context.top_level_entries.len()),
                     "completed",
                 );
@@ -975,39 +1443,146 @@ fn build_agent_turn_artifacts(
             }
         }
         Err(error) => {
-            let _ = append_agent_tool_log(conn, &session.id, "get_project_context", ".", &error, "error");
             sections.push(format!("Project context error:\n{}", error));
         }
+    }
     }
 
     if let Some(query) = search_query.as_deref() {
         match search_agent_files(&root, &root, query, 8) {
             Ok(matches) if !matches.is_empty() => {
+                search_matches = matches.clone();
                 let formatted = matches
                     .iter()
                     .map(|item| format!("- {}:{} -> {}", item.path, item.line, item.snippet))
                     .collect::<Vec<_>>()
                     .join("\n");
-                let _ = append_agent_tool_log(
-                    conn,
-                    &session.id,
-                    "search_in_files",
-                    query,
-                    &format!("{} matches", matches.len()),
-                    "completed",
-                );
+                let running = start_agent_tool_feedback(app, &session.id, "search_in_files", query);
+                let _ = finish_agent_tool_feedback(conn, app, &session.id, running, &format!("{} matches", matches.len()), "completed");
                 sections.push(format!("Search results for `{}`:\n{}", query, formatted));
             }
             Ok(_) => {
-                let _ = append_agent_tool_log(conn, &session.id, "search_in_files", query, "no matches", "completed");
+                let running = start_agent_tool_feedback(app, &session.id, "search_in_files", query);
+                let _ = finish_agent_tool_feedback(conn, app, &session.id, running, "no matches", "completed");
                 sections.push(format!("Search results for `{}`:\n- no matches found", query));
             }
             Err(error) => {
-                let _ = append_agent_tool_log(conn, &session.id, "search_in_files", query, &error, "error");
+                let running = start_agent_tool_feedback(app, &session.id, "search_in_files", query);
+                let _ = finish_agent_tool_feedback(conn, app, &session.id, running, &error, "error");
                 sections.push(format!("Search error for `{}`:\n{}", query, error));
             }
         }
     }
+
+    if !identifier_candidates.is_empty() {
+        match find_agent_paths(&root, &identifier_candidates, 6) {
+            Ok(matches) if !matches.is_empty() => {
+                let summary = matches
+                    .iter()
+                    .map(|item| format!("- {}{}", item.path, if item.is_dir { "/" } else { "" }))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let _ = append_agent_tool_log(
+                    conn,
+                    &session.id,
+                    "find_paths",
+                    &identifier_candidates.join(", "),
+                    &format!("{} path matches", matches.len()),
+                    "internal",
+                    "completed",
+                );
+                sections.push(format!("Path matches:\n{}", summary));
+                path_targets = matches;
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = append_agent_tool_log(conn, &session.id, "find_paths", &identifier_candidates.join(", "), &error, "internal", "error");
+            }
+        }
+    }
+
+    for target in path_targets.iter().filter(|item| item.is_dir).take(2) {
+        let scoped_path = match resolve_agent_scoped_path(&root, &target.path) {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = append_agent_tool_log(conn, &session.id, "list_dir", &target.path, &error, "default", "error");
+                continue;
+            }
+        };
+
+        match file_entries_from_dir(&scoped_path) {
+            Ok(entries) => {
+                let _ = append_agent_tool_log(
+                    conn,
+                    &session.id,
+                    "list_dir",
+                    &target.path,
+                    &format!("{} entries", entries.len()),
+                    "default",
+                    "completed",
+                );
+                sections.push(summarize_directory_entries(&root, &scoped_path, &entries));
+            }
+            Err(error) => {
+                let _ = append_agent_tool_log(conn, &session.id, "list_dir", &target.path, &error, "default", "error");
+            }
+        }
+    }
+
+    for target in path_targets.iter().filter(|item| item.is_dir).take(2) {
+        match collect_impl_files_for_target(&root, target, 3) {
+            Ok(found) if !found.is_empty() => {
+                let summary = found.iter().map(|path| format!("- {}", path)).collect::<Vec<_>>().join("\n");
+                let _ = append_agent_tool_log(
+                    conn,
+                    &session.id,
+                    "discover_impl_files",
+                    &target.path,
+                    &format!("{} source files", found.len()),
+                    "internal",
+                    "completed",
+                );
+                sections.push(format!("Relevant implementation files under {}:\n{}", target.path, summary));
+                impl_files.extend(found);
+            }
+            Ok(_) => {}
+            Err(error) => {
+                let _ = append_agent_tool_log(conn, &session.id, "discover_impl_files", &target.path, &error, "internal", "error");
+            }
+        }
+    }
+
+    let read_targets = build_read_targets(latest_message, &key_files, &search_matches, &path_targets, &impl_files);
+    for target in &read_targets {
+        let scoped_path = match resolve_agent_scoped_path(&root, &target.path) {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = append_agent_tool_log(conn, &session.id, "read_file", &target.path, &error, "default", "error");
+                continue;
+            }
+        };
+
+        match read_agent_file(&root, &scoped_path, Some(target.start_line), Some(48)) {
+            Ok(read_result) => {
+                let running = start_agent_tool_feedback(app, &session.id, "read_file", &format!("{} from line {}", target.path, target.start_line));
+                let _ = finish_agent_tool_feedback(
+                    conn,
+                    app,
+                    &session.id,
+                    running,
+                    &format!("{} lines from {} ({})", read_result.end_line.saturating_sub(read_result.start_line).saturating_add(1), read_result.path, target.reason),
+                    "completed",
+                );
+                sections.push(summarize_file_excerpt(&read_result));
+            }
+            Err(error) => {
+                let running = start_agent_tool_feedback(app, &session.id, "read_file", &target.path);
+                let _ = finish_agent_tool_feedback(conn, app, &session.id, running, &error, "error");
+            }
+        }
+    }
+
+    let plan_items = build_agent_plan_items(session, latest_message, search_query.as_deref(), impl_files.len(), read_targets.len());
 
     AgentTurnArtifacts {
         runtime_context: sections.join("\n\n"),
@@ -1191,6 +1766,7 @@ where
             delta: None,
             content: None,
             error: None,
+            tool_call: None,
         },
     );
 
@@ -1247,15 +1823,16 @@ where
             );
             emit_agent_stream_event(
                 app,
-                AgentStreamEventPayload {
-                    session_id: session_id.to_string(),
-                    phase: "delta".to_string(),
-                    message_id: message_id.to_string(),
-                    created_at,
-                    delta: Some(delta),
-                    content: None,
-                    error: None,
-                },
+                    AgentStreamEventPayload {
+                        session_id: session_id.to_string(),
+                        phase: "delta".to_string(),
+                        message_id: message_id.to_string(),
+                        created_at,
+                        delta: Some(delta),
+                        content: None,
+                        error: None,
+                        tool_call: None,
+                    },
             );
         }
     }
@@ -1320,6 +1897,7 @@ where
                             delta: Some(content.clone()),
                             content: None,
                             error: None,
+                            tool_call: None,
                         },
                     );
                     return Ok(content);
@@ -1706,7 +2284,7 @@ pub(crate) fn run_agent_turn(app: AppHandle, request: AgentTurnRequest) -> Resul
     validate_agent_session_provider(&session, &provider)?;
 
     let messages = load_agent_messages_from_db(&conn, &session.id)?;
-    let artifacts = build_agent_turn_artifacts(&conn, &session, &messages);
+    let artifacts = build_agent_turn_artifacts(&app, &conn, &session, &messages);
     replace_agent_plan_items(&conn, &session.id, &artifacts.plan_items)?;
 
     if session.status == "streaming" {
@@ -1772,6 +2350,7 @@ pub(crate) fn run_agent_turn(app: AppHandle, request: AgentTurnRequest) -> Resul
                         delta: None,
                         content: Some(content),
                         error: None,
+                        tool_call: None,
                     },
                 );
             }
@@ -1807,6 +2386,7 @@ pub(crate) fn run_agent_turn(app: AppHandle, request: AgentTurnRequest) -> Resul
                         delta: None,
                         content: None,
                         error: Some(error),
+                        tool_call: None,
                     },
                 );
             }

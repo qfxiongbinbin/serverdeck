@@ -1,4 +1,4 @@
-import { Archive, ArrowUp, Bot, Check, ChevronDown, MessageSquare, MoreHorizontal, Plus, Sparkles, Trash2, Wrench } from "lucide-react";
+import { Archive, ArrowUp, Bot, Check, ChevronDown, LoaderCircle, MessageSquare, MoreHorizontal, Plus, Sparkles, Trash2, Wrench } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
@@ -140,13 +140,25 @@ export function AgentWorkspace({
   const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
   const [attachedToolWidths, setAttachedToolWidths] = useState<Record<string, number>>({});
   const [expandedToolCallIds, setExpandedToolCallIds] = useState<Set<string>>(new Set());
+  const visibleToolCalls = useMemo(
+    () => (activeSessionDetail?.toolCalls ?? []).filter((call) => call.visibility !== "internal"),
+    [activeSessionDetail]
+  );
+  const activeRunningTool = useMemo(
+    () => visibleToolCalls.find((call) => call.status === "running") ?? null,
+    [visibleToolCalls]
+  );
   const streamStateLabel = useMemo(() => {
     if (!activeSessionDetail) {
       return "";
     }
 
-    return activeSessionDetail.session.status === "streaming" ? thinkingLabel : "";
-  }, [activeSessionDetail, thinkingLabel]);
+    if (activeSessionDetail.session.status !== "streaming") {
+      return "";
+    }
+
+    return activeRunningTool ? `${runningLabel} · ${activeRunningTool.toolName}` : thinkingLabel;
+  }, [activeRunningTool, activeSessionDetail, runningLabel, thinkingLabel]);
   const latestMessageSignature = useMemo(() => {
     if (!activeSessionDetail) {
       return "";
@@ -452,6 +464,8 @@ export function AgentWorkspace({
                             {tools.map((tool) => {
                               const isExpanded = expandedToolCallIds.has(tool.id);
                               const toolName = tool.content.split("\n")[0] || "Tool Call";
+                              const toolCall = visibleToolCalls.find((call) => call.createdAt === tool.createdAt && call.toolName === toolName) ?? null;
+                              const isRunning = toolCall?.status === "running";
                               return (
                                 <div key={tool.id} className="agent-tool-item">
                                   <button
@@ -471,7 +485,10 @@ export function AgentWorkspace({
                                   >
                                     <Wrench size={12} className="agent-tool-item__icon" />
                                     <span className="agent-tool-item__name">{toolName}</span>
-                                    <Check size={12} className="agent-tool-item__check" />
+                                    <span className={`agent-tool-item__state agent-tool-item__state--${isRunning ? "running" : "completed"}`}>
+                                      {isRunning ? <LoaderCircle size={12} className="agent-tool-item__spinner" /> : <Check size={12} className="agent-tool-item__check" />}
+                                      <span>{isRunning ? runningLabel : completedLabel}</span>
+                                    </span>
                                     <ChevronDown size={12} className={`agent-tool-item__arrow ${isExpanded ? "agent-tool-item__arrow--open" : ""}`} />
                                   </button>
                                   {isExpanded ? (
