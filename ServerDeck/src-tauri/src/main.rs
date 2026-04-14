@@ -1,3 +1,5 @@
+mod agent;
+
 use dirs::home_dir;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -5,13 +7,19 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{async_runtime, AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
+
+use agent::{
+    agent_get_project_context, agent_list_dir, agent_read_file, agent_search_in_files,
+    append_agent_user_message, create_agent_session, delete_agent_session,
+    get_agent_session_detail, list_agent_sessions, run_agent_turn,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -40,7 +48,7 @@ struct ManagedProjectRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AiProviderRecord {
+pub(crate) struct AiProviderRecord {
     id: String,
     name: String,
     provider_type: String,
@@ -95,68 +103,6 @@ struct AppSettingsRecord {
     terminal_charset: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentSessionRecord {
-    id: String,
-    project_id: String,
-    title: String,
-    goal: String,
-    status: String,
-    provider_id: String,
-    model: String,
-    root_path: String,
-    created_at: i64,
-    updated_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentMessageRecord {
-    id: String,
-    session_id: String,
-    role: String,
-    content: String,
-    created_at: i64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentSessionCreateRequest {
-    project_id: String,
-    root_path: String,
-    provider_id: String,
-    model: String,
-    goal: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentTurnRequest {
-    session_id: String,
-    provider_id: Option<String>,
-    model: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentSessionDetailPayload {
-    session: AgentSessionRecord,
-    messages: Vec<AgentMessageRecord>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AgentStreamEventPayload {
-    session_id: String,
-    phase: String,
-    message_id: String,
-    created_at: i64,
-    delta: Option<String>,
-    content: Option<String>,
-    error: Option<String>,
-}
-
 fn default_project_id() -> String {
     "default".to_string()
 }
@@ -196,7 +142,7 @@ struct ProcessObservation {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct FileEntry {
+pub(crate) struct FileEntry {
     name: String,
     path: String,
     is_dir: bool,
@@ -289,7 +235,7 @@ fn default_app_settings_record() -> AppSettingsRecord {
 
 // author: BrianXiong
 // time: 2026/04/06/11:42:03
-fn open_db() -> Result<Connection, String> {
+pub(crate) fn open_db() -> Result<Connection, String> {
     let path = db_file()?;
     let conn = Connection::open(path).map_err(|error| error.to_string())?;
     init_db(&conn)?;
@@ -366,11 +312,38 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           created_at INTEGER NOT NULL
         );
 
+        CREATE TABLE IF NOT EXISTS agent_plan_items (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          status TEXT NOT NULL,
+          position INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS agent_tool_calls (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          arguments_summary TEXT NOT NULL,
+          result_summary TEXT NOT NULL,
+          visibility TEXT NOT NULL DEFAULT 'default',
+          status TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+
         CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated_at
           ON agent_sessions(updated_at DESC);
 
         CREATE INDEX IF NOT EXISTS idx_agent_messages_session_id_created_at
           ON agent_messages(session_id, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_agent_plan_items_session_id_position
+          ON agent_plan_items(session_id, position, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_session_id_created_at
+          ON agent_tool_calls(session_id, created_at);
         "#,
     )
     .map_err(|error| error.to_string())?;
@@ -381,6 +354,10 @@ fn init_db(conn: &Connection) -> Result<(), String> {
     );
     let _ = conn.execute(
         "ALTER TABLE ai_providers ADD COLUMN enabled_models_json TEXT NOT NULL DEFAULT '[]'",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE agent_tool_calls ADD COLUMN visibility TEXT NOT NULL DEFAULT 'default'",
         [],
     );
 
@@ -512,7 +489,7 @@ fn now_millis() -> String {
 
 // author: BrianXiong
 // time: 2026/04/08/16:24:00
-fn now_millis_i64() -> i64 {
+pub(crate) fn now_millis_i64() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
@@ -521,19 +498,6 @@ fn now_millis_i64() -> i64 {
 
 // author: BrianXiong
 // time: 2026/04/08/16:24:00
-fn build_agent_session_title(goal: &str) -> String {
-    let trimmed = goal.trim();
-    if trimmed.is_empty() {
-        return "New Agent Session".to_string();
-    }
-
-    let mut title = trimmed.chars().take(48).collect::<String>();
-    if trimmed.chars().count() > 48 {
-        title.push('…');
-    }
-    title
-}
-
 fn read_hosts() -> Result<Vec<HostRecord>, String> {
     let path = hosts_file()?;
     if !path.exists() {
@@ -628,90 +592,6 @@ fn load_projects_from_db(conn: &Connection) -> Result<Vec<ManagedProjectRecord>,
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-fn load_agent_sessions_from_db(conn: &Connection) -> Result<Vec<AgentSessionRecord>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, project_id, title, goal, status, provider_id, model, root_path, created_at, updated_at FROM agent_sessions ORDER BY updated_at DESC, created_at DESC",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            Ok(AgentSessionRecord {
-                id: row.get(0)?,
-                project_id: row.get(1)?,
-                title: row.get(2)?,
-                goal: row.get(3)?,
-                status: row.get(4)?,
-                provider_id: row.get(5)?,
-                model: row.get(6)?,
-                root_path: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
-            })
-        })
-        .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-fn load_agent_session_by_id(conn: &Connection, session_id: &str) -> Result<AgentSessionRecord, String> {
-    conn.query_row(
-        "SELECT id, project_id, title, goal, status, provider_id, model, root_path, created_at, updated_at FROM agent_sessions WHERE id = ?1",
-        params![session_id],
-        |row| {
-            Ok(AgentSessionRecord {
-                id: row.get(0)?,
-                project_id: row.get(1)?,
-                title: row.get(2)?,
-                goal: row.get(3)?,
-                status: row.get(4)?,
-                provider_id: row.get(5)?,
-                model: row.get(6)?,
-                root_path: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
-            })
-        },
-    )
-    .optional()
-    .map_err(|error| error.to_string())?
-    .ok_or_else(|| "Agent session not found".to_string())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-fn load_agent_messages_from_db(conn: &Connection, session_id: &str) -> Result<Vec<AgentMessageRecord>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, session_id, role, content, created_at FROM agent_messages WHERE session_id = ?1 ORDER BY created_at, id",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map(params![session_id], |row| {
-            Ok(AgentMessageRecord {
-                id: row.get(0)?,
-                session_id: row.get(1)?,
-                role: row.get(2)?,
-                content: row.get(3)?,
-                created_at: row.get(4)?,
-            })
-        })
-        .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-fn build_agent_session_detail(conn: &Connection, session_id: &str) -> Result<AgentSessionDetailPayload, String> {
-    Ok(AgentSessionDetailPayload {
-        session: load_agent_session_by_id(conn, session_id)?,
-        messages: load_agent_messages_from_db(conn, session_id)?,
-    })
-}
-
 fn load_ai_providers_from_db(conn: &Connection) -> Result<Vec<AiProviderRecord>, String> {
     let mut stmt = conn
         .prepare(
@@ -739,34 +619,6 @@ fn load_ai_providers_from_db(conn: &Connection) -> Result<Vec<AiProviderRecord>,
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn load_ai_provider_by_id(conn: &Connection, provider_id: &str) -> Result<AiProviderRecord, String> {
-    conn.query_row(
-        "SELECT id, name, provider_type, base_url, api_key, model, available_models_json, enabled_models_json, enabled, is_default FROM ai_providers WHERE id = ?1",
-        params![provider_id],
-        |row| {
-            let available_models_json: String = row.get(6)?;
-            let enabled_models_json: String = row.get(7)?;
-            Ok(AiProviderRecord {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                provider_type: row.get(2)?,
-                base_url: row.get(3)?,
-                api_key: row.get(4)?,
-                model: row.get(5)?,
-                available_models: serde_json::from_str(&available_models_json).unwrap_or_default(),
-                enabled_models: serde_json::from_str(&enabled_models_json).unwrap_or_default(),
-                enabled: row.get(8)?,
-                is_default: row.get(9)?,
-            })
-        },
-    )
-    .optional()
-    .map_err(|error| error.to_string())?
-    .ok_or_else(|| "AI Provider not found".to_string())
-}
-
 fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -792,7 +644,7 @@ fn load_recent_projects_from_db(conn: &Connection) -> Result<Vec<String>, String
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
-fn expand_path(path: &str) -> PathBuf {
+pub(crate) fn expand_path(path: &str) -> PathBuf {
     if path == "~" {
         return home_dir().unwrap_or_else(|| PathBuf::from("/"));
     }
@@ -806,23 +658,7 @@ fn expand_path(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-fn validate_agent_root_path(root_path: &str) -> Result<String, String> {
-    let trimmed = root_path.trim();
-    if trimmed.is_empty() {
-        return Err("Agent project path is required".to_string());
-    }
-
-    let resolved = expand_path(trimmed);
-    if !resolved.is_dir() {
-        return Err(format!("Agent project path not found: {}", resolved.display()));
-    }
-
-    Ok(resolved.display().to_string())
-}
-
-fn resolve_binary(name: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_binary(name: &str) -> Result<PathBuf, String> {
     let mut candidates = Vec::new();
 
     if let Some(path) = env::var_os("PATH") {
@@ -882,7 +718,7 @@ fn resolve_local_shell() -> Result<PathBuf, String> {
         .ok_or_else(|| "Local shell not found".to_string())
 }
 
-fn default_ai_provider_base_url(provider_type: &str) -> &str {
+pub(crate) fn default_ai_provider_base_url(provider_type: &str) -> &str {
     match provider_type {
         "openai" => "https://api.openai.com/v1",
         "anthropic" => "https://api.anthropic.com/v1",
@@ -911,614 +747,6 @@ fn fetch_model_list_via_curl(url: &str, headers: &[(&str, String)]) -> Result<se
     }
 
     serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn emit_agent_stream_event(app: &AppHandle, payload: AgentStreamEventPayload) {
-    eprintln!(
-        "[AGENT] emit event session={} phase={} message={} created_at={} delta_len={} has_content={} has_error={}",
-        payload.session_id,
-        payload.phase,
-        payload.message_id,
-        payload.created_at,
-        payload.delta.as_ref().map(|value| value.len()).unwrap_or(0),
-        payload.content.as_ref().map(|value| !value.is_empty()).unwrap_or(false),
-        payload.error.as_ref().map(|value| !value.is_empty()).unwrap_or(false)
-    );
-    let _ = app.emit("agent-stream", payload);
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:58:00
-fn preview_log_text(value: &str, limit: usize) -> String {
-    let mut preview = value.chars().take(limit).collect::<String>();
-    if value.chars().count() > limit {
-        preview.push('…');
-    }
-    preview.replace('\n', "\\n")
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn update_agent_session_status(conn: &Connection, session_id: &str, status: &str, updated_at: i64) -> Result<(), String> {
-    conn.execute(
-        "UPDATE agent_sessions SET status = ?2, updated_at = ?3 WHERE id = ?1",
-        params![session_id, status, updated_at],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/20:06:00
-fn update_agent_session_provider_model(
-    conn: &Connection,
-    session_id: &str,
-    provider_id: &str,
-    model: &str,
-    updated_at: i64,
-) -> Result<(), String> {
-    conn.execute(
-        "UPDATE agent_sessions SET provider_id = ?2, model = ?3, updated_at = ?4 WHERE id = ?1",
-        params![session_id, provider_id, model, updated_at],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn insert_agent_message(conn: &Connection, message: &AgentMessageRecord) -> Result<(), String> {
-    conn.execute(
-        "INSERT INTO agent_messages (id, session_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![message.id, message.session_id, message.role, message.content, message.created_at],
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn build_agent_system_prompt(session: &AgentSessionRecord) -> String {
-    format!(
-        "You are ServerDeck's project-scoped AI assistant. The current project root is: {}. This first version only supports streamed conversation, so answer directly in concise Markdown and stay grounded in the user messages.",
-        session.root_path
-    )
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn resolve_provider_base_url(provider: &AiProviderRecord) -> Result<String, String> {
-    let trimmed = provider.base_url.trim();
-    if !trimmed.is_empty() {
-        return Ok(trimmed.trim_end_matches('/').to_string());
-    }
-
-    let default_url = default_ai_provider_base_url(&provider.provider_type);
-    if default_url.is_empty() {
-        return Err("Base URL is required for this AI Provider".to_string());
-    }
-
-    Ok(default_url.trim_end_matches('/').to_string())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn validate_agent_session_provider(session: &AgentSessionRecord, provider: &AiProviderRecord) -> Result<(), String> {
-    if session.provider_id.trim().is_empty() || session.model.trim().is_empty() {
-        return Err("Select an AI model before starting the agent session".to_string());
-    }
-
-    if provider.api_key.trim().is_empty() {
-        return Err("The selected AI Provider is missing an API key".to_string());
-    }
-
-    Ok(())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn parse_openai_like_delta(json: &serde_json::Value) -> Option<String> {
-    json.get("choices")
-        .and_then(|value| value.as_array())
-        .and_then(|items| items.first())
-        .and_then(|item| item.get("delta"))
-        .and_then(|delta| delta.get("content"))
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:45:00
-fn parse_openai_like_response(json: &serde_json::Value) -> Option<String> {
-    if let Some(content) = json
-        .get("choices")
-        .and_then(|value| value.as_array())
-        .and_then(|items| items.first())
-        .and_then(|item| item.get("message"))
-        .and_then(|message| message.get("content"))
-    {
-        if let Some(text) = content.as_str() {
-            return Some(text.to_string());
-        }
-
-        if let Some(parts) = content.as_array() {
-            let text = parts
-                .iter()
-                .filter_map(|part| part.get("text").and_then(|value| value.as_str()))
-                .collect::<String>();
-            if !text.is_empty() {
-                return Some(text);
-            }
-        }
-    }
-
-    None
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn parse_anthropic_delta(json: &serde_json::Value) -> Option<String> {
-    if json.get("type").and_then(|value| value.as_str()) != Some("content_block_delta") {
-        return None;
-    }
-
-    json.get("delta")
-        .and_then(|value| value.get("text"))
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:45:00
-fn parse_anthropic_response(json: &serde_json::Value) -> Option<String> {
-    json.get("content")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("text").and_then(|value| value.as_str()))
-                .collect::<String>()
-        })
-        .filter(|text| !text.is_empty())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn parse_gemini_delta(json: &serde_json::Value) -> Option<String> {
-    let texts = json
-        .get("candidates")
-        .and_then(|value| value.as_array())
-        .and_then(|items| items.first())
-        .and_then(|item| item.get("content"))
-        .and_then(|value| value.get("parts"))
-        .and_then(|value| value.as_array())
-        .map(|parts| {
-            parts
-                .iter()
-                .filter_map(|part| part.get("text").and_then(|value| value.as_str()))
-                .collect::<String>()
-        })
-        .unwrap_or_default();
-
-    if texts.is_empty() {
-        None
-    } else {
-        Some(texts)
-    }
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:45:00
-fn parse_error_response(json: &serde_json::Value) -> Option<String> {
-    if let Some(message) = json
-        .get("error")
-        .and_then(|value| value.get("message").or(Some(value)))
-        .and_then(|value| value.as_str())
-    {
-        return Some(message.to_string());
-    }
-
-    json.get("message")
-        .and_then(|value| value.as_str())
-        .map(|value| value.to_string())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn collect_stream_from_curl<F>(
-    mut command: Command,
-    app: &AppHandle,
-    session_id: &str,
-    message_id: &str,
-    created_at: i64,
-    request_label: &str,
-    mut parse_delta: F,
-    parse_response: fn(&serde_json::Value) -> Option<String>,
-) -> Result<String, String>
-where
-    F: FnMut(&serde_json::Value) -> Option<String>,
-{
-    eprintln!(
-        "[AGENT] starting curl stream session={} message={} request={}",
-        session_id, message_id, request_label
-    );
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| error.to_string())?;
-    let stdout = child.stdout.take().ok_or_else(|| "Failed to capture stream output".to_string())?;
-    let mut reader = BufReader::new(stdout);
-    let mut line = String::new();
-    let mut collected = String::new();
-    let mut raw_output = String::new();
-    let mut saw_sse_payload = false;
-
-    emit_agent_stream_event(
-        app,
-        AgentStreamEventPayload {
-            session_id: session_id.to_string(),
-            phase: "start".to_string(),
-            message_id: message_id.to_string(),
-            created_at,
-            delta: None,
-            content: None,
-            error: None,
-        },
-    );
-
-    loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line).map_err(|error| error.to_string())?;
-        if bytes_read == 0 {
-            break;
-        }
-
-        raw_output.push_str(&line);
-
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with(':') || trimmed.starts_with("event:") {
-            continue;
-        }
-
-        if !trimmed.starts_with("data:") {
-            continue;
-        }
-
-        let payload = trimmed.trim_start_matches("data:").trim();
-        if payload == "[DONE]" {
-            eprintln!("[AGENT] received DONE marker session={} request={}", session_id, request_label);
-            break;
-        }
-
-        saw_sse_payload = true;
-        eprintln!(
-            "[AGENT] received sse payload session={} request={} payload_preview={}",
-            session_id,
-            request_label,
-            preview_log_text(payload, 220)
-        );
-
-        let json: serde_json::Value = serde_json::from_str(payload).map_err(|error| error.to_string())?;
-        if let Some(error) = parse_error_response(&json) {
-            eprintln!("[AGENT] parsed error payload session={} request={} error={}", session_id, request_label, error);
-            return Err(error);
-        }
-
-        if let Some(delta) = parse_delta(&json) {
-            if delta.is_empty() {
-                continue;
-            }
-
-            collected.push_str(&delta);
-            eprintln!(
-                "[AGENT] parsed delta session={} request={} delta_len={} total_len={}",
-                session_id,
-                request_label,
-                delta.len(),
-                collected.len()
-            );
-            emit_agent_stream_event(
-                app,
-                AgentStreamEventPayload {
-                    session_id: session_id.to_string(),
-                    phase: "delta".to_string(),
-                    message_id: message_id.to_string(),
-                    created_at,
-                    delta: Some(delta),
-                    content: None,
-                    error: None,
-                },
-            );
-        }
-    }
-
-    let mut stderr_output = String::new();
-    if let Some(mut stderr) = child.stderr.take() {
-        stderr.read_to_string(&mut stderr_output).map_err(|error| error.to_string())?;
-    }
-
-    let status = child.wait().map_err(|error| error.to_string())?;
-    eprintln!(
-        "[AGENT] curl finished session={} request={} success={} saw_sse={} raw_len={} stderr_len={} collected_len={}",
-        session_id,
-        request_label,
-        status.success(),
-        saw_sse_payload,
-        raw_output.len(),
-        stderr_output.len(),
-        collected.len()
-    );
-    if !status.success() {
-        let detail = stderr_output.trim().to_string();
-        eprintln!(
-            "[AGENT] curl failure session={} request={} stderr_preview={}",
-            session_id,
-            request_label,
-            preview_log_text(&detail, 220)
-        );
-        return Err(if detail.is_empty() { "Agent request failed".to_string() } else { detail });
-    }
-
-    if !saw_sse_payload {
-        let trimmed = raw_output.trim();
-        if !trimmed.is_empty() {
-            eprintln!(
-                "[AGENT] non-sse response session={} request={} body_preview={}",
-                session_id,
-                request_label,
-                preview_log_text(trimmed, 220)
-            );
-            let json: serde_json::Value = serde_json::from_str(trimmed).map_err(|error| error.to_string())?;
-            if let Some(error) = parse_error_response(&json) {
-                eprintln!("[AGENT] parsed non-sse error session={} request={} error={}", session_id, request_label, error);
-                return Err(error);
-            }
-
-            if let Some(content) = parse_response(&json) {
-                if !content.is_empty() {
-                    eprintln!(
-                        "[AGENT] parsed non-sse content session={} request={} content_len={}",
-                        session_id,
-                        request_label,
-                        content.len()
-                    );
-                    emit_agent_stream_event(
-                        app,
-                        AgentStreamEventPayload {
-                            session_id: session_id.to_string(),
-                            phase: "delta".to_string(),
-                            message_id: message_id.to_string(),
-                            created_at,
-                            delta: Some(content.clone()),
-                            content: None,
-                            error: None,
-                        },
-                    );
-                    return Ok(content);
-                }
-            }
-        }
-    }
-
-    eprintln!(
-        "[AGENT] returning collected content session={} request={} content_len={}",
-        session_id,
-        request_label,
-        collected.len()
-    );
-    Ok(collected)
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn stream_openai_compatible_completion(
-    app: &AppHandle,
-    session: &AgentSessionRecord,
-    provider: &AiProviderRecord,
-    messages: &[AgentMessageRecord],
-    system_prompt: &str,
-    message_id: &str,
-    created_at: i64,
-) -> Result<String, String> {
-    let base_url = resolve_provider_base_url(provider)?;
-    let url = if provider.provider_type == "azure-openai" {
-        format!(
-            "{}/openai/deployments/{}/chat/completions?api-version=2024-02-01",
-            base_url,
-            session.model
-        )
-    } else {
-        format!("{}/chat/completions", base_url)
-    };
-
-    let prompt_messages = std::iter::once(serde_json::json!({
-        "role": "system",
-        "content": system_prompt,
-    }))
-    .chain(messages.iter().map(|message| {
-        serde_json::json!({
-            "role": message.role,
-            "content": message.content,
-        })
-    }))
-    .collect::<Vec<_>>();
-
-    let body = serde_json::json!({
-        "model": session.model,
-        "stream": true,
-        "messages": prompt_messages,
-    });
-
-    let mut command = Command::new(resolve_binary("curl")?);
-    command
-        .arg("-sS")
-        .arg("-N")
-        .arg("-X")
-        .arg("POST")
-        .arg(url)
-        .arg("-H")
-        .arg("Content-Type: application/json")
-        .arg("-d")
-        .arg(body.to_string());
-
-    if provider.provider_type == "azure-openai" {
-        command.arg("-H").arg(format!("api-key: {}", provider.api_key.trim()));
-    } else {
-        command.arg("-H").arg(format!("Authorization: Bearer {}", provider.api_key.trim()));
-    }
-
-    collect_stream_from_curl(
-        command,
-        app,
-        &session.id,
-        message_id,
-        created_at,
-        &format!("{}:{}", provider.provider_type, session.model),
-        parse_openai_like_delta,
-        parse_openai_like_response,
-    )
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn stream_anthropic_completion(
-    app: &AppHandle,
-    session: &AgentSessionRecord,
-    provider: &AiProviderRecord,
-    messages: &[AgentMessageRecord],
-    system_prompt: &str,
-    message_id: &str,
-    created_at: i64,
-) -> Result<String, String> {
-    let base_url = resolve_provider_base_url(provider)?;
-    let url = format!("{}/messages", base_url);
-    let prompt_messages = messages
-        .iter()
-        .filter(|message| message.role == "user" || message.role == "assistant")
-        .map(|message| {
-            serde_json::json!({
-                "role": message.role,
-                "content": [{
-                    "type": "text",
-                    "text": message.content,
-                }],
-            })
-        })
-        .collect::<Vec<_>>();
-    let body = serde_json::json!({
-        "model": session.model,
-        "stream": true,
-        "max_tokens": 4096,
-        "system": system_prompt,
-        "messages": prompt_messages,
-    });
-
-    let mut command = Command::new(resolve_binary("curl")?);
-    command
-        .arg("-sS")
-        .arg("-N")
-        .arg("-X")
-        .arg("POST")
-        .arg(url)
-        .arg("-H")
-        .arg("Content-Type: application/json")
-        .arg("-H")
-        .arg(format!("x-api-key: {}", provider.api_key.trim()))
-        .arg("-H")
-        .arg("anthropic-version: 2023-06-01")
-        .arg("-d")
-        .arg(body.to_string());
-
-    collect_stream_from_curl(
-        command,
-        app,
-        &session.id,
-        message_id,
-        created_at,
-        &format!("{}:{}", provider.provider_type, session.model),
-        parse_anthropic_delta,
-        parse_anthropic_response,
-    )
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn stream_gemini_completion(
-    app: &AppHandle,
-    session: &AgentSessionRecord,
-    provider: &AiProviderRecord,
-    messages: &[AgentMessageRecord],
-    system_prompt: &str,
-    message_id: &str,
-    created_at: i64,
-) -> Result<String, String> {
-    let base_url = resolve_provider_base_url(provider)?;
-    let url = format!(
-        "{}/models/{}:streamGenerateContent?alt=sse&key={}",
-        base_url,
-        session.model,
-        provider.api_key.trim()
-    );
-    let contents = messages
-        .iter()
-        .filter(|message| message.role == "user" || message.role == "assistant")
-        .map(|message| {
-            serde_json::json!({
-                "role": if message.role == "assistant" { "model" } else { "user" },
-                "parts": [{ "text": message.content }],
-            })
-        })
-        .collect::<Vec<_>>();
-    let body = serde_json::json!({
-        "system_instruction": {
-            "parts": [{ "text": system_prompt }],
-        },
-        "contents": contents,
-    });
-
-    let mut command = Command::new(resolve_binary("curl")?);
-    command
-        .arg("-sS")
-        .arg("-N")
-        .arg("-X")
-        .arg("POST")
-        .arg(url)
-        .arg("-H")
-        .arg("Content-Type: application/json")
-        .arg("-d")
-        .arg(body.to_string());
-
-    collect_stream_from_curl(
-        command,
-        app,
-        &session.id,
-        message_id,
-        created_at,
-        &format!("{}:{}", provider.provider_type, session.model),
-        parse_gemini_delta,
-        parse_gemini_delta,
-    )
-}
-
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn run_streaming_agent_completion(
-    app: &AppHandle,
-    session: &AgentSessionRecord,
-    provider: &AiProviderRecord,
-    messages: &[AgentMessageRecord],
-    message_id: &str,
-    created_at: i64,
-) -> Result<String, String> {
-    let system_prompt = build_agent_system_prompt(session);
-    match provider.provider_type.as_str() {
-        "anthropic" => stream_anthropic_completion(app, session, provider, messages, &system_prompt, message_id, created_at),
-        "gemini" => stream_gemini_completion(app, session, provider, messages, &system_prompt, message_id, created_at),
-        "openai" | "openrouter" | "custom-openai" | "azure-openai" => {
-            stream_openai_compatible_completion(app, session, provider, messages, &system_prompt, message_id, created_at)
-        }
-        _ => Err("This AI Provider type is not supported yet for Agent streaming".to_string()),
-    }
 }
 
 fn binary_exists(name: &str) -> bool {
@@ -1579,7 +807,7 @@ fn apply_local_terminal_utf8_env(cmd: &mut CommandBuilder) {
     }
 }
 
-fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
+pub(crate) fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
     let mut entries = Vec::new();
     let read_dir = fs::read_dir(path).map_err(|error| error.to_string())?;
 
@@ -2425,250 +1653,6 @@ fn wire_terminal_pty_exit(
             }
         }
     });
-}
-
-#[tauri::command]
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-fn list_agent_sessions() -> Result<Vec<AgentSessionRecord>, String> {
-    let conn = open_db()?;
-    load_agent_sessions_from_db(&conn)
-}
-
-#[tauri::command]
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-fn get_agent_session_detail(session_id: String) -> Result<AgentSessionDetailPayload, String> {
-    let conn = open_db()?;
-    build_agent_session_detail(&conn, &session_id)
-}
-
-#[tauri::command]
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-fn create_agent_session(request: AgentSessionCreateRequest) -> Result<AgentSessionDetailPayload, String> {
-    if request.goal.trim().is_empty() {
-        return Err("Agent task is required".to_string());
-    }
-
-    let root_path = validate_agent_root_path(&request.root_path)?;
-    let session_id = Uuid::new_v4().to_string();
-    let message_id = Uuid::new_v4().to_string();
-    let created_at = now_millis_i64();
-    let title = build_agent_session_title(&request.goal);
-
-    let mut conn = open_db()?;
-    let tx = conn.transaction().map_err(|error| error.to_string())?;
-    tx.execute(
-        "INSERT INTO agent_sessions (id, project_id, title, goal, status, provider_id, model, root_path, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-        params![
-            session_id,
-            request.project_id.trim(),
-            title,
-            request.goal.trim(),
-            "idle",
-            request.provider_id.trim(),
-            request.model.trim(),
-            root_path,
-            created_at,
-            created_at,
-        ],
-    )
-    .map_err(|error| error.to_string())?;
-    tx.execute(
-        "INSERT INTO agent_messages (id, session_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![message_id, session_id, "user", request.goal.trim(), created_at],
-    )
-    .map_err(|error| error.to_string())?;
-    tx.commit().map_err(|error| error.to_string())?;
-
-    let conn = open_db()?;
-    build_agent_session_detail(&conn, &session_id)
-}
-
-#[tauri::command]
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-fn append_agent_user_message(session_id: String, content: String) -> Result<AgentSessionDetailPayload, String> {
-    if content.trim().is_empty() {
-        return Err("Agent message is required".to_string());
-    }
-
-    let created_at = now_millis_i64();
-    let message_id = Uuid::new_v4().to_string();
-    let mut conn = open_db()?;
-    let tx = conn.transaction().map_err(|error| error.to_string())?;
-    load_agent_session_by_id(&tx, &session_id)?;
-    tx.execute(
-        "INSERT INTO agent_messages (id, session_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![message_id, session_id, "user", content.trim(), created_at],
-    )
-    .map_err(|error| error.to_string())?;
-    tx.execute(
-        "UPDATE agent_sessions SET updated_at = ?2 WHERE id = ?1",
-        params![session_id, created_at],
-    )
-    .map_err(|error| error.to_string())?;
-    tx.commit().map_err(|error| error.to_string())?;
-
-    let conn = open_db()?;
-    build_agent_session_detail(&conn, &session_id)
-}
-
-#[tauri::command]
-// author: BrianXiong
-// time: 2026/04/08/20:22:00
-fn delete_agent_session(session_id: String) -> Result<bool, String> {
-    let mut conn = open_db()?;
-    let tx = conn.transaction().map_err(|error| error.to_string())?;
-    tx.execute("DELETE FROM agent_messages WHERE session_id = ?1", params![session_id])
-        .map_err(|error| error.to_string())?;
-    tx.execute("DELETE FROM agent_sessions WHERE id = ?1", params![session_id])
-        .map_err(|error| error.to_string())?;
-    tx.commit().map_err(|error| error.to_string())?;
-    Ok(true)
-}
-
-#[tauri::command]
-// author: BrianXiong
-// time: 2026/04/08/19:20:00
-fn run_agent_turn(app: AppHandle, request: AgentTurnRequest) -> Result<bool, String> {
-    let conn = open_db()?;
-    let mut session = load_agent_session_by_id(&conn, &request.session_id)?;
-    eprintln!(
-        "[AGENT] run turn requested session={} status={} provider={} model={} root={}",
-        session.id,
-        session.status,
-        session.provider_id,
-        session.model,
-        session.root_path
-    );
-
-    if session.provider_id.trim().is_empty() || session.model.trim().is_empty() {
-        let fallback_provider_id = request.provider_id.unwrap_or_default();
-        let fallback_model = request.model.unwrap_or_default();
-        if fallback_provider_id.trim().is_empty() || fallback_model.trim().is_empty() {
-            return Err("Select an AI model before starting the agent session".to_string());
-        }
-
-        let updated_at = now_millis_i64();
-        update_agent_session_provider_model(&conn, &session.id, fallback_provider_id.trim(), fallback_model.trim(), updated_at)?;
-        session.provider_id = fallback_provider_id.trim().to_string();
-        session.model = fallback_model.trim().to_string();
-        session.updated_at = updated_at;
-        eprintln!(
-            "[AGENT] applied fallback model binding session={} provider={} model={}",
-            session.id,
-            session.provider_id,
-            session.model
-        );
-    }
-
-    let provider = load_ai_provider_by_id(&conn, &session.provider_id)?;
-    eprintln!(
-        "[AGENT] provider loaded session={} provider_type={} provider_name={} base_url_present={} api_key_present={}",
-        session.id,
-        provider.provider_type,
-        provider.name,
-        !provider.base_url.trim().is_empty(),
-        !provider.api_key.trim().is_empty()
-    );
-    validate_agent_session_provider(&session, &provider)?;
-
-    if session.status == "streaming" {
-        return Err("Agent session is already streaming".to_string());
-    }
-
-    let updated_at = now_millis_i64();
-    update_agent_session_status(&conn, &session.id, "streaming", updated_at)?;
-    let messages = load_agent_messages_from_db(&conn, &session.id)?;
-    let app_handle = app.clone();
-
-    std::thread::spawn(move || {
-        let message_id = Uuid::new_v4().to_string();
-        let created_at = now_millis_i64();
-        eprintln!(
-            "[AGENT] worker started session={} message={} provider_type={} model={}",
-            session.id,
-            message_id,
-            provider.provider_type,
-            session.model
-        );
-        let result = run_streaming_agent_completion(&app_handle, &session, &provider, &messages, &message_id, created_at);
-
-        match result {
-            Ok(content) => {
-                eprintln!(
-                    "[AGENT] worker success session={} message={} content_len={}",
-                    session.id,
-                    message_id,
-                    content.len()
-                );
-                if let Ok(conn) = open_db() {
-                    let _ = insert_agent_message(
-                        &conn,
-                        &AgentMessageRecord {
-                            id: message_id.clone(),
-                            session_id: session.id.clone(),
-                            role: "assistant".to_string(),
-                            content: content.clone(),
-                            created_at,
-                        },
-                    );
-                    let _ = update_agent_session_status(&conn, &session.id, "idle", now_millis_i64());
-                }
-
-                emit_agent_stream_event(
-                    &app_handle,
-                    AgentStreamEventPayload {
-                        session_id: session.id.clone(),
-                        phase: "done".to_string(),
-                        message_id,
-                        created_at,
-                        delta: None,
-                        content: Some(content),
-                        error: None,
-                    },
-                );
-            }
-            Err(error) => {
-                eprintln!(
-                    "[AGENT] worker error session={} message={} error={}",
-                    session.id,
-                    message_id,
-                    error
-                );
-                if let Ok(conn) = open_db() {
-                    let _ = insert_agent_message(
-                        &conn,
-                        &AgentMessageRecord {
-                            id: message_id.clone(),
-                            session_id: session.id.clone(),
-                            role: "assistant".to_string(),
-                            content: format!("Request failed:\n\n{}", error),
-                            created_at,
-                        },
-                    );
-                    let _ = update_agent_session_status(&conn, &session.id, "error", now_millis_i64());
-                }
-
-                emit_agent_stream_event(
-                    &app_handle,
-                    AgentStreamEventPayload {
-                        session_id: session.id.clone(),
-                        phase: "error".to_string(),
-                        message_id,
-                        created_at,
-                        delta: None,
-                        content: None,
-                        error: Some(error),
-                    },
-                );
-            }
-        }
-    });
-
-    Ok(true)
 }
 
 #[tauri::command]
@@ -3613,6 +2597,10 @@ fn main() {
             append_agent_user_message,
             delete_agent_session,
             run_agent_turn,
+            agent_get_project_context,
+            agent_list_dir,
+            agent_search_in_files,
+            agent_read_file,
             fetch_ai_provider_models,
             detect_ai_provider_imports,
             list_hosts,

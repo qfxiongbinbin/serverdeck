@@ -245,6 +245,8 @@ type Messages = {
   agentThinking: string;
   agentNoMessages: string;
   agentArchive: string;
+  agentRunning: string;
+  agentCompleted: string;
   agentModelRequired: string;
   agentProjectRequired: string;
   agentTaskRequired: string;
@@ -568,6 +570,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     agentThinking: "Thinking...",
     agentNoMessages: "No messages yet",
     agentArchive: "Archive",
+    agentRunning: "Running",
+    agentCompleted: "Completed",
     agentModelRequired: "Select an AI model first",
     agentProjectRequired: "Choose a local project first",
     agentTaskRequired: "Agent task is required",
@@ -889,6 +893,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     agentThinking: "思考中...",
     agentNoMessages: "暂无对话消息",
     agentArchive: "归档",
+    agentRunning: "执行中",
+    agentCompleted: "已完成",
     agentModelRequired: "请先选择一个 AI 模型",
     agentProjectRequired: "请先选择一个本地项目",
     agentTaskRequired: "请输入 agent 任务",
@@ -1210,6 +1216,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     agentThinking: "考え中...",
     agentNoMessages: "メッセージはまだありません",
     agentArchive: "アーカイブ",
+    agentRunning: "実行中",
+    agentCompleted: "完了",
     agentModelRequired: "先に AI モデルを選択してください",
     agentProjectRequired: "先にローカルプロジェクトを選択してください",
     agentTaskRequired: "agent タスクを入力してください",

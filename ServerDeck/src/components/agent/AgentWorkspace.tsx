@@ -1,5 +1,5 @@
-import { Archive, ArrowUp, Bot, ChevronDown, MessageSquare, MoreHorizontal, Plus, Sparkles, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Archive, ArrowUp, Bot, Check, ChevronDown, LoaderCircle, MessageSquare, MoreHorizontal, Plus, Sparkles, Trash2, Wrench } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
@@ -29,6 +29,8 @@ type AgentWorkspaceProps = {
   loadingLabel: string;
   thinkingLabel: string;
   noMessagesLabel: string;
+  runningLabel: string;
+  completedLabel: string;
   modelLabel: string;
   deleteLabel: string;
   archiveLabel: string;
@@ -96,6 +98,8 @@ export function AgentWorkspace({
   loadingLabel,
   thinkingLabel,
   noMessagesLabel,
+  runningLabel,
+  completedLabel,
   modelLabel,
   deleteLabel,
   archiveLabel,
@@ -131,15 +135,32 @@ export function AgentWorkspace({
     : selectedModel;
   const hasSelectedModelOption = availableModels.some((option) => buildModelValue(option.providerId, option.model) === modelValue);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const shouldRestoreComposerFocusRef = useRef(false);
+  const assistantBubbleRefs = useRef(new Map<string, HTMLDivElement>());
   const [stickToBottom, setStickToBottom] = useState(true);
   const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
+  const [attachedToolWidths, setAttachedToolWidths] = useState<Record<string, number>>({});
+  const [expandedToolCallIds, setExpandedToolCallIds] = useState<Set<string>>(new Set());
+  const visibleToolCalls = useMemo(
+    () => (activeSessionDetail?.toolCalls ?? []).filter((call) => call.visibility !== "internal"),
+    [activeSessionDetail]
+  );
+  const activeRunningTool = useMemo(
+    () => visibleToolCalls.find((call) => call.status === "running") ?? null,
+    [visibleToolCalls]
+  );
   const streamStateLabel = useMemo(() => {
     if (!activeSessionDetail) {
       return "";
     }
 
-    return activeSessionDetail.session.status === "streaming" ? thinkingLabel : "";
-  }, [activeSessionDetail, thinkingLabel]);
+    if (activeSessionDetail.session.status !== "streaming") {
+      return "";
+    }
+
+    return activeRunningTool ? `${runningLabel} · ${activeRunningTool.toolName}` : thinkingLabel;
+  }, [activeRunningTool, activeSessionDetail, runningLabel, thinkingLabel]);
   const latestMessageSignature = useMemo(() => {
     if (!activeSessionDetail) {
       return "";
@@ -161,6 +182,41 @@ export function AgentWorkspace({
     const node = messageListRef.current;
     node.scrollTop = node.scrollHeight;
   }, [latestMessageSignature, stickToBottom]);
+
+  useLayoutEffect(() => {
+    if (!shouldRestoreComposerFocusRef.current) {
+      return;
+    }
+
+    shouldRestoreComposerFocusRef.current = false;
+    const node = composerTextareaRef.current;
+    if (!node) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      node.focus({ preventScroll: true });
+      const cursor = node.value.length;
+      node.setSelectionRange(cursor, cursor);
+    });
+  }, [activeSessionDetail?.session.id, composerValue, createBusy, latestMessageSignature, sendBusy]);
+
+  useEffect(() => {
+    function updateAttachedToolWidths() {
+      const nextWidths: Record<string, number> = {};
+      assistantBubbleRefs.current.forEach((node, messageId) => {
+        nextWidths[messageId] = node.getBoundingClientRect().width;
+      });
+      setAttachedToolWidths(nextWidths);
+    }
+
+    const frameId = window.requestAnimationFrame(updateAttachedToolWidths);
+    window.addEventListener("resize", updateAttachedToolWidths);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", updateAttachedToolWidths);
+    };
+  }, [activeSessionDetail, latestMessageSignature]);
 
   useEffect(() => {
     if (!openMenuSessionId) {
@@ -185,6 +241,9 @@ export function AgentWorkspace({
     }
 
     event.preventDefault();
+    event.stopPropagation();
+    setStickToBottom(true);
+    shouldRestoreComposerFocusRef.current = true;
     if (activeSessionDetail) {
       onSendFollowUp();
       return;
@@ -321,34 +380,158 @@ export function AgentWorkspace({
                   <span className="agent-message__status">{streamStateLabel}</span>
                 </div>
               ) : null}
-              {!detailLoading && activeSessionDetail.messages.map((message) => {
-                const isUserMessage = message.role === "user";
-                const showStreamingState = !isUserMessage && activeSessionDetail.session.status === "streaming" && !message.content.trim();
+              {!detailLoading && (() => {
+                // Group tool messages with their following assistant message
+                const grouped: { tools: typeof activeSessionDetail.messages; message: typeof activeSessionDetail.messages[0] }[] = [];
+                let pendingTools: typeof activeSessionDetail.messages = [];
 
-                return (
-                  <article key={message.id} className={`agent-message agent-message--${isUserMessage ? "user" : "assistant"}`}>
-                    <div className="agent-message__inner">
-                      {!isUserMessage ? <div className="agent-message__role">{message.role}</div> : null}
-                      <div className="agent-message__bubble">
-                        <div className="agent-message__content">
-                          {showStreamingState ? (
-                            <span className="agent-message__status">{streamStateLabel}</span>
-                          ) : isUserMessage ? (
-                            message.content
-                          ) : (
-                            <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-                              {message.content}
-                            </ReactMarkdown>
-                          )}
+                for (const message of activeSessionDetail.messages) {
+                  if (message.role === "tool") {
+                    pendingTools.push(message);
+                  } else {
+                    grouped.push({ tools: pendingTools, message });
+                    pendingTools = [];
+                  }
+                }
+
+                // Handle any remaining tool messages without a following message
+                if (pendingTools.length > 0) {
+                  grouped.push({ tools: pendingTools, message: null as unknown as typeof activeSessionDetail.messages[0] });
+                }
+
+                return grouped.map((group, groupIndex) => {
+                  const { tools, message } = group;
+
+                  // Render standalone tool calls (no following message yet)
+                  if (!message) {
+                    return (
+                      <div key={`tools-${groupIndex}`} className="agent-tool-list agent-tool-list--standalone">
+                        {tools.map((tool) => {
+                          const isExpanded = expandedToolCallIds.has(tool.id);
+                          const toolName = tool.content.split("\n")[0] || "Tool Call";
+                          return (
+                            <div key={tool.id} className="agent-tool-item">
+                              <button
+                                type="button"
+                                className="agent-tool-item__header"
+                                onClick={() => {
+                                  setExpandedToolCallIds((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(tool.id)) {
+                                      next.delete(tool.id);
+                                    } else {
+                                      next.add(tool.id);
+                                    }
+                                    return next;
+                                  });
+                                }}
+                              >
+                                <Wrench size={12} className="agent-tool-item__icon" />
+                                <span className="agent-tool-item__name">{toolName}</span>
+                                <Check size={12} className="agent-tool-item__check" />
+                                <ChevronDown size={12} className={`agent-tool-item__arrow ${isExpanded ? "agent-tool-item__arrow--open" : ""}`} />
+                              </button>
+                              {isExpanded ? (
+                                <div className="agent-tool-item__detail">
+                                  <pre className="agent-tool-item__content">{tool.content}</pre>
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  }
+
+                  const isUserMessage = message.role === "user";
+                  const showStreamingState = !isUserMessage && activeSessionDetail.session.status === "streaming" && !message.content.trim();
+
+                  return (
+                    <article key={message.id} className={`agent-message agent-message--${isUserMessage ? "user" : "assistant"}`}>
+                      <div className="agent-message__inner">
+                        {!isUserMessage ? <div className="agent-message__role">{message.role}</div> : null}
+                        <div
+                          ref={(node) => {
+                            if (!node) {
+                              assistantBubbleRefs.current.delete(message.id);
+                              return;
+                            }
+
+                            assistantBubbleRefs.current.set(message.id, node);
+                          }}
+                          className="agent-message__bubble"
+                        >
+                          <div className="agent-message__content">
+                            {showStreamingState ? (
+                              <span className="agent-message__status">{streamStateLabel}</span>
+                            ) : isUserMessage ? (
+                              message.content
+                            ) : (
+                              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                                {message.content}
+                              </ReactMarkdown>
+                            )}
+                          </div>
+                        </div>
+                        {/* Render tool calls outside message bubble */}
+                        {!isUserMessage && tools.length > 0 ? (
+                          <div
+                            className="agent-tool-list"
+                            style={attachedToolWidths[message.id]
+                              ? {
+                                width: `${attachedToolWidths[message.id]}px`,
+                                maxWidth: `${attachedToolWidths[message.id]}px`
+                              }
+                              : undefined}
+                          >
+                            {tools.map((tool) => {
+                              const isExpanded = expandedToolCallIds.has(tool.id);
+                              const toolName = tool.content.split("\n")[0] || "Tool Call";
+                              const toolCall = visibleToolCalls.find((call) => call.createdAt === tool.createdAt && call.toolName === toolName) ?? null;
+                              const isRunning = toolCall?.status === "running";
+                              return (
+                                <div key={tool.id} className="agent-tool-item">
+                                  <button
+                                    type="button"
+                                    className="agent-tool-item__header"
+                                    onClick={() => {
+                                      setExpandedToolCallIds((prev) => {
+                                        const next = new Set(prev);
+                                        if (next.has(tool.id)) {
+                                          next.delete(tool.id);
+                                        } else {
+                                          next.add(tool.id);
+                                        }
+                                        return next;
+                                      });
+                                    }}
+                                  >
+                                    <Wrench size={12} className="agent-tool-item__icon" />
+                                    <span className="agent-tool-item__name">{toolName}</span>
+                                    <span className={`agent-tool-item__state agent-tool-item__state--${isRunning ? "running" : "completed"}`}>
+                                      {isRunning ? <LoaderCircle size={12} className="agent-tool-item__spinner" /> : <Check size={12} className="agent-tool-item__check" />}
+                                      <span>{isRunning ? runningLabel : completedLabel}</span>
+                                    </span>
+                                    <ChevronDown size={12} className={`agent-tool-item__arrow ${isExpanded ? "agent-tool-item__arrow--open" : ""}`} />
+                                  </button>
+                                  {isExpanded ? (
+                                    <div className="agent-tool-item__detail">
+                                      <pre className="agent-tool-item__content">{tool.content}</pre>
+                                    </div>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                        <div className="agent-message__meta">
+                          <span className="agent-message__time">{formatSessionTime(message.createdAt)}</span>
                         </div>
                       </div>
-                      <div className="agent-message__meta">
-                        <span className="agent-message__time">{formatSessionTime(message.createdAt)}</span>
-                      </div>
-                    </div>
-                  </article>
-                );
-              })}
+                    </article>
+                  );
+                });
+              })()}
               {!detailLoading && activeSessionDetail.session.status === "streaming" && activeSessionDetail.messages.length > 0 && activeSessionDetail.messages[activeSessionDetail.messages.length - 1].role === "user" ? (
                 <article className="agent-message agent-message--assistant">
                   <div className="agent-message__inner">
@@ -387,6 +570,7 @@ export function AgentWorkspace({
           <div className="agent-composer-shell">
             <div className="agent-composer">
               <textarea
+                ref={composerTextareaRef}
                 rows={3}
                 value={composerValue}
                 onKeyDown={handleComposerKeyDown}
