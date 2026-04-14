@@ -763,6 +763,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
+  const [terminalMountNode, setTerminalMountNode] = useState<HTMLDivElement | null>(null);
   const [transferJobs, setTransferJobs] = useState<TransferJob[]>([]);
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdate | null>(null);
   const [appVersion, setAppVersion] = useState(packageJson.version);
@@ -863,6 +864,11 @@ export default function App() {
     () => terminalThemePresets.find((item) => item.id === settings.terminalThemeId) ?? terminalThemePresets[0],
     [settings.terminalThemeId]
   );
+
+  const handleTerminalMount = useCallback((element: HTMLDivElement | null) => {
+    terminalEl.current = element;
+    setTerminalMountNode(element);
+  }, []);
 
   const messages = useMemo(() => messagesByLanguage[settings.language], [settings.language]);
   const sshOptions = useMemo<SshConnectionOptions>(
@@ -2017,11 +2023,11 @@ export default function App() {
   }, [isLocalTerminalView, localPreviewOpen, messages.failedLoadLocalPreview, selectedLocalBrowserEntry]);
 
   useEffect(() => {
-    if (!activeTerminalTab || !terminalEl.current) {
+    if (!activeTerminalTab || !terminalMountNode) {
       return;
     }
 
-    terminalEl.current.innerHTML = "";
+    terminalMountNode.innerHTML = "";
 
     const terminal = new Terminal({
       cursorBlink: true,
@@ -2032,7 +2038,7 @@ export default function App() {
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
-    terminal.open(terminalEl.current);
+    terminal.open(terminalMountNode);
     terminal.focus();
     terminal.attachCustomKeyEventHandler((event) => {
       const sequence = getTerminalControlSequence(event);
@@ -2064,7 +2070,6 @@ export default function App() {
 
       frameId = window.requestAnimationFrame(() => {
         fitAddon.fit();
-        terminal.refresh(0, Math.max(terminal.rows - 1, 0));
         void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
         frameId = null;
       });
@@ -2075,7 +2080,7 @@ export default function App() {
     const resizeObserver = new ResizeObserver(() => {
       syncTerminalViewport();
     });
-    resizeObserver.observe(terminalEl.current);
+    resizeObserver.observe(terminalMountNode);
 
     return () => {
       resizeObserver.disconnect();
@@ -2087,7 +2092,7 @@ export default function App() {
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [activeTerminalTab?.id, activeTerminalTheme, isLocalTerminalView, localPreviewOpen, sendActiveTerminalInput, settings.terminalFontSize]);
+  }, [activeTerminalTab?.id, sendActiveTerminalInput, terminalMountNode]);
 
   useEffect(() => {
     if (!terminalRef.current) {
@@ -4681,9 +4686,7 @@ export default function App() {
             </section>
           ) : isLocalTerminalView && localPreviewOpen ? (
             <LocalTerminalWorkspace
-              onTerminalMount={(element) => {
-                terminalEl.current = element;
-              }}
+              onTerminalMount={handleTerminalMount}
               terminalBackground={activeTerminalTheme.theme.background}
               previewOpen={localPreviewOpen}
               browserTitle={messages.localFiles}
@@ -4738,7 +4741,7 @@ export default function App() {
               </div>
               <div
                 className="terminal-frame"
-                ref={terminalEl}
+                ref={handleTerminalMount}
                 onMouseDown={() => terminalRef.current?.focus()}
                 style={{ background: activeTerminalTheme.theme.background }}
               />
@@ -4747,7 +4750,7 @@ export default function App() {
             <section className="terminal-screen" style={{ background: activeTerminalTheme.theme.background }}>
               <div
                 className="terminal-frame"
-                ref={terminalEl}
+                ref={handleTerminalMount}
                 onMouseDown={() => terminalRef.current?.focus()}
                 style={{ background: activeTerminalTheme.theme.background }}
               />

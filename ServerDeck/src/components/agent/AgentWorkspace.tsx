@@ -1,5 +1,5 @@
 import { Archive, ArrowUp, Bot, Check, ChevronDown, LoaderCircle, MessageSquare, MoreHorizontal, Plus, Sparkles, Trash2, Wrench } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
@@ -135,6 +135,8 @@ export function AgentWorkspace({
     : selectedModel;
   const hasSelectedModelOption = availableModels.some((option) => buildModelValue(option.providerId, option.model) === modelValue);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const shouldRestoreComposerFocusRef = useRef(false);
   const assistantBubbleRefs = useRef(new Map<string, HTMLDivElement>());
   const [stickToBottom, setStickToBottom] = useState(true);
   const [openMenuSessionId, setOpenMenuSessionId] = useState<string | null>(null);
@@ -181,6 +183,24 @@ export function AgentWorkspace({
     node.scrollTop = node.scrollHeight;
   }, [latestMessageSignature, stickToBottom]);
 
+  useLayoutEffect(() => {
+    if (!shouldRestoreComposerFocusRef.current) {
+      return;
+    }
+
+    shouldRestoreComposerFocusRef.current = false;
+    const node = composerTextareaRef.current;
+    if (!node) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      node.focus({ preventScroll: true });
+      const cursor = node.value.length;
+      node.setSelectionRange(cursor, cursor);
+    });
+  }, [activeSessionDetail?.session.id, composerValue, createBusy, latestMessageSignature, sendBusy]);
+
   useEffect(() => {
     function updateAttachedToolWidths() {
       const nextWidths: Record<string, number> = {};
@@ -221,6 +241,9 @@ export function AgentWorkspace({
     }
 
     event.preventDefault();
+    event.stopPropagation();
+    setStickToBottom(true);
+    shouldRestoreComposerFocusRef.current = true;
     if (activeSessionDetail) {
       onSendFollowUp();
       return;
@@ -547,6 +570,7 @@ export function AgentWorkspace({
           <div className="agent-composer-shell">
             <div className="agent-composer">
               <textarea
+                ref={composerTextareaRef}
                 rows={3}
                 value={composerValue}
                 onKeyDown={handleComposerKeyDown}

@@ -2855,6 +2855,7 @@ select {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overflow-anchor: auto;
 }
 
 .agent-message-list--conversation {
@@ -3337,6 +3338,7 @@ select {
   padding: 10px 18px 16px;
   background: color-mix(in srgb, var(--agent-main-bg) 88%, transparent);
   backdrop-filter: blur(14px);
+  overflow-anchor: none;
 }
 
 .agent-composer__project {
