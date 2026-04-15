@@ -37,7 +37,13 @@ jobs:
         id: version
         working-directory: ServerDeck
         run: |
-          echo "version=$(node -e \"console.log(require('./package.json').version)\")" >> "$GITHUB_OUTPUT"
+          VERSION=$(python3 - <<'PY'
+          import json
+          with open('package.json', 'r', encoding='utf-8') as f:
+              print(json.load(f)['version'])
+          PY
+          )
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Commit, tag, and push
         env:
