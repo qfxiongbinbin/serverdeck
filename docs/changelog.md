@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.17
+
+Compared with `v0.0.16`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Avoid local terminal selection on open
+
 ## v0.0.16
 
 Compared with `v0.0.15`.
