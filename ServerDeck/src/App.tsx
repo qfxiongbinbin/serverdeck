@@ -13,6 +13,7 @@ import {
   Activity,
   ArrowLeft,
   Bot,
+  Home,
   ChevronRight,
   Copy,
   Download,
@@ -108,6 +109,7 @@ import {
   type TerminalThemePreset
 } from "./data/terminalThemes";
 
+const HOME_TAB_ID = "home";
 const HOSTS_TAB_ID = "hosts";
 const SFTP_TAB_ID = "sftp";
 const AGENT_TAB_ID = "agent";
@@ -772,7 +774,7 @@ export default function App() {
   const detachedSettingsWindow = isSettingsWindowView();
   const preferenceSyncSource = detachedSettingsWindow ? "settings" : "main";
 
-  const [activeTabId, setActiveTabId] = useState(() => (detachedSettingsWindow ? SETTINGS_TAB_ID : HOSTS_TAB_ID));
+  const [activeTabId, setActiveTabId] = useState(() => (detachedSettingsWindow ? SETTINGS_TAB_ID : HOME_TAB_ID));
   const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
   const [monitorTabs, setMonitorTabs] = useState<MonitorTab[]>([]);
   const [hosts, setHosts] = useState<SavedHost[]>([]);
@@ -853,12 +855,13 @@ export default function App() {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalDecodersRef = useRef<Map<string, TextDecoder>>(new Map());
   const terminalBuffersRef = useRef<Map<string, string[]>>(new Map());
-  const activeTabIdRef = useRef(HOSTS_TAB_ID);
-  const previousTabIdRef = useRef(HOSTS_TAB_ID);
+  const activeTabIdRef = useRef(HOME_TAB_ID);
+  const previousTabIdRef = useRef(HOME_TAB_ID);
   const terminalTabsRef = useRef<TerminalTab[]>([]);
   const monitorTabsRef = useRef<MonitorTab[]>([]);
   const skipPreferenceSyncRef = useRef(false);
 
+  const isHomeView = activeTabId === HOME_TAB_ID;
   const isHostsView = activeTabId === HOSTS_TAB_ID;
   const isSftpView = activeTabId === SFTP_TAB_ID;
   const isAgentView = activeTabId === AGENT_TAB_ID;
@@ -2454,7 +2457,7 @@ export default function App() {
   }
 
   function closeSettings() {
-    const fallbackTabId = previousTabIdRef.current === SETTINGS_TAB_ID ? HOSTS_TAB_ID : previousTabIdRef.current;
+    const fallbackTabId = previousTabIdRef.current === SETTINGS_TAB_ID ? HOME_TAB_ID : previousTabIdRef.current;
     setActiveTabId(fallbackTabId);
   }
 
@@ -3286,7 +3289,7 @@ export default function App() {
     const nextTabs = currentTabs.filter((tab) => tab.id !== tabId);
     const nextActiveTabId =
       activeTabIdRef.current === tabId
-        ? nextTabs[targetIndex]?.id ?? nextTabs[targetIndex - 1]?.id ?? HOSTS_TAB_ID
+        ? nextTabs[targetIndex]?.id ?? nextTabs[targetIndex - 1]?.id ?? HOME_TAB_ID
         : activeTabIdRef.current;
 
     setTerminalTabs(nextTabs);
@@ -3390,7 +3393,7 @@ export default function App() {
 
     const targetTab = currentTabs[targetIndex];
     const nextTabs = currentTabs.filter((tab) => tab.id !== tabId);
-    const nextActiveTabId = activeTabIdRef.current === tabId ? HOSTS_TAB_ID : activeTabIdRef.current;
+    const nextActiveTabId = activeTabIdRef.current === tabId ? HOME_TAB_ID : activeTabIdRef.current;
 
     setMonitorTabs(nextTabs);
     setActiveTabId(nextActiveTabId);
@@ -3482,33 +3485,6 @@ export default function App() {
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-          </button>
-
-          <button
-            type="button"
-            className={`top-tab ${isHostsView ? "top-tab--active" : ""}`}
-            onClick={() => setActiveTabId(HOSTS_TAB_ID)}
-          >
-            <Server size={16} />
-            {messages.hosts}
-          </button>
-
-          <button
-            type="button"
-            className={`top-tab ${isSftpView ? "top-tab--active" : ""}`}
-            onClick={() => setActiveTabId(SFTP_TAB_ID)}
-          >
-            <FolderOpen size={16} />
-            {messages.sftp}
-          </button>
-
-          <button
-            type="button"
-            className={`top-tab ${isAgentView ? "top-tab--active" : ""}`}
-            onClick={() => setActiveTabId(AGENT_TAB_ID)}
-          >
-            <Bot size={16} />
-            {messages.agent}
           </button>
 
           {terminalTabs.map((tab) => (
@@ -3647,11 +3623,29 @@ export default function App() {
           <div className="sidebar__top">
             <button
               type="button"
+              className={`side-nav ${isHomeView ? "side-nav--active" : ""}`}
+              onClick={() => setActiveTabId(HOME_TAB_ID)}
+            >
+              <Home size={18} />
+              <span>{messages.home}</span>
+            </button>
+
+            <button
+              type="button"
               className={`side-nav ${isHostsView ? "side-nav--active" : ""}`}
               onClick={() => setActiveTabId(HOSTS_TAB_ID)}
             >
               <Server size={18} />
-              <span>Hosts</span>
+              <span>{messages.hosts}</span>
+            </button>
+
+            <button
+              type="button"
+              className={`side-nav ${isSftpView ? "side-nav--active" : ""}`}
+              onClick={() => setActiveTabId(SFTP_TAB_ID)}
+            >
+              <FolderOpen size={18} />
+              <span>{messages.sftp}</span>
             </button>
 
             <button
@@ -3688,7 +3682,53 @@ export default function App() {
         </aside>
 
         <main className="mainpane">
-          {isHostsView ? (
+          {isHomeView ? (
+            <section className="home-screen">
+              <div className="home-screen__inner">
+                <div className="home-screen__badge">SD</div>
+                <h1>ServerDeck</h1>
+                <p>{messages.homeDescription}</p>
+
+                <div className="home-screen__actions">
+                  <button type="button" className="primary-button" onClick={() => setActiveTabId(HOSTS_TAB_ID)}>
+                    <Server size={16} />
+                    {messages.hosts}
+                  </button>
+                  <button type="button" className="secondary-button" onClick={() => setActiveTabId(SFTP_TAB_ID)}>
+                    <FolderOpen size={16} />
+                    {messages.sftp}
+                  </button>
+                  <button type="button" className="secondary-button" onClick={() => setActiveTabId(AGENT_TAB_ID)}>
+                    <Bot size={16} />
+                    {messages.agent}
+                  </button>
+                  <button type="button" className="secondary-button" onClick={() => void handleOpenLocalTerminal({ source: "default" })}>
+                    <Plus size={16} />
+                    {messages.localTerminal}
+                  </button>
+                </div>
+
+                <div className="home-screen__stats">
+                  <div className="home-stat-card">
+                    <strong>{projects.length}</strong>
+                    <span>{messages.projects}</span>
+                  </div>
+                  <div className="home-stat-card">
+                    <strong>{hosts.length}</strong>
+                    <span>{messages.hosts}</span>
+                  </div>
+                  <div className="home-stat-card">
+                    <strong>{terminalTabs.length}</strong>
+                    <span>{messages.terminal}</span>
+                  </div>
+                  <div className="home-stat-card">
+                    <strong>{agentSessions.length}</strong>
+                    <span>{messages.agentSessions}</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : isHostsView ? (
             <section className="hosts-screen">
               <div className="hosts-toolbar">
                 <div className="searchbar">

@@ -100,6 +100,8 @@ type Messages = {
   monitorInfoCopied: string;
   copied: string;
   copyServerInfo: string;
+  home: string;
+  homeDescription: string;
   hosts: string;
   sftp: string;
   newTab: string;
@@ -425,6 +427,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     monitorInfoCopied: "Server info copied",
     copied: "Copied",
     copyServerInfo: "Copy Server Info",
+    home: "Home",
+    homeDescription: "Start from one clear place, then jump into hosts, SFTP, agent, or a local terminal.",
     hosts: "Hosts",
     sftp: "SFTP",
     newTab: "New Tab",
@@ -748,6 +752,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     monitorInfoCopied: "已复制服务器信息",
     copied: "已复制",
     copyServerInfo: "一键复制配置信息",
+    home: "首页",
+    homeDescription: "先从一个清晰入口开始，再进入主机、SFTP、Agent 或本地终端。",
     hosts: "主机",
     sftp: "SFTP",
     newTab: "新标签页",
@@ -1071,6 +1077,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     monitorInfoCopied: "サーバー情報をコピーしました",
     copied: "コピー済み",
     copyServerInfo: "設定情報をコピー",
+    home: "ホーム",
+    homeDescription: "まずは分かりやすい入口から始めて、そこから Hosts、SFTP、Agent、ローカルターミナルへ進みます。",
     hosts: "ホスト",
     sftp: "SFTP",
     newTab: "新しいタブ",
