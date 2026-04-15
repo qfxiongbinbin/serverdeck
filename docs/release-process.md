@@ -39,10 +39,14 @@ After a pull request is merged into `main`, the workflow at `.github/workflows/a
 - prepend release notes to `docs/changelog.md`
 - commit the release change back to `main`
 - create and push the matching `v*` tag
+- build the macOS app
+- publish the GitHub Release and upload artifacts
 
-## 3. GitHub Actions builds the release
+## 3. Manual fallback release workflow
 
-Once the auto-release workflow pushes the new tag, `.github/workflows/release.yml` runs on tags matching `v*`.
+The repository still keeps `.github/workflows/release.yml` as a manual fallback workflow.
+
+Use it only when you need to rebuild or republish a specific tag by hand.
 
 It will:
 
@@ -70,6 +74,7 @@ The matching updater public key is embedded in `ServerDeck/src-tauri/tauri.conf.
   - `feat:` -> `Added`
   - `fix:` -> `Fixed`
   - everything else -> `Changed`
+- Release build and GitHub Release publishing now happen inside the same auto-release workflow, so they do not depend on one workflow triggering another.
 
 ## 5. Client update behavior
 
