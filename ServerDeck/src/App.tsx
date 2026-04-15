@@ -287,6 +287,13 @@ function getTerminalControlSequence(event: KeyboardEvent) {
   }
 }
 
+// author: BrianXiong
+// time: 2026/04/15/17:58:00
+function isTerminalViewportNearBottom(terminal: Terminal) {
+  const activeBuffer = terminal.buffer.active;
+  return activeBuffer.baseY - activeBuffer.viewportY <= 1;
+}
+
 const blankProject: ManagedProject = {
   id: "",
   name: "",
@@ -2057,7 +2064,12 @@ export default function App() {
     fitAddonRef.current = fitAddon;
 
     if (activeTerminalTab.buffer.length > 0) {
-      terminal.write(activeTerminalTab.buffer.join(""));
+      const shouldStickToBottom = isTerminalViewportNearBottom(terminal);
+      terminal.write(activeTerminalTab.buffer.join(""), () => {
+        if (shouldStickToBottom) {
+          terminal.scrollToBottom();
+        }
+      });
     }
 
     const disposable = terminal.onData((data) => {
@@ -2071,8 +2083,12 @@ export default function App() {
       }
 
       frameId = window.requestAnimationFrame(() => {
+        const shouldStickToBottom = isTerminalViewportNearBottom(terminal);
         fitAddon.fit();
         terminal.refresh(0, Math.max(terminal.rows - 1, 0));
+        if (shouldStickToBottom) {
+          terminal.scrollToBottom();
+        }
         void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
         frameId = null;
       });
@@ -2166,7 +2182,12 @@ export default function App() {
       );
 
       if (activeTabIdRef.current === matchingTab.id && terminalRef.current) {
-        terminalRef.current.write(chunk);
+        const shouldStickToBottom = isTerminalViewportNearBottom(terminalRef.current);
+        terminalRef.current.write(chunk, () => {
+          if (shouldStickToBottom) {
+            terminalRef.current?.scrollToBottom();
+          }
+        });
       }
     })
       .then((unlisten) => {
