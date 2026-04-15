@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.25
+
+Compared with `v0.0.24`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Prioritize agent on home and sidebar
+
 ## v0.0.24
 
 Compared with `v0.0.23`.
