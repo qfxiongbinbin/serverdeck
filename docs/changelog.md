@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.21
+
+Compared with `v0.0.20`.
+
+### Added
+
+- Add home view and simplify navigation
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.20
 
 Compared with `v0.0.19`.
