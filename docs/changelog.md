@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.20
+
+Compared with `v0.0.19`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Prevent terminal output overflow when opening sftp
+
 ## v0.0.19
 
 Compared with `v0.0.18`.
