@@ -4743,21 +4743,25 @@ export default function App() {
                   <span className="preview-switch__label">{messages.preview}</span>
                 </label>
               </div>
-              <div
-                className="terminal-frame"
-                ref={handleTerminalMount}
-                onMouseDown={() => terminalRef.current?.focus()}
-                style={{ background: activeTerminalTheme.theme.background }}
-              />
+              <div className="terminal-frame-shell" style={{ background: activeTerminalTheme.theme.background }}>
+                <div
+                  className="terminal-frame"
+                  ref={handleTerminalMount}
+                  onMouseDown={() => terminalRef.current?.focus()}
+                  style={{ background: activeTerminalTheme.theme.background }}
+                />
+              </div>
             </section>
           ) : (
             <section className="terminal-screen" style={{ background: activeTerminalTheme.theme.background }}>
-              <div
-                className="terminal-frame"
-                ref={handleTerminalMount}
-                onMouseDown={() => terminalRef.current?.focus()}
-                style={{ background: activeTerminalTheme.theme.background }}
-              />
+              <div className="terminal-frame-shell" style={{ background: activeTerminalTheme.theme.background }}>
+                <div
+                  className="terminal-frame"
+                  ref={handleTerminalMount}
+                  onMouseDown={() => terminalRef.current?.focus()}
+                  style={{ background: activeTerminalTheme.theme.background }}
+                />
+              </div>
             </section>
           )}
         </main>

@@ -271,12 +271,14 @@ export function LocalTerminalWorkspace({
         </div>
       ) : (
         <div className="local-terminal-workspace__terminal-pane">
-          <div
-            className="terminal-frame terminal-frame--workspace"
-            ref={onTerminalMount}
-            onMouseDown={onFocusTerminal}
-            style={{ background: terminalBackground }}
-          />
+          <div className="terminal-frame-shell terminal-frame-shell--workspace" style={{ background: terminalBackground }}>
+            <div
+              className="terminal-frame terminal-frame--workspace"
+              ref={onTerminalMount}
+              onMouseDown={onFocusTerminal}
+              style={{ background: terminalBackground }}
+            />
+          </div>
         </div>
       )}
     </section>
