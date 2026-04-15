@@ -1,9 +1,11 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example v0.0.16"
+        required: true
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -21,7 +23,7 @@ jobs:
       - name: Generate release notes
         id: release_notes
         run: |
-          node ServerDeck/scripts/generate-release-notes.mjs "${{ github.ref_name }}" > release-notes.md
+          node ServerDeck/scripts/generate-release-notes.mjs "${{ inputs.tag }}" > release-notes.md
           {
             echo 'body<<EOF'
             cat release-notes.md
@@ -50,8 +52,8 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: ServerDeck
-          tagName: ${{ github.ref_name }}
-          releaseName: ServerDeck ${{ github.ref_name }}
+          tagName: ${{ inputs.tag }}
+          releaseName: ServerDeck ${{ inputs.tag }}
           releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: false
           prerelease: false
