@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.22
+
+Compared with `v0.0.21`.
+
+### Added
+
+- None
+
+### Changed
+
+- V0.0.21
+
+### Fixed
+
+- None
+
 ## v0.0.21
 
 Compared with `v0.0.20`.
