@@ -3711,20 +3711,6 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="home-screen__stats">
-                  <div className="home-stat-card">
-                    <strong>{settings.projects.length}</strong>
-                    <span>{messages.projects}</span>
-                  </div>
-                  <div className="home-stat-card">
-                    <strong>{hosts.length}</strong>
-                    <span>{messages.hosts}</span>
-                  </div>
-                  <div className="home-stat-card">
-                    <strong>{terminalTabs.length}</strong>
-                    <span>{messages.terminal}</span>
-                  </div>
-                </div>
               </div>
             </section>
           ) : isHostsView ? (
