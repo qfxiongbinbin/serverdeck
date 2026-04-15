@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.16
+
+Compared with `v0.0.15`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Build release in auto-release workflow
+
 ## v0.0.15
 
 Compared with `v0.0.14`.
