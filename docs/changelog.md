@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.24
+
+Compared with `v0.0.23`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Refine home page logo and terminal entry
+
 ## v0.0.23
 
 Compared with `v0.0.22`.
