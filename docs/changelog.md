@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.26
+
+Compared with `v0.0.25`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Remove home stats cards
+
 ## v0.0.25
 
 Compared with `v0.0.24`.
