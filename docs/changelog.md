@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.23
+
+Compared with `v0.0.22`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Use settings projects on home screen
+
 ## v0.0.22
 
 Compared with `v0.0.21`.
