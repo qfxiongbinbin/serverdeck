@@ -149,7 +149,6 @@ type TerminalTab = {
   host: SavedHost | null;
   state: TerminalState;
   statusText: string;
-  buffer: string[];
 };
 
 type MonitorTab = {
@@ -292,6 +291,23 @@ function getTerminalControlSequence(event: KeyboardEvent) {
 function isTerminalViewportNearBottom(terminal: Terminal) {
   const activeBuffer = terminal.buffer.active;
   return activeBuffer.baseY - activeBuffer.viewportY <= 1;
+}
+
+const MAX_TERMINAL_BUFFER_CHUNKS = 800;
+const MAX_TERMINAL_BUFFER_CHARS = 400_000;
+
+// author: BrianXiong
+// time: 2026/04/15/18:20:00
+function appendTerminalBufferChunk(buffer: string[], chunk: string) {
+  const nextBuffer = [...buffer, chunk];
+  let totalChars = nextBuffer.reduce((sum, item) => sum + item.length, 0);
+
+  while (nextBuffer.length > MAX_TERMINAL_BUFFER_CHUNKS || totalChars > MAX_TERMINAL_BUFFER_CHARS) {
+    const removed = nextBuffer.shift();
+    totalChars -= removed?.length ?? 0;
+  }
+
+  return nextBuffer;
 }
 
 const blankProject: ManagedProject = {
@@ -836,6 +852,7 @@ export default function App() {
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalDecodersRef = useRef<Map<string, TextDecoder>>(new Map());
+  const terminalBuffersRef = useRef<Map<string, string[]>>(new Map());
   const activeTabIdRef = useRef(HOSTS_TAB_ID);
   const previousTabIdRef = useRef(HOSTS_TAB_ID);
   const terminalTabsRef = useRef<TerminalTab[]>([]);
@@ -2063,9 +2080,10 @@ export default function App() {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    if (activeTerminalTab.buffer.length > 0) {
+    const bufferedOutput = terminalBuffersRef.current.get(activeTerminalTab.sessionId) ?? [];
+    if (bufferedOutput.length > 0) {
       const shouldStickToBottom = isTerminalViewportNearBottom(terminal);
-      terminal.write(activeTerminalTab.buffer.join(""), () => {
+      terminal.write(bufferedOutput.join(""), () => {
         if (shouldStickToBottom) {
           terminal.scrollToBottom();
         }
@@ -2173,13 +2191,18 @@ export default function App() {
           ? messages.connected
           : matchingTab.statusText;
 
-      setTerminalTabs((prev) =>
-        prev.map((tab) =>
-          tab.sessionId === event.payload.sessionId
-            ? { ...tab, state: nextState, statusText: nextStatusText, buffer: [...tab.buffer, chunk] }
-            : tab
-        )
-      );
+      const existingBuffer = terminalBuffersRef.current.get(event.payload.sessionId) ?? [];
+      terminalBuffersRef.current.set(event.payload.sessionId, appendTerminalBufferChunk(existingBuffer, chunk));
+
+      if (matchingTab.state !== nextState || matchingTab.statusText !== nextStatusText) {
+        setTerminalTabs((prev) =>
+          prev.map((tab) =>
+            tab.sessionId === event.payload.sessionId
+              ? { ...tab, state: nextState, statusText: nextStatusText }
+              : tab
+          )
+        );
+      }
 
       if (activeTabIdRef.current === matchingTab.id && terminalRef.current) {
         const shouldStickToBottom = isTerminalViewportNearBottom(terminalRef.current);
@@ -3112,11 +3135,11 @@ export default function App() {
           kind: "remote",
           host: targetHost,
           state: "connecting",
-          statusText: messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port),
-          buffer: []
+          statusText: messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port)
         }
       ]);
 
+      terminalBuffersRef.current.set(sessionId, []);
       setActiveTabId(tabId);
       setDrawerOpen(false);
       setStatus(messages.terminalSessionOpened(targetHost.username, targetHost.address));
@@ -3161,11 +3184,11 @@ export default function App() {
           kind: "local",
           host: null,
           state: "connecting",
-          statusText: messages.openingLocalTerminal,
-          buffer: []
+          statusText: messages.openingLocalTerminal
         }
       ]);
 
+      terminalBuffersRef.current.set(sessionId, []);
       setActiveTabId(tabId);
       if (cwd) {
         setLocalPath(cwd);
@@ -3257,6 +3280,7 @@ export default function App() {
 
     const targetTab = currentTabs[targetIndex];
     terminalDecodersRef.current.delete(targetTab.sessionId);
+    terminalBuffersRef.current.delete(targetTab.sessionId);
     await closeTerminalSession(targetTab.sessionId);
 
     const nextTabs = currentTabs.filter((tab) => tab.id !== tabId);
