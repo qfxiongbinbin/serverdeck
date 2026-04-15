@@ -30,22 +30,19 @@ Do not fill release notes with release mechanics like version bumping, tag creat
 
 ## 2. Merge to `main`
 
-Release changes should land in `main` through a pull request.
+All changes should still land in `main` through a pull request.
 
-## 3. Create and push a tag
+After a pull request is merged into `main`, the workflow at `.github/workflows/auto-release-on-main.yml` will automatically:
 
-From a clean `main` branch:
+- bump the patch version
+- sync version files
+- prepend release notes to `docs/changelog.md`
+- commit the release change back to `main`
+- create and push the matching `v*` tag
 
-```bash
-git checkout main
-git pull --ff-only
-git tag v0.1.1
-git push origin v0.1.1
-```
+## 3. GitHub Actions builds the release
 
-## 4. GitHub Actions builds the release
-
-The workflow at `.github/workflows/release.yml` runs on tags matching `v*`.
+Once the auto-release workflow pushes the new tag, `.github/workflows/release.yml` runs on tags matching `v*`.
 
 It will:
 
@@ -64,6 +61,15 @@ Before the updater can work, configure these GitHub repository secrets:
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (optional if the key has no password)
 
 The matching updater public key is embedded in `ServerDeck/src-tauri/tauri.conf.json`.
+
+## 4. Notes about automatic release behavior
+
+- The current auto-release flow bumps the patch version on every merged pull request into `main`.
+- Release notes are generated from commit subjects since the previous tag.
+- Conventional commit prefixes are mapped as follows:
+  - `feat:` -> `Added`
+  - `fix:` -> `Fixed`
+  - everything else -> `Changed`
 
 ## 5. Client update behavior
 
