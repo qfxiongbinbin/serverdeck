@@ -2070,6 +2070,7 @@ export default function App() {
 
       frameId = window.requestAnimationFrame(() => {
         fitAddon.fit();
+        terminal.refresh(0, Math.max(terminal.rows - 1, 0));
         void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
         frameId = null;
       });
