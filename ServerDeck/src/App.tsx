@@ -109,6 +109,8 @@ import {
   type TerminalThemePreset
 } from "./data/terminalThemes";
 
+const appLogo = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
+
 const HOME_TAB_ID = "home";
 const HOSTS_TAB_ID = "hosts";
 const SFTP_TAB_ID = "sftp";
@@ -3685,9 +3687,10 @@ export default function App() {
           {isHomeView ? (
             <section className="home-screen">
               <div className="home-screen__inner">
-                <div className="home-screen__badge">SD</div>
+                <div className="home-screen__badge">
+                  <img src={appLogo} alt="ServerDeck logo" className="home-screen__logo" />
+                </div>
                 <h1>ServerDeck</h1>
-                <p>{messages.homeDescription}</p>
 
                 <div className="home-screen__actions">
                   <button type="button" className="primary-button" onClick={() => setActiveTabId(HOSTS_TAB_ID)}>
@@ -3702,7 +3705,7 @@ export default function App() {
                     <Bot size={16} />
                     {messages.agent}
                   </button>
-                  <button type="button" className="secondary-button" onClick={() => void handleOpenLocalTerminal({ source: "default" })}>
+                  <button type="button" className="secondary-button" onClick={() => void handleOpenPickedDirectoryTerminal()}>
                     <Plus size={16} />
                     {messages.localTerminal}
                   </button>
