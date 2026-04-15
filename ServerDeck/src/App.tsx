@@ -3710,7 +3710,7 @@ export default function App() {
 
                 <div className="home-screen__stats">
                   <div className="home-stat-card">
-                    <strong>{projects.length}</strong>
+                    <strong>{settings.projects.length}</strong>
                     <span>{messages.projects}</span>
                   </div>
                   <div className="home-stat-card">
