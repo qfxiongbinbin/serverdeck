@@ -2039,7 +2039,9 @@ export default function App() {
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(terminalMountNode);
-    terminal.focus();
+    const clearSelectionFrame = window.requestAnimationFrame(() => {
+      terminal.clearSelection();
+    });
     terminal.attachCustomKeyEventHandler((event) => {
       const sequence = getTerminalControlSequence(event);
       if (!sequence) {
@@ -2088,6 +2090,7 @@ export default function App() {
       if (frameId !== null) {
         window.cancelAnimationFrame(frameId);
       }
+      window.cancelAnimationFrame(clearSelectionFrame);
       disposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
