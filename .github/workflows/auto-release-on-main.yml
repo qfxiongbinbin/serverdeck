@@ -1,0 +1,54 @@
+name: Auto Release On Main Merge
+
+on:
+  pull_request_target:
+    types:
+      - closed
+
+permissions:
+  contents: write
+
+jobs:
+  auto-release:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Prepare next release version
+        working-directory: ServerDeck
+        run: node ./scripts/auto-release-on-main.mjs
+
+      - name: Read version
+        id: version
+        working-directory: ServerDeck
+        run: |
+          echo "version=$(node -e \"console.log(require('./package.json').version)\")" >> "$GITHUB_OUTPUT"
+
+      - name: Commit, tag, and push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git add ServerDeck/package.json \
+            ServerDeck/package-lock.json \
+            ServerDeck/src-tauri/Cargo.toml \
+            ServerDeck/src-tauri/tauri.conf.json \
+            docs/changelog.md
+          git commit -m "chore(release): v${VERSION}"
+          git tag "v${VERSION}"
+          git push origin main
+          git push origin "v${VERSION}"
