@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.19
+
+Compared with `v0.0.18`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Keep terminal viewport at bottom on enter
+
 ## v0.0.18
 
 Compared with `v0.0.17`.
