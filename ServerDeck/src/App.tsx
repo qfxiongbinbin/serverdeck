@@ -3634,6 +3634,15 @@ export default function App() {
 
             <button
               type="button"
+              className={`side-nav ${isAgentView ? "side-nav--active" : ""}`}
+              onClick={() => setActiveTabId(AGENT_TAB_ID)}
+            >
+              <Bot size={18} />
+              <span>{messages.agent}</span>
+            </button>
+
+            <button
+              type="button"
               className={`side-nav ${isHostsView ? "side-nav--active" : ""}`}
               onClick={() => setActiveTabId(HOSTS_TAB_ID)}
             >
@@ -3648,15 +3657,6 @@ export default function App() {
             >
               <FolderOpen size={18} />
               <span>{messages.sftp}</span>
-            </button>
-
-            <button
-              type="button"
-              className={`side-nav ${isAgentView ? "side-nav--active" : ""}`}
-              onClick={() => setActiveTabId(AGENT_TAB_ID)}
-            >
-              <Bot size={18} />
-              <span>{messages.agent}</span>
             </button>
           </div>
 
@@ -3693,17 +3693,17 @@ export default function App() {
                 <h1>ServerDeck</h1>
 
                 <div className="home-screen__actions">
-                  <button type="button" className="primary-button" onClick={() => setActiveTabId(HOSTS_TAB_ID)}>
+                  <button type="button" className="primary-button" onClick={() => setActiveTabId(AGENT_TAB_ID)}>
+                    <Bot size={16} />
+                    {messages.agent}
+                  </button>
+                  <button type="button" className="secondary-button" onClick={() => setActiveTabId(HOSTS_TAB_ID)}>
                     <Server size={16} />
                     {messages.hosts}
                   </button>
                   <button type="button" className="secondary-button" onClick={() => setActiveTabId(SFTP_TAB_ID)}>
                     <FolderOpen size={16} />
                     {messages.sftp}
-                  </button>
-                  <button type="button" className="secondary-button" onClick={() => setActiveTabId(AGENT_TAB_ID)}>
-                    <Bot size={16} />
-                    {messages.agent}
                   </button>
                   <button type="button" className="secondary-button" onClick={() => void handleOpenPickedDirectoryTerminal()}>
                     <Plus size={16} />
@@ -3723,10 +3723,6 @@ export default function App() {
                   <div className="home-stat-card">
                     <strong>{terminalTabs.length}</strong>
                     <span>{messages.terminal}</span>
-                  </div>
-                  <div className="home-stat-card">
-                    <strong>{agentSessions.length}</strong>
-                    <span>{messages.agentSessions}</span>
                   </div>
                 </div>
               </div>
