@@ -2082,7 +2082,13 @@ export default function App() {
       clearDocumentSelection();
       terminal.focus();
     });
+    let isTerminalComposing = false;
+
     terminal.attachCustomKeyEventHandler((event) => {
+      if (event.isComposing || event.keyCode === 229) {
+        return true;
+      }
+
       const sequence = getTerminalControlSequence(event);
       if (!sequence) {
         return true;
@@ -2107,18 +2113,19 @@ export default function App() {
     }
 
     const terminalTextarea = terminal.textarea;
-    const handleTerminalBlur = () => {
-      window.requestAnimationFrame(() => {
-        terminal.clearSelection();
-        clearDocumentSelection();
-      });
+    const handleCompositionStart = () => {
+      isTerminalComposing = true;
     };
-    terminalTextarea?.addEventListener("blur", handleTerminalBlur);
+    const handleCompositionEnd = () => {
+      isTerminalComposing = false;
+    };
+    terminalTextarea?.addEventListener("compositionstart", handleCompositionStart);
+    terminalTextarea?.addEventListener("compositionend", handleCompositionEnd);
 
     const disposable = terminal.onData((data) => {
       sendActiveTerminalInput(data);
 
-      if (data === "\r") {
+      if (data === "\r" && !isTerminalComposing) {
         window.requestAnimationFrame(() => {
           terminal.focus();
           terminal.clearSelection();
@@ -2159,7 +2166,8 @@ export default function App() {
       }
       window.cancelAnimationFrame(clearSelectionFrame);
       disposable.dispose();
-      terminalTextarea?.removeEventListener("blur", handleTerminalBlur);
+      terminalTextarea?.removeEventListener("compositionstart", handleCompositionStart);
+      terminalTextarea?.removeEventListener("compositionend", handleCompositionEnd);
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
