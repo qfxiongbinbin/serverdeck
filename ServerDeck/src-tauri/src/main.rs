@@ -782,6 +782,8 @@ fn parse_toml_string_value(content: &str, key: &str) -> Option<String> {
 // author: BrianXiong
 // time: 2026/04/05/16:45:00
 fn apply_local_terminal_utf8_env(cmd: &mut CommandBuilder) {
+    let preferred_utf8_locale = "en_US.UTF-8";
+
     let needs_utf8_locale = cmd
         .get_env("LANG")
         .and_then(|value| value.to_str())
@@ -789,7 +791,7 @@ fn apply_local_terminal_utf8_env(cmd: &mut CommandBuilder) {
         .unwrap_or(true);
 
     if needs_utf8_locale {
-        cmd.env("LANG", "en_US.UTF-8");
+        cmd.env("LANG", preferred_utf8_locale);
     }
 
     let needs_utf8_ctype = cmd
@@ -799,11 +801,25 @@ fn apply_local_terminal_utf8_env(cmd: &mut CommandBuilder) {
         .unwrap_or(true);
 
     if needs_utf8_ctype {
-        cmd.env("LC_CTYPE", "en_US.UTF-8");
+        cmd.env("LC_CTYPE", preferred_utf8_locale);
+    }
+
+    let needs_utf8_all = cmd
+        .get_env("LC_ALL")
+        .and_then(|value| value.to_str())
+        .map(|value| !value.to_ascii_uppercase().contains("UTF-8"))
+        .unwrap_or(true);
+
+    if needs_utf8_all {
+        cmd.env("LC_ALL", preferred_utf8_locale);
     }
 
     if cmd.get_env("TERM").is_none() {
         cmd.env("TERM", "xterm-256color");
+    }
+
+    if cmd.get_env("COLORTERM").is_none() {
+        cmd.env("COLORTERM", "truecolor");
     }
 }
 
