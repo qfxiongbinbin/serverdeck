@@ -12,6 +12,15 @@ export type ModelOption = {
   model: string;
 };
 
+function clearDocumentSelection() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return;
+  }
+
+  selection.removeAllRanges();
+}
+
 type AgentWorkspaceProps = {
   title: string;
   description: string;
@@ -198,6 +207,7 @@ export function AgentWorkspace({
       node.focus({ preventScroll: true });
       const cursor = node.value.length;
       node.setSelectionRange(cursor, cursor);
+      clearDocumentSelection();
     });
   }, [activeSessionDetail?.session.id, composerValue, createBusy, latestMessageSignature, sendBusy]);
 
@@ -574,6 +584,7 @@ export function AgentWorkspace({
                 rows={3}
                 value={composerValue}
                 onKeyDown={handleComposerKeyDown}
+                onBlur={() => clearDocumentSelection()}
                 onChange={(event) => {
                   if (activeSessionDetail) {
                     onFollowUpInputChange(event.target.value);
