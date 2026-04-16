@@ -2,6 +2,23 @@
 
 This file records release notes for each published version.
 
+## v0.0.27
+
+Compared with `v0.0.26`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Keep terminal focused after enter
+- Clear agent input selection after send
+
 ## v0.0.26
 
 Compared with `v0.0.25`.
