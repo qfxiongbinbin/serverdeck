@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.28
+
+Compared with `v0.0.27`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Allow ime input in terminal
+
 ## v0.0.27
 
 Compared with `v0.0.26`.
