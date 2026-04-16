@@ -297,15 +297,6 @@ function isTerminalViewportNearBottom(terminal: Terminal) {
   return activeBuffer.baseY - activeBuffer.viewportY <= 1;
 }
 
-function clearDocumentSelection() {
-  const selection = window.getSelection();
-  if (!selection || selection.rangeCount === 0) {
-    return;
-  }
-
-  selection.removeAllRanges();
-}
-
 const MAX_TERMINAL_BUFFER_CHUNKS = 800;
 const MAX_TERMINAL_BUFFER_CHARS = 400_000;
 
@@ -2079,16 +2070,8 @@ export default function App() {
     terminal.open(terminalMountNode);
     const clearSelectionFrame = window.requestAnimationFrame(() => {
       terminal.clearSelection();
-      clearDocumentSelection();
-      terminal.focus();
     });
-    let isTerminalComposing = false;
-
     terminal.attachCustomKeyEventHandler((event) => {
-      if (event.isComposing || event.keyCode === 229) {
-        return true;
-      }
-
       const sequence = getTerminalControlSequence(event);
       if (!sequence) {
         return true;
@@ -2112,26 +2095,8 @@ export default function App() {
       });
     }
 
-    const terminalTextarea = terminal.textarea;
-    const handleCompositionStart = () => {
-      isTerminalComposing = true;
-    };
-    const handleCompositionEnd = () => {
-      isTerminalComposing = false;
-    };
-    terminalTextarea?.addEventListener("compositionstart", handleCompositionStart);
-    terminalTextarea?.addEventListener("compositionend", handleCompositionEnd);
-
     const disposable = terminal.onData((data) => {
       sendActiveTerminalInput(data);
-
-      if (data === "\r" && !isTerminalComposing) {
-        window.requestAnimationFrame(() => {
-          terminal.focus();
-          terminal.clearSelection();
-          clearDocumentSelection();
-        });
-      }
     });
 
     let frameId: number | null = null;
@@ -2166,8 +2131,6 @@ export default function App() {
       }
       window.cancelAnimationFrame(clearSelectionFrame);
       disposable.dispose();
-      terminalTextarea?.removeEventListener("compositionstart", handleCompositionStart);
-      terminalTextarea?.removeEventListener("compositionend", handleCompositionEnd);
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
