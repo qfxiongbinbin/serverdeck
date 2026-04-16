@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.29
+
+Compared with `v0.0.28`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Set utf8 locale for terminal apps
+
 ## v0.0.28
 
 Compared with `v0.0.27`.
