@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.30
+
+Compared with `v0.0.29`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Revert broken IME input handling code
+
 ## v0.0.29
 
 Compared with `v0.0.28`.
