@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.31
+
+Compared with `v0.0.30`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Stabilize local terminal scroll sync
+
 ## v0.0.30
 
 Compared with `v0.0.29`.
