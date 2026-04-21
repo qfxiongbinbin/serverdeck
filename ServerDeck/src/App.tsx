@@ -204,6 +204,7 @@ type TransferJob = {
 };
 
 type TerminalCharset = "utf-8" | "gb18030" | "gbk" | "big5";
+type TerminalViewportSyncMode = "immediate" | "resize";
 
 type AppSettings = {
   appTheme: "light" | "dark";
@@ -299,6 +300,7 @@ function isTerminalViewportNearBottom(terminal: Terminal) {
 
 const MAX_TERMINAL_BUFFER_CHUNKS = 800;
 const MAX_TERMINAL_BUFFER_CHARS = 400_000;
+const TERMINAL_VIEWPORT_RESIZE_DEBOUNCE_MS = 80;
 
 // author: BrianXiong
 // time: 2026/04/15/18:20:00
@@ -857,6 +859,10 @@ export default function App() {
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalDecodersRef = useRef<Map<string, TextDecoder>>(new Map());
   const terminalBuffersRef = useRef<Map<string, string[]>>(new Map());
+  const terminalShouldStickToBottomRef = useRef(true);
+  const terminalWriteQueueRef = useRef<string[]>([]);
+  const terminalWriteFrameRef = useRef<number | null>(null);
+  const terminalViewportSyncRef = useRef<((mode: TerminalViewportSyncMode) => void) | null>(null);
   const activeTabIdRef = useRef(HOME_TAB_ID);
   const previousTabIdRef = useRef(HOME_TAB_ID);
   const terminalTabsRef = useRef<TerminalTab[]>([]);
@@ -935,6 +941,53 @@ export default function App() {
       return payload.data ?? "";
     },
     [settings.terminalCharset]
+  );
+
+  // author: BrianXiong
+  // time: 2026/04/21/11:06:00
+  const flushActiveTerminalOutput = useCallback(() => {
+    if (terminalWriteFrameRef.current !== null) {
+      return;
+    }
+
+    terminalWriteFrameRef.current = window.requestAnimationFrame(() => {
+      terminalWriteFrameRef.current = null;
+
+      const terminal = terminalRef.current;
+      if (!terminal) {
+        terminalWriteQueueRef.current = [];
+        return;
+      }
+
+      const queuedChunks = terminalWriteQueueRef.current;
+      if (queuedChunks.length === 0) {
+        return;
+      }
+
+      terminalWriteQueueRef.current = [];
+      const nextOutput = queuedChunks.join("");
+      const shouldStickToBottom = terminalShouldStickToBottomRef.current || isTerminalViewportNearBottom(terminal);
+
+      terminal.write(nextOutput, () => {
+        if (shouldStickToBottom) {
+          terminal.scrollToBottom();
+          terminalShouldStickToBottomRef.current = true;
+          return;
+        }
+
+        terminalShouldStickToBottomRef.current = isTerminalViewportNearBottom(terminal);
+      });
+    });
+  }, []);
+
+  // author: BrianXiong
+  // time: 2026/04/21/11:06:00
+  const enqueueActiveTerminalOutput = useCallback(
+    (chunk: string) => {
+      terminalWriteQueueRef.current.push(chunk);
+      flushActiveTerminalOutput();
+    },
+    [flushActiveTerminalOutput]
   );
 
   const appThemeOptions = useMemo(
@@ -2056,6 +2109,7 @@ export default function App() {
       return;
     }
 
+    const activeTerminalSessionId = activeTerminalTab.sessionId;
     terminalMountNode.innerHTML = "";
 
     const terminal = new Terminal({
@@ -2084,53 +2138,105 @@ export default function App() {
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    terminalShouldStickToBottomRef.current = true;
+    terminalWriteQueueRef.current = [];
 
     const bufferedOutput = terminalBuffersRef.current.get(activeTerminalTab.sessionId) ?? [];
     if (bufferedOutput.length > 0) {
-      const shouldStickToBottom = isTerminalViewportNearBottom(terminal);
       terminal.write(bufferedOutput.join(""), () => {
-        if (shouldStickToBottom) {
-          terminal.scrollToBottom();
-        }
+        terminal.scrollToBottom();
+        terminalShouldStickToBottomRef.current = true;
       });
     }
 
     const disposable = terminal.onData((data) => {
       sendActiveTerminalInput(data);
     });
+    const scrollDisposable = terminal.onScroll(() => {
+      terminalShouldStickToBottomRef.current = isTerminalViewportNearBottom(terminal);
+    });
 
     let frameId: number | null = null;
-    const syncTerminalViewport = () => {
+    let resizeTimerId: number | null = null;
+    let lastViewportSize = "";
+
+    // author: BrianXiong
+    // time: 2026/04/21/11:06:00
+    function runTerminalViewportSync() {
+      const shouldStickToBottom = terminalShouldStickToBottomRef.current || isTerminalViewportNearBottom(terminal);
+      fitAddon.fit();
+      terminal.refresh(0, Math.max(terminal.rows - 1, 0));
+      if (shouldStickToBottom) {
+        terminal.scrollToBottom();
+        terminalShouldStickToBottomRef.current = true;
+      } else {
+        terminalShouldStickToBottomRef.current = isTerminalViewportNearBottom(terminal);
+      }
+
+      const nextViewportSize = `${terminal.cols}x${terminal.rows}`;
+      if (nextViewportSize !== lastViewportSize) {
+        lastViewportSize = nextViewportSize;
+        void resizeTerminalSession(activeTerminalSessionId, terminal.cols, terminal.rows);
+      }
+    }
+
+    // author: BrianXiong
+    // time: 2026/04/21/11:06:00
+    function requestTerminalViewportSyncFrame() {
       if (frameId !== null) {
         window.cancelAnimationFrame(frameId);
       }
 
       frameId = window.requestAnimationFrame(() => {
-        const shouldStickToBottom = isTerminalViewportNearBottom(terminal);
-        fitAddon.fit();
-        terminal.refresh(0, Math.max(terminal.rows - 1, 0));
-        if (shouldStickToBottom) {
-          terminal.scrollToBottom();
-        }
-        void resizeTerminalSession(activeTerminalTab.sessionId, terminal.cols, terminal.rows);
+        runTerminalViewportSync();
         frameId = null;
       });
-    };
+    }
 
-    syncTerminalViewport();
+    // author: BrianXiong
+    // time: 2026/04/21/11:06:00
+    function syncTerminalViewport(mode: TerminalViewportSyncMode) {
+      if (mode === "resize") {
+        if (resizeTimerId !== null) {
+          window.clearTimeout(resizeTimerId);
+        }
+
+        resizeTimerId = window.setTimeout(() => {
+          resizeTimerId = null;
+          requestTerminalViewportSyncFrame();
+        }, TERMINAL_VIEWPORT_RESIZE_DEBOUNCE_MS);
+        return;
+      }
+
+      requestTerminalViewportSyncFrame();
+    }
+
+    terminalViewportSyncRef.current = syncTerminalViewport;
+
+    syncTerminalViewport("immediate");
 
     const resizeObserver = new ResizeObserver(() => {
-      syncTerminalViewport();
+      syncTerminalViewport("resize");
     });
     resizeObserver.observe(terminalMountNode);
 
     return () => {
       resizeObserver.disconnect();
+      if (resizeTimerId !== null) {
+        window.clearTimeout(resizeTimerId);
+      }
       if (frameId !== null) {
         window.cancelAnimationFrame(frameId);
       }
+      if (terminalWriteFrameRef.current !== null) {
+        window.cancelAnimationFrame(terminalWriteFrameRef.current);
+        terminalWriteFrameRef.current = null;
+      }
+      terminalWriteQueueRef.current = [];
+      terminalViewportSyncRef.current = null;
       window.cancelAnimationFrame(clearSelectionFrame);
       disposable.dispose();
+      scrollDisposable.dispose();
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -2151,7 +2257,7 @@ export default function App() {
     }
 
     terminalRef.current.options.fontSize = settings.terminalFontSize;
-    fitAddonRef.current?.fit();
+    terminalViewportSyncRef.current?.("immediate");
   }, [settings.terminalFontSize]);
 
   useEffect(() => {
@@ -2210,12 +2316,7 @@ export default function App() {
       }
 
       if (activeTabIdRef.current === matchingTab.id && terminalRef.current) {
-        const shouldStickToBottom = isTerminalViewportNearBottom(terminalRef.current);
-        terminalRef.current.write(chunk, () => {
-          if (shouldStickToBottom) {
-            terminalRef.current?.scrollToBottom();
-          }
-        });
+        enqueueActiveTerminalOutput(chunk);
       }
     })
       .then((unlisten) => {
@@ -2234,7 +2335,7 @@ export default function App() {
       disposed = true;
       cleanup?.();
     };
-  }, [decodeTerminalPayload, messages.connected]);
+  }, [decodeTerminalPayload, enqueueActiveTerminalOutput, messages.connected]);
 
   useEffect(() => {
     let cleanup: null | (() => void) = null;
