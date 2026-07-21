@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.32
+
+Compared with `v0.0.31`.
+
+### Added
+
+- Ssh/sftp usability and reliability improvements
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.31
 
 Compared with `v0.0.30`.
