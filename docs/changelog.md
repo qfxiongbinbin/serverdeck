@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.33
+
+Compared with `v0.0.32`.
+
+### Added
+
+- Terminal polish and sftp completeness
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.32
 
 Compared with `v0.0.31`.
