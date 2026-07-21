@@ -4909,3 +4909,24 @@ select {
 .browser-row__icon--symlink {
   color: #12a5b8;
 }
+
+/* author: BrianXiong */
+/* time: 2026/07/21/00:00:00 */
+/* Fix: keep the hidden-files toggle on one line — CJK text wraps per
+   character when flex squeezes it, and the generic header span rule was
+   adding stray margins. */
+.sftp-screen__controls {
+  flex-shrink: 0;
+}
+
+.sftp-screen__header .sftp-hidden-toggle {
+  flex-shrink: 0;
+}
+
+.sftp-screen__header .sftp-hidden-toggle span {
+  display: inline;
+  margin: 0;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--content-muted);
+}
