@@ -7,7 +7,8 @@ import {
   FileImage,
   FileSpreadsheet,
   FileText,
-  Folder
+  Folder,
+  Link2
 } from "lucide-react";
 import type { FileEntry } from "../../lib/api";
 import { formatFileSize, formatModified, parseModifiedTimestamp } from "../../lib/fileBrowser";
@@ -37,12 +38,17 @@ type FileBrowserPaneProps = {
   onPathChange: (path: string) => void;
   onRefresh: () => void;
   onOpenDir: (entry: FileEntry) => void;
+  onOpenFile?: (entry: FileEntry) => void;
   onGoUp: () => void;
 };
 
 // author: BrianXiong
 // time: 2026/04/05/12:19:04
 function getFileIcon(entry: FileEntry) {
+  if (entry.is_symlink) {
+    return { icon: Link2, className: "browser-row__icon--symlink" };
+  }
+
   if (entry.is_dir) {
     return { icon: Folder, className: "browser-row__icon--dir" };
   }
@@ -96,6 +102,7 @@ export function FileBrowserPane({
   onPathChange,
   onRefresh,
   onOpenDir,
+  onOpenFile,
   onGoUp
 }: FileBrowserPaneProps) {
   const paneRef = useRef<HTMLElement | null>(null);
@@ -320,6 +327,11 @@ export function FileBrowserPane({
                 onDoubleClick={() => {
                   if (!openDirectoryOnClick && isNavigable) {
                     onOpenDir(entry);
+                    return;
+                  }
+
+                  if (!entry.is_dir) {
+                    onOpenFile?.(entry);
                   }
                 }}
                 onContextMenu={(event) => onContextMenu?.(event, entry)}

@@ -16,6 +16,7 @@ export type FileEntry = {
   name: string;
   path: string;
   is_dir: boolean;
+  is_symlink?: boolean;
   size: number;
   modified: string;
 };
@@ -254,6 +255,25 @@ export async function listRemoteDirectory(host: SavedHost, path: string, sshOpti
     return tauriInvoke<FileEntry[]>("list_remote_directory", { host, path, sshOptions });
   }
   return [];
+}
+
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+export async function resolveRemotePath(host: SavedHost, path: string, sshOptions: SshConnectionOptions) {
+  if (hasTauri()) {
+    return tauriInvoke<string>("resolve_remote_path", { host, path, sshOptions });
+  }
+  return path;
+}
+
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+export async function openExternalUrl(url: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("open_external_url", { url });
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+  return true;
 }
 
 export async function uploadToRemote(host: SavedHost, localPath: string, remoteDir: string, sshOptions: SshConnectionOptions) {

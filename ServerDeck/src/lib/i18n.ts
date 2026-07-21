@@ -179,6 +179,8 @@ type Messages = {
   reconnect: string;
   sessionDisconnected: string;
   reconnecting: string;
+  terminalSearchPlaceholder: string;
+  showHiddenFiles: string;
   sftpDescription: string;
   selectHost: string;
   selectHostPlaceholder: string;
@@ -524,6 +526,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     reconnect: "Reconnect",
     sessionDisconnected: "Session disconnected",
     reconnecting: "Reconnecting...",
+    terminalSearchPlaceholder: "Find in terminal",
+    showHiddenFiles: "Show hidden files",
     sftpDescription: "Choose a host before browsing remote files.",
     selectHost: "Select Host",
     selectHostPlaceholder: "Select host",
@@ -867,6 +871,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     reconnect: "重新连接",
     sessionDisconnected: "会话已断开",
     reconnecting: "正在重新连接...",
+    terminalSearchPlaceholder: "在终端中搜索",
+    showHiddenFiles: "显示隐藏文件",
     sftpDescription: "浏览远程文件前请先选择一台主机。",
     selectHost: "选择主机",
     selectHostPlaceholder: "请选择主机",
@@ -1210,6 +1216,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     reconnect: "再接続",
     sessionDisconnected: "セッションが切断されました",
     reconnecting: "再接続しています...",
+    terminalSearchPlaceholder: "ターミナル内を検索",
+    showHiddenFiles: "隠しファイルを表示",
     sftpDescription: "リモートファイルを閲覧する前にホストを選択してください。",
     selectHost: "ホストを選択",
     selectHostPlaceholder: "ホストを選択",

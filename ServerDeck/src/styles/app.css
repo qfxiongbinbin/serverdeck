@@ -4838,3 +4838,74 @@ select {
   background: var(--settings-card-bg);
   color: var(--settings-text);
 }
+
+/* author: BrianXiong */
+/* time: 2026/07/21/00:00:00 */
+/* Terminal search bar (Cmd+F) */
+.terminal-search {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 20, 32, 0.94);
+  color: #dbe3f1;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+}
+
+.terminal-search input {
+  width: 190px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: inherit;
+  font-size: 12.5px;
+}
+
+.terminal-search__button {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.terminal-search__button:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+/* SFTP header controls */
+.sftp-screen__controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.sftp-hidden-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+  opacity: 0.85;
+  user-select: none;
+}
+
+.sftp-hidden-toggle input {
+  accent-color: #5b5bd6;
+}
+
+/* Symlink entries in file browsers */
+.browser-row__icon--symlink {
+  color: #12a5b8;
+}
