@@ -7,6 +7,9 @@ import { check, type DownloadEvent, type Update as AppUpdate } from "@tauri-apps
 import packageJson from "../package.json";
 import ReactECharts from "echarts-for-react";
 import { FitAddon } from "@xterm/addon-fit";
+import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import {
@@ -60,6 +63,8 @@ import {
   listHosts,
   loadAppPreferences,
   observeServer,
+  openExternalUrl,
+  resolveRemotePath,
   queryLocalEntrySize,
   saveHost,
   saveAppPreferences,
@@ -872,11 +877,16 @@ export default function App() {
   const [agentCreateBusy, setAgentCreateBusy] = useState(false);
   const [agentSendBusy, setAgentSendBusy] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
+  const [terminalSearchOpen, setTerminalSearchOpen] = useState(false);
+  const [terminalSearchQuery, setTerminalSearchQuery] = useState("");
+  const [showHiddenFiles, setShowHiddenFiles] = useState(false);
 
   const terminalEl = useRef<HTMLDivElement | null>(null);
   const localTerminalMenuRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
+  const searchAddonRef = useRef<SearchAddon | null>(null);
+  const terminalSearchInputRef = useRef<HTMLInputElement | null>(null);
   const terminalDecodersRef = useRef<Map<string, TextDecoder>>(new Map());
   const terminalBuffersRef = useRef<Map<string, string[]>>(new Map());
   const terminalShouldStickToBottomRef = useRef(true);
@@ -1009,6 +1019,106 @@ export default function App() {
     },
     [flushActiveTerminalOutput]
   );
+
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // Terminal search (Cmd+F): incremental highlight while typing, Enter/Shift+Enter
+  // to jump between matches, Esc to close and return focus to the terminal.
+  function findInTerminal(direction: "next" | "previous") {
+    const addon = searchAddonRef.current;
+    const query = terminalSearchQuery.trim();
+    if (!addon || !query) {
+      return;
+    }
+
+    if (direction === "next") {
+      addon.findNext(query);
+    } else {
+      addon.findPrevious(query);
+    }
+  }
+
+  function closeTerminalSearch() {
+    setTerminalSearchOpen(false);
+    setTerminalSearchQuery("");
+    searchAddonRef.current?.clearDecorations();
+    terminalRef.current?.focus();
+  }
+
+  useEffect(() => {
+    if (!terminalSearchOpen) {
+      return;
+    }
+
+    const addon = searchAddonRef.current;
+    if (!addon) {
+      return;
+    }
+
+    const query = terminalSearchQuery.trim();
+    if (!query) {
+      addon.clearDecorations();
+      return;
+    }
+
+    addon.findNext(query, { incremental: true });
+  }, [terminalSearchOpen, terminalSearchQuery]);
+
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // Keep a ref to the latest close handler so the global shortcut listener
+  // (registered once) never calls a stale closure.
+  const closeTerminalTabRef = useRef<(tabId: string) => void>(() => {});
+  closeTerminalTabRef.current = (tabId: string) => {
+    void handleCloseTerminalTab(tabId);
+  };
+
+  // Terminal keyboard shortcuts: Cmd+1-9 switch tabs, and on an active
+  // terminal tab Cmd+W closes it, Cmd+K clears the screen, Cmd+F searches.
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+
+      const digit = Number.parseInt(event.key, 10);
+      if (digit >= 1 && digit <= 9) {
+        const target = terminalTabsRef.current[digit - 1];
+        if (target) {
+          event.preventDefault();
+          setActiveTabId(target.id);
+        }
+        return;
+      }
+
+      const activeTab = terminalTabsRef.current.find((tab) => tab.id === activeTabIdRef.current);
+      if (!activeTab) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "w") {
+        event.preventDefault();
+        closeTerminalTabRef.current(activeTab.id);
+        return;
+      }
+
+      if (key === "k") {
+        event.preventDefault();
+        terminalRef.current?.clear();
+        return;
+      }
+
+      if (key === "f") {
+        event.preventDefault();
+        setTerminalSearchOpen(true);
+        window.setTimeout(() => terminalSearchInputRef.current?.select(), 0);
+      }
+    };
+
+    window.addEventListener("keydown", handleShortcut);
+    return () => window.removeEventListener("keydown", handleShortcut);
+  }, []);
 
   const appThemeOptions = useMemo(
     () => [
@@ -2092,6 +2202,30 @@ export default function App() {
     };
   }, [isSftpView, selectedHost, remotePath, remoteRefreshTick, sshOptions]);
 
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // Resolve the placeholder "." into the real remote home directory so the
+  // path bar shows an absolute path users can read, edit and copy.
+  useEffect(() => {
+    if (!isSftpView || !selectedHost || remotePath !== ".") {
+      return;
+    }
+
+    let cancelled = false;
+    void resolveRemotePath(selectedHost, ".", sshOptions)
+      .then((absolutePath) => {
+        const next = absolutePath.trim();
+        if (!cancelled && next && next !== ".") {
+          setRemotePath(next);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isSftpView, remotePath, selectedHost, sshOptions]);
+
   useEffect(() => {
     setLocalPreview(null);
     setLocalBrowserSelectedPath("");
@@ -2191,12 +2325,41 @@ export default function App() {
       cursorBlink: true,
       fontSize: settings.terminalFontSize,
       lineHeight: 1.12,
+      scrollback: 5000,
       theme: activeTerminalTheme.theme
     });
 
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
+
+    // author: BrianXiong
+    // time: 2026/07/21/00:00:00
+    // Search (Cmd+F), clickable links (opened via the system browser), and
+    // WebGL rendering with silent fallback to the DOM renderer.
+    const searchAddon = new SearchAddon();
+    terminal.loadAddon(searchAddon);
+    searchAddonRef.current = searchAddon;
+
+    terminal.loadAddon(
+      new WebLinksAddon((event, uri) => {
+        event.preventDefault();
+        void openExternalUrl(uri);
+      })
+    );
+
     terminal.open(terminalMountNode);
+
+    let webglAddon: WebglAddon | null = null;
+    try {
+      webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => {
+        webglAddon?.dispose();
+        webglAddon = null;
+      });
+      terminal.loadAddon(webglAddon);
+    } catch {
+      webglAddon = null;
+    }
     const clearSelectionFrame = window.requestAnimationFrame(() => {
       terminal.clearSelection();
     });
@@ -2312,6 +2475,7 @@ export default function App() {
       window.cancelAnimationFrame(clearSelectionFrame);
       disposable.dispose();
       scrollDisposable.dispose();
+      searchAddonRef.current = null;
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
@@ -3772,6 +3936,44 @@ export default function App() {
       </div>
     ) : null;
 
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  const terminalSearchBar =
+    activeTerminalTab && terminalSearchOpen ? (
+      <div className="terminal-search">
+        <Search size={14} />
+        <input
+          ref={terminalSearchInputRef}
+          value={terminalSearchQuery}
+          placeholder={messages.terminalSearchPlaceholder}
+          autoFocus
+          spellCheck={false}
+          onChange={(event) => setTerminalSearchQuery(event.target.value)}
+          onKeyDown={(event) => {
+            event.stopPropagation();
+            if (event.key === "Enter") {
+              event.preventDefault();
+              findInTerminal(event.shiftKey ? "previous" : "next");
+              return;
+            }
+            if (event.key === "Escape") {
+              event.preventDefault();
+              closeTerminalSearch();
+            }
+          }}
+        />
+        <button type="button" className="terminal-search__button" onClick={() => findInTerminal("previous")} aria-label="Previous match" title="Shift+Enter">
+          ⌃
+        </button>
+        <button type="button" className="terminal-search__button" onClick={() => findInTerminal("next")} aria-label="Next match" title="Enter">
+          ⌄
+        </button>
+        <button type="button" className="terminal-search__button" onClick={closeTerminalSearch} aria-label="Close search" title="Esc">
+          <X size={13} />
+        </button>
+      </div>
+    ) : null;
+
   return (
     <div className={`app-shell ${detachedSettingsWindow ? "app-shell--settings-window" : ""}`}>
       <header className="topbar">
@@ -4324,17 +4526,28 @@ export default function App() {
                   <span>{messages.sftpDescription}</span>
                 </div>
 
-                <label className="sftp-host-select">
-                  <span>{messages.selectHost}</span>
-                  <select value={selectedId} onChange={(event) => handleSelectSftpHost(event.target.value)}>
-                    <option value="">{messages.selectHostPlaceholder}</option>
-                    {hosts.map((host) => (
-                      <option key={host.id} value={host.id}>
-                        {getDisplayHostTitle(host)}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <div className="sftp-screen__controls">
+                  <label className="sftp-hidden-toggle">
+                    <input
+                      type="checkbox"
+                      checked={showHiddenFiles}
+                      onChange={(event) => setShowHiddenFiles(event.target.checked)}
+                    />
+                    <span>{messages.showHiddenFiles}</span>
+                  </label>
+
+                  <label className="sftp-host-select">
+                    <span>{messages.selectHost}</span>
+                    <select value={selectedId} onChange={(event) => handleSelectSftpHost(event.target.value)}>
+                      <option value="">{messages.selectHostPlaceholder}</option>
+                      {hosts.map((host) => (
+                        <option key={host.id} value={host.id}>
+                          {getDisplayHostTitle(host)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
               </div>
 
               <div className="sftp-browser-grid">
@@ -4347,7 +4560,7 @@ export default function App() {
                   modifiedColumnLabel={messages.fileModifiedDateColumn}
                   sizeColumnLabel={messages.fileSizeColumn}
                   path={localPath}
-                  items={localEntries}
+                  items={showHiddenFiles ? localEntries : localEntries.filter((entry) => !entry.name.startsWith("."))}
                   loading={localLoading}
                   error={localError}
                   emptyText={messages.noLocalFiles}
@@ -4360,6 +4573,7 @@ export default function App() {
                   onRefresh={() => setLocalRefreshTick((current) => current + 1)}
                   onGoUp={() => setLocalPath((current) => getParentPath(current))}
                   onOpenDir={(entry) => setLocalPath((current) => joinChildPath(current, entry.name))}
+                  onOpenFile={(entry) => void handleUploadEntry(entry)}
                 />
 
                 <FileBrowserPane
@@ -4371,7 +4585,7 @@ export default function App() {
                   modifiedColumnLabel={messages.fileModifiedDateColumn}
                   sizeColumnLabel={messages.fileSizeColumn}
                   path={remotePath}
-                  items={remoteEntries}
+                  items={showHiddenFiles ? remoteEntries : remoteEntries.filter((entry) => !entry.name.startsWith("."))}
                   loading={remoteLoading}
                   error={remoteError}
                   emptyText={selectedHost ? messages.noRemoteFiles : messages.selectHostPlaceholder}
@@ -4385,6 +4599,7 @@ export default function App() {
                   onRefresh={() => setRemoteRefreshTick((current) => current + 1)}
                   onGoUp={() => setRemotePath((current) => getParentPath(current))}
                   onOpenDir={(entry) => setRemotePath((current) => joinChildPath(current, entry.name))}
+                  onOpenFile={(entry) => void handleDownloadEntry(entry)}
                 />
               </div>
 
@@ -5195,6 +5410,7 @@ export default function App() {
                   onMouseDown={() => terminalRef.current?.focus()}
                   style={{ background: activeTerminalTheme.theme.background }}
                 />
+                {terminalSearchBar}
                 {terminalDisconnectOverlay}
               </div>
             </section>
@@ -5207,6 +5423,7 @@ export default function App() {
                   onMouseDown={() => terminalRef.current?.focus()}
                   style={{ background: activeTerminalTheme.theme.background }}
                 />
+                {terminalSearchBar}
                 {terminalDisconnectOverlay}
               </div>
             </section>

@@ -159,6 +159,8 @@ pub(crate) struct FileEntry {
     name: String,
     path: String,
     is_dir: bool,
+    #[serde(default)]
+    is_symlink: bool,
     size: u64,
     modified: String,
 }
@@ -852,6 +854,10 @@ pub(crate) fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, Strin
     for item in read_dir {
         let item = item.map_err(|error| error.to_string())?;
         let metadata = item.metadata().map_err(|error| error.to_string())?;
+        let is_symlink = item
+            .file_type()
+            .map(|file_type| file_type.is_symlink())
+            .unwrap_or(false);
         let modified = metadata
             .modified()
             .ok()
@@ -863,6 +869,7 @@ pub(crate) fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, Strin
             name: item.file_name().to_string_lossy().into_owned(),
             path: item.path().display().to_string(),
             is_dir: metadata.is_dir(),
+            is_symlink,
             size: metadata.len(),
             modified,
         });
@@ -1166,11 +1173,23 @@ fn parse_sftp_ls_line(line: &str) -> Option<FileEntry> {
 
     let mode = parts[0];
     let is_dir = mode.starts_with('d');
+    // author: BrianXiong
+    // time: 2026/07/21/00:00:00
+    // Symlinks come through as `lrwxrwxrwx ... name -> target`; mark them and
+    // strip the arrow suffix so the entry name (used for download/delete
+    // paths) is the link itself, not "name -> target".
+    let is_symlink = mode.starts_with('l');
     let size = parts[4].parse::<u64>().unwrap_or(0);
     let modified = format!("{} {} {}", parts[5], parts[6], parts[7]);
-    let name = parts[8..].join(" ");
+    let mut name = parts[8..].join(" ");
 
-    if name == "." || name == ".." {
+    if is_symlink {
+        if let Some(arrow_index) = name.find(" -> ") {
+            name.truncate(arrow_index);
+        }
+    }
+
+    if name == "." || name == ".." || name.is_empty() {
         return None;
     }
 
@@ -1178,6 +1197,7 @@ fn parse_sftp_ls_line(line: &str) -> Option<FileEntry> {
         name: name.clone(),
         path: name,
         is_dir,
+        is_symlink,
         size,
         modified,
     })
@@ -2253,6 +2273,13 @@ fn delete_local_entry(path: String, is_dir: bool) -> Result<bool, String> {
 }
 
 // author: BrianXiong
+// time: 2026/07/21/00:00:00
+// Quote a path for use inside a remote shell command line.
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+// author: BrianXiong
 // time: 2026/04/07/22:11:00
 #[tauri::command]
 async fn delete_remote_entry(
@@ -2262,18 +2289,93 @@ async fn delete_remote_entry(
     ssh_options: SshConnectionOptions,
 ) -> Result<bool, String> {
     async_runtime::spawn_blocking(move || {
-        let batch = if is_dir {
-            format!("rmdir {}\nbye\n", escape_sftp_path(&remote_path))
-        } else {
-            format!("rm {}\nbye\n", escape_sftp_path(&remote_path))
-        };
+        // author: BrianXiong
+        // time: 2026/07/21/00:00:00
+        // sftp `rmdir` only removes empty directories, so directories go
+        // through `rm -rf` over ssh (the UI always confirms deletes first).
+        if is_dir {
+            let output = build_ssh_command(&host, &ssh_options)
+                .arg(format!("rm -rf -- {}", shell_single_quote(&remote_path)))
+                .output()
+                .map_err(|error| error.to_string())?;
 
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                return Err(if stderr.is_empty() {
+                    "Delete failed".to_string()
+                } else {
+                    stderr
+                });
+            }
+
+            return Ok(true);
+        }
+
+        let batch = format!("rm {}\nbye\n", escape_sftp_path(&remote_path));
         let output = run_sftp_batch(&host, &ssh_options, &batch)?;
         ensure_sftp_success(&output, "Delete failed")?;
         Ok(true)
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+// Resolve a remote path (".", "~" or relative) to the absolute path reported
+// by the SFTP server, so the UI path bar can show something meaningful.
+#[tauri::command]
+async fn resolve_remote_path(
+    host: HostRecord,
+    path: String,
+    ssh_options: SshConnectionOptions,
+) -> Result<String, String> {
+    async_runtime::spawn_blocking(move || {
+        let remote_path = if path.trim().is_empty() || path.trim() == "~" {
+            "."
+        } else {
+            path.trim()
+        };
+
+        let batch = format!("cd {}\npwd\nbye\n", escape_sftp_path(remote_path));
+        let output = run_sftp_batch(&host, &ssh_options, &batch)?;
+        ensure_sftp_success(&output, "Failed to resolve remote path")?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_prefix("Remote working directory:")
+                    .map(|value| value.trim().to_string())
+            })
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "Remote working directory not reported".to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
+}
+
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+// Open a link from the terminal in the system browser (macOS `open`).
+#[tauri::command]
+fn open_external_url(url: String) -> Result<bool, String> {
+    let trimmed = url.trim();
+    if !(trimmed.starts_with("http://") || trimmed.starts_with("https://")) {
+        return Err("Only http/https links can be opened".to_string());
+    }
+
+    let status = Command::new("open")
+        .arg(trimmed)
+        .status()
+        .map_err(|error| error.to_string())?;
+
+    if !status.success() {
+        return Err("Failed to open link".to_string());
+    }
+
+    Ok(true)
 }
 
 #[tauri::command]
@@ -2794,6 +2896,8 @@ fn main() {
             query_local_entry_size,
             delete_local_entry,
             delete_remote_entry,
+            resolve_remote_path,
+            open_external_url,
             start_terminal_session,
             start_local_terminal_session,
             pick_local_directory,
