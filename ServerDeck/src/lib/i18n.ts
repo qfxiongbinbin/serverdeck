@@ -171,6 +171,14 @@ type Messages = {
   testSsh: string;
   save: string;
   delete: string;
+  confirmDeleteTitle: string;
+  confirmDeleteLocalMessage: (path: string) => string;
+  confirmDeleteRemoteMessage: (path: string) => string;
+  deleteEntryFailed: (name: string) => string;
+  disconnected: string;
+  reconnect: string;
+  sessionDisconnected: string;
+  reconnecting: string;
   sftpDescription: string;
   selectHost: string;
   selectHostPlaceholder: string;
@@ -256,6 +264,16 @@ type Messages = {
   aiModels: string;
   aiUsage: string;
   aiSkills: string;
+  aiMemory: string;
+  aiMemoryDescription: string;
+  aiMemoryEmpty: string;
+  aiMemoryEmptyDescription: string;
+  aiMemoryAgent: string;
+  aiMemoryFile: string;
+  aiMemorySize: string;
+  aiMemoryModified: string;
+  aiMemoryOpenInEditor: string;
+  aiMemoryRefresh: string;
   addAiProvider: string;
   importClaudeCode: string;
   importCodexCli: string;
@@ -498,6 +516,14 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     testSsh: "Test SSH",
     save: "Save",
     delete: "Delete",
+    confirmDeleteTitle: "Confirm Delete",
+    confirmDeleteLocalMessage: (path: string) => `Delete local file "${path}"? This cannot be undone.`,
+    confirmDeleteRemoteMessage: (path: string) => `Delete remote file "${path}" on the server? This cannot be undone.`,
+    deleteEntryFailed: (name: string) => `Failed to delete ${name}`,
+    disconnected: "Disconnected",
+    reconnect: "Reconnect",
+    sessionDisconnected: "Session disconnected",
+    reconnecting: "Reconnecting...",
     sftpDescription: "Choose a host before browsing remote files.",
     selectHost: "Select Host",
     selectHostPlaceholder: "Select host",
@@ -583,6 +609,16 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     aiModels: "Models",
     aiUsage: "Usage",
     aiSkills: "Skills",
+    aiMemory: "Memory",
+    aiMemoryDescription: "View and manage memory files from different AI agents on your system.",
+    aiMemoryEmpty: "No memory files found",
+    aiMemoryEmptyDescription: "No AI agent memory files detected in your home directory.",
+    aiMemoryAgent: "Agent",
+    aiMemoryFile: "File",
+    aiMemorySize: "Size",
+    aiMemoryModified: "Modified",
+    aiMemoryOpenInEditor: "Open in Editor",
+    aiMemoryRefresh: "Refresh",
     addAiProvider: "Add Provider",
     importClaudeCode: "Import Claude Code",
     importCodexCli: "Import Codex CLI",
@@ -823,6 +859,14 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     testSsh: "测试 SSH",
     save: "保存",
     delete: "删除",
+    confirmDeleteTitle: "删除确认",
+    confirmDeleteLocalMessage: (path: string) => `确定要删除本地文件「${path}」吗?此操作不可恢复。`,
+    confirmDeleteRemoteMessage: (path: string) => `确定要删除服务器上的「${path}」吗?此操作不可恢复。`,
+    deleteEntryFailed: (name: string) => `删除 ${name} 失败`,
+    disconnected: "已断开",
+    reconnect: "重新连接",
+    sessionDisconnected: "会话已断开",
+    reconnecting: "正在重新连接...",
     sftpDescription: "浏览远程文件前请先选择一台主机。",
     selectHost: "选择主机",
     selectHostPlaceholder: "请选择主机",
@@ -908,6 +952,16 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     aiModels: "模型",
     aiUsage: "用量",
     aiSkills: "技能",
+    aiMemory: "记忆",
+    aiMemoryDescription: "查看和管理系统中各 AI Agent 的记忆文件。",
+    aiMemoryEmpty: "未找到记忆文件",
+    aiMemoryEmptyDescription: "在主目录中未检测到 AI Agent 记忆文件。",
+    aiMemoryAgent: "Agent",
+    aiMemoryFile: "文件",
+    aiMemorySize: "大小",
+    aiMemoryModified: "修改时间",
+    aiMemoryOpenInEditor: "在编辑器中打开",
+    aiMemoryRefresh: "刷新",
     addAiProvider: "添加 Provider",
     importClaudeCode: "导入 Claude Code",
     importCodexCli: "导入 Codex CLI",
@@ -1148,6 +1202,14 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     testSsh: "SSH をテスト",
     save: "保存",
     delete: "削除",
+    confirmDeleteTitle: "削除の確認",
+    confirmDeleteLocalMessage: (path: string) => `ローカルファイル「${path}」を削除しますか?この操作は元に戻せません。`,
+    confirmDeleteRemoteMessage: (path: string) => `サーバー上の「${path}」を削除しますか?この操作は元に戻せません。`,
+    deleteEntryFailed: (name: string) => `${name} の削除に失敗しました`,
+    disconnected: "切断されました",
+    reconnect: "再接続",
+    sessionDisconnected: "セッションが切断されました",
+    reconnecting: "再接続しています...",
     sftpDescription: "リモートファイルを閲覧する前にホストを選択してください。",
     selectHost: "ホストを選択",
     selectHostPlaceholder: "ホストを選択",
@@ -1233,6 +1295,16 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     aiModels: "モデル",
     aiUsage: "利用量",
     aiSkills: "スキル",
+    aiMemory: "メモリ",
+    aiMemoryDescription: "システム上の各 AI エージェントのメモリファイルを表示・管理します。",
+    aiMemoryEmpty: "メモリファイルが見つかりません",
+    aiMemoryEmptyDescription: "ホームディレクトリに AI エージェントのメモリファイルが検出されませんでした。",
+    aiMemoryAgent: "エージェント",
+    aiMemoryFile: "ファイル",
+    aiMemorySize: "サイズ",
+    aiMemoryModified: "更新日時",
+    aiMemoryOpenInEditor: "エディタで開く",
+    aiMemoryRefresh: "更新",
     addAiProvider: "Provider を追加",
     importClaudeCode: "Claude Code を導入",
     importCodexCli: "Codex CLI を導入",

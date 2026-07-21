@@ -27,6 +27,13 @@ export type TerminalEventPayload = {
   stream?: "stdout" | "stderr" | "system";
 };
 
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+export type TerminalExitPayload = {
+  sessionId: string;
+  exitCode?: number | null;
+};
+
 export type TransferUpdatePayload = {
   jobId: string;
   direction: "upload" | "download";
@@ -85,6 +92,17 @@ export type AiProviderImportSuggestion = {
   apiKey: string;
   model: string;
   note: string;
+};
+
+// author: BrianXiong
+// time: 2026/05/07/23:30:00
+export type AiMemoryFile = {
+  id: string;
+  agentName: string;
+  fileName: string;
+  filePath: string;
+  fileSize: number;
+  modifiedTime: number;
 };
 
 export type AppPreferences = {
@@ -358,6 +376,26 @@ export async function detectAiProviderImports() {
   }
 
   return [];
+}
+
+// author: BrianXiong
+// time: 2026/05/07/23:30:00
+export async function scanAiMemoryFiles() {
+  if (hasTauri()) {
+    return tauriInvoke<AiMemoryFile[]>("scan_ai_memory_files");
+  }
+
+  return [];
+}
+
+// author: BrianXiong
+// time: 2026/05/07/23:30:00
+export async function readAiMemoryFile(path: string) {
+  if (hasTauri()) {
+    return tauriInvoke<string>("read_ai_memory_file", { path });
+  }
+
+  return "";
 }
 
 export async function startTerminalSession(host: SavedHost, sshOptions: SshConnectionOptions) {

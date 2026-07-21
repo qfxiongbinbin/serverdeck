@@ -4509,9 +4509,179 @@ select {
   }
 }
 
+/* AI Memory Styles */
+/* author: BrianXiong */
+/* time: 2026/05/07/23:30:00 */
+
+.ai-memory-container {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 16px;
+  min-height: 400px;
+}
+
+.ai-memory-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: var(--content-subtle-bg);
+  border-radius: 12px;
+  overflow-y: auto;
+  max-height: 500px;
+}
+
+.ai-memory-item {
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--card-background);
+  cursor: pointer;
+  transition: background 120ms ease, box-shadow 120ms ease;
+  border: 1px solid transparent;
+}
+
+.ai-memory-item:hover {
+  background: var(--hover-background);
+}
+
+.ai-memory-item--active {
+  background: var(--primary-button-bg);
+  color: #fff;
+  border-color: var(--primary-button-bg);
+}
+
+.ai-memory-item--active:hover {
+  background: var(--primary-button-bg);
+}
+
+.ai-memory-item__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.ai-memory-item__agent {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.8;
+}
+
+.ai-memory-item__size {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.ai-memory-item__name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.ai-memory-item__path {
+  font-size: 11px;
+  opacity: 0.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-memory-preview {
+  display: flex;
+  flex-direction: column;
+  background: var(--card-background);
+  border-radius: 12px;
+  border: 1px solid var(--divider-color);
+  overflow: hidden;
+}
+
+.ai-memory-preview__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--divider-color);
+  background: var(--content-subtle-bg);
+}
+
+.ai-memory-preview__title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-memory-preview__title strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.ai-memory-preview__title span {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: var(--primary-button-bg);
+  color: #fff;
+  border-radius: 4px;
+}
+
+.ai-memory-preview__meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.ai-memory-preview__content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  max-height: 450px;
+}
+
+.ai-memory-preview__content pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", "Segoe UI Mono", Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ai-memory-preview__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  color: var(--text-secondary);
+}
+
+.ai-memory-preview__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 300px;
+  gap: 12px;
+  color: var(--text-secondary);
+}
+
+.ai-memory-preview__empty svg {
+  opacity: 0.3;
+}
+
 @media (max-width: 1280px) {
   .hosts-layout--drawer {
     grid-template-columns: 1fr;
+  }
+
+  .ai-memory-container {
+    grid-template-columns: 1fr;
+  }
+
+  .ai-memory-list {
+    max-height: 200px;
   }
 }
 
@@ -4555,4 +4725,116 @@ select {
   .topbar__brand {
     min-width: auto;
   }
+}
+
+/* author: BrianXiong */
+/* time: 2026/07/21/00:00:00 */
+/* Disconnected terminal state + reconnect overlay */
+.top-tab__dot--disconnected {
+  background: #9aa4b5;
+}
+
+.terminal-frame-shell {
+  position: relative;
+}
+
+.terminal-disconnect {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: rgba(8, 12, 22, 0.35);
+  backdrop-filter: blur(1.5px);
+}
+
+.terminal-disconnect__card {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(15, 20, 32, 0.92);
+  color: #e6ebf5;
+  box-shadow: 0 16px 44px rgba(0, 0, 0, 0.35);
+}
+
+.terminal-disconnect__title {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Delete confirmation modal */
+.confirm-modal {
+  width: min(440px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--white-line);
+  border-radius: 18px;
+  background: var(--white-panel);
+  color: var(--white-text);
+  box-shadow: 0 24px 60px rgba(17, 34, 68, 0.22);
+}
+
+.confirm-modal__header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.confirm-modal__header h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.confirm-modal__icon {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  color: #d64545;
+  background: rgba(214, 69, 69, 0.12);
+}
+
+.confirm-modal__message {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  word-break: break-all;
+  opacity: 0.85;
+}
+
+.confirm-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.confirm-modal__danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: #d64545;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.confirm-modal__danger:hover {
+  background: #c23a3a;
+}
+
+:root[data-app-theme="dark"] .confirm-modal {
+  border-color: var(--settings-border);
+  background: var(--settings-card-bg);
+  color: var(--settings-text);
 }

@@ -34,7 +34,10 @@ import {
   TerminalSquare,
   Trash2,
   Users,
-  X
+  X,
+  RefreshCw,
+  FileText,
+  ExternalLink
 } from "lucide-react";
 import {
   clearAppData,
@@ -66,6 +69,9 @@ import {
   startTerminalSession,
   testConnection,
   writeTerminalInput,
+  scanAiMemoryFiles,
+  readAiMemoryFile,
+  type AiMemoryFile,
   type AiProviderConfig,
   type AiProviderImportSuggestion,
   type AiProviderFetchRequest,
@@ -77,6 +83,7 @@ import {
   type ServerObservation,
   type SshConnectionOptions,
   type TerminalEventPayload,
+  type TerminalExitPayload,
   type TransferUpdatePayload
 } from "./lib/api";
 import { FileBrowserPane } from "./components/files/FileBrowserPane";
@@ -143,7 +150,7 @@ const blankHost: SavedHost = {
 };
 
 type DrawerMode = "new" | "edit";
-type TerminalState = "connecting" | "connected" | "error";
+type TerminalState = "connecting" | "connected" | "error" | "disconnected";
 
 type TerminalTab = {
   id: string;
@@ -151,8 +158,14 @@ type TerminalTab = {
   title: string;
   kind: "remote" | "local";
   host: SavedHost | null;
+  cwd?: string;
   state: TerminalState;
   statusText: string;
+};
+
+type DeleteConfirmState = {
+  side: "local" | "remote";
+  entry: FileEntry;
 };
 
 type MonitorTab = {
@@ -225,7 +238,7 @@ type SettingsSectionId = "general" | "projects" | "terminal" | "ai" | "about" | 
 type ProjectEditorMode = "new" | "edit";
 type LocalTerminalSource = "default" | "project" | "directory";
 type AiProviderEditorMode = "new" | "edit";
-type AiSettingsSectionId = "providers" | "models" | "usage" | "skills";
+type AiSettingsSectionId = "providers" | "models" | "usage" | "skills" | "memory";
 
 const blankAiProvider: AiProviderConfig = {
   id: "",
@@ -792,6 +805,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [fileMenu, setFileMenu] = useState<FileMenuState | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
   const [terminalMountNode, setTerminalMountNode] = useState<HTMLDivElement | null>(null);
   const [transferJobs, setTransferJobs] = useState<TransferJob[]>([]);
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdate | null>(null);
@@ -817,6 +831,12 @@ export default function App() {
   const [aiProviderModelsLoading, setAiProviderModelsLoading] = useState(false);
   const [aiProviderModelsError, setAiProviderModelsError] = useState("");
   const [aiImportSuggestions, setAiImportSuggestions] = useState<AiProviderImportSuggestion[]>([]);
+  // author: BrianXiong
+  // time: 2026/05/07/23:30:00
+  const [aiMemoryFiles, setAiMemoryFiles] = useState<AiMemoryFile[]>([]);
+  const [selectedMemoryFile, setSelectedMemoryFile] = useState<AiMemoryFile | null>(null);
+  const [memoryContent, setMemoryContent] = useState("");
+  const [memoryLoading, setMemoryLoading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [localTerminalMenuOpen, setLocalTerminalMenuOpen] = useState(false);
   const [localTerminalProjectSearch, setLocalTerminalProjectSearch] = useState("");
@@ -1905,6 +1925,61 @@ export default function App() {
     void detectAiProviderImports().then(setAiImportSuggestions).catch(() => {});
   }, [activeSettingsSection]);
 
+  // author: BrianXiong
+  // time: 2026/05/07/23:30:00
+  useEffect(() => {
+    if (activeSettingsSection !== "ai" || activeAiSettingsSection !== "memory") {
+      return;
+    }
+
+    void loadMemoryFiles();
+  }, [activeSettingsSection, activeAiSettingsSection]);
+
+  // author: BrianXiong
+  // time: 2026/05/07/23:30:00
+  async function loadMemoryFiles() {
+    try {
+      const files = await scanAiMemoryFiles();
+      setAiMemoryFiles(files);
+      if (files.length > 0 && !selectedMemoryFile) {
+        await handleSelectMemoryFile(files[0]);
+      }
+    } catch {
+      setAiMemoryFiles([]);
+    }
+  }
+
+  // author: BrianXiong
+  // time: 2026/05/07/23:30:00
+  async function handleSelectMemoryFile(file: AiMemoryFile) {
+    setSelectedMemoryFile(file);
+    setMemoryLoading(true);
+    try {
+      const content = await readAiMemoryFile(file.filePath);
+      setMemoryContent(content);
+    } catch {
+      setMemoryContent("");
+    } finally {
+      setMemoryLoading(false);
+    }
+  }
+
+  // author: BrianXiong
+  // time: 2026/05/07/23:30:00
+  function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  // author: BrianXiong
+  // time: 2026/05/07/23:30:00
+  function formatModifiedTime(timestamp: number): string {
+    if (timestamp === 0) return "-";
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString();
+  }
+
   useEffect(() => {
     terminalDecodersRef.current.clear();
   }, [settings.terminalCharset]);
@@ -2241,7 +2316,7 @@ export default function App() {
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
-  }, [activeTerminalTab?.id, sendActiveTerminalInput, terminalMountNode]);
+  }, [activeTerminalTab?.id, activeTerminalTab?.sessionId, sendActiveTerminalInput, terminalMountNode]);
 
   useEffect(() => {
     if (!terminalRef.current) {
@@ -2336,6 +2411,43 @@ export default function App() {
       cleanup?.();
     };
   }, [decodeTerminalPayload, enqueueActiveTerminalOutput, messages.connected]);
+
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // Track PTY exit so a dropped SSH session is surfaced in the tab state
+  // instead of silently keeping the "connected" dot forever.
+  useEffect(() => {
+    let cleanup: null | (() => void) = null;
+    let disposed = false;
+
+    void listen<TerminalExitPayload>("terminal-exit", (event) => {
+      const matchingTab = terminalTabsRef.current.find((tab) => tab.sessionId === event.payload.sessionId);
+      if (!matchingTab || matchingTab.state === "disconnected") {
+        return;
+      }
+
+      setTerminalTabs((prev) =>
+        prev.map((tab) =>
+          tab.sessionId === event.payload.sessionId
+            ? { ...tab, state: "disconnected", statusText: messages.sessionDisconnected }
+            : tab
+        )
+      );
+    })
+      .then((unlisten) => {
+        if (disposed) {
+          unlisten();
+          return;
+        }
+        cleanup = unlisten;
+      })
+      .catch(() => {});
+
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, [messages.sessionDisconnected]);
 
   useEffect(() => {
     let cleanup: null | (() => void) = null;
@@ -3070,6 +3182,33 @@ export default function App() {
     setRemoteRefreshTick((current) => current + 1);
   }
 
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // Deleting is destructive and has no undo, so it always goes through an
+  // explicit confirmation dialog instead of firing straight from the menu.
+  function handleRequestDeleteEntry(side: DeleteConfirmState["side"], entry: FileEntry) {
+    setFileMenu(null);
+    setDeleteConfirm({ side, entry });
+  }
+
+  async function handleConfirmDeleteEntry() {
+    const target = deleteConfirm;
+    if (!target) return;
+
+    setDeleteConfirm(null);
+
+    try {
+      if (target.side === "local") {
+        await handleDeleteLocalFile(target.entry);
+      } else {
+        await handleDeleteRemoteFile(target.entry);
+      }
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.deleteEntryFailed(target.entry.name)));
+      setStatusTone("error");
+    }
+  }
+
   function handleSelectSftpHost(hostId: string) {
     setSelectedId(hostId);
     setRemotePath(".");
@@ -3289,6 +3428,7 @@ export default function App() {
           title,
           kind: "local",
           host: null,
+          cwd,
           state: "connecting",
           statusText: messages.openingLocalTerminal
         }
@@ -3375,6 +3515,48 @@ export default function App() {
   // time: 2026/04/05/12:19:04
   function handleSelectLocalPreview(entry: FileEntry | null) {
     setLocalBrowserSelectedPath(entry?.path ?? "");
+  }
+
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // Reconnect a disconnected tab in place: start a fresh session for the same
+  // host (or local cwd) and rebind the existing tab to the new session id.
+  async function handleReconnectTerminalTab(tab: TerminalTab) {
+    setStatusTone("neutral");
+    setStatus(messages.reconnecting);
+    setTerminalTabs((prev) =>
+      prev.map((item) => (item.id === tab.id ? { ...item, state: "connecting", statusText: messages.reconnecting } : item))
+    );
+
+    try {
+      const sessionId =
+        tab.kind === "remote" && tab.host
+          ? await startTerminalSession(tab.host, sshOptions)
+          : await startLocalTerminalSession(tab.cwd);
+
+      terminalDecodersRef.current.delete(tab.sessionId);
+      terminalBuffersRef.current.delete(tab.sessionId);
+      void closeTerminalSession(tab.sessionId).catch(() => {});
+      terminalBuffersRef.current.set(sessionId, []);
+
+      const statusText =
+        tab.kind === "remote" && tab.host
+          ? messages.connectingToHost(tab.host.username, tab.host.address, tab.host.port)
+          : messages.openingLocalTerminal;
+
+      setTerminalTabs((prev) =>
+        prev.map((item) => (item.id === tab.id ? { ...item, sessionId, state: "connecting", statusText } : item))
+      );
+      setStatus(statusText);
+    } catch (error) {
+      setTerminalTabs((prev) =>
+        prev.map((item) =>
+          item.id === tab.id ? { ...item, state: "disconnected", statusText: messages.sessionDisconnected } : item
+        )
+      );
+      setStatus(getErrorMessage(error, messages.terminalOpenFailed));
+      setStatusTone("error");
+    }
   }
 
   // author: BrianXiong
@@ -3570,6 +3752,25 @@ export default function App() {
       top: Math.max(12, Math.min(fileMenu.y, window.innerHeight - menuHeight - 16))
     };
   }, [fileMenu]);
+
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  const terminalDisconnectOverlay =
+    activeTerminalTab && activeTerminalTab.state === "disconnected" ? (
+      <div className="terminal-disconnect">
+        <div className="terminal-disconnect__card">
+          <span className="terminal-disconnect__title">{messages.sessionDisconnected}</span>
+          <button
+            type="button"
+            className="primary-button"
+            onClick={() => void handleReconnectTerminalTab(activeTerminalTab)}
+          >
+            <RefreshCw size={14} />
+            {messages.reconnect}
+          </button>
+        </div>
+      </div>
+    ) : null;
 
   return (
     <div className={`app-shell ${detachedSettingsWindow ? "app-shell--settings-window" : ""}`}>
@@ -4576,6 +4777,9 @@ export default function App() {
                         <button type="button" className={`settings-chip ${activeAiSettingsSection === "skills" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("skills")}>
                           {messages.aiSkills}
                         </button>
+                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "memory" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("memory")}>
+                          {messages.aiMemory}
+                        </button>
                       </div>
 
                       {activeAiSettingsSection === "providers" ? (
@@ -4665,6 +4869,76 @@ export default function App() {
                             </div>
                           </div>
                         </div>
+                      ) : null}
+
+                      {activeAiSettingsSection === "memory" ? (
+                        <>
+                          <div className="settings-panel__toolbar">
+                            <button type="button" className="secondary-button secondary-button--compact" onClick={() => void loadMemoryFiles()}>
+                              <RefreshCw size={14} />
+                              {messages.aiMemoryRefresh}
+                            </button>
+                          </div>
+
+                          {aiMemoryFiles.length === 0 ? (
+                            <div className="settings-card">
+                              <div className="settings-item settings-item--panel settings-item--stacked">
+                                <div className="topbar-popover__empty">
+                                  <FileText size={32} strokeWidth={1.5} />
+                                  <strong>{messages.aiMemoryEmpty}</strong>
+                                  <span>{messages.aiMemoryEmptyDescription}</span>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="ai-memory-container">
+                              <div className="ai-memory-list">
+                                {aiMemoryFiles.map((file) => (
+                                  <div
+                                    key={file.id}
+                                    className={`ai-memory-item ${selectedMemoryFile?.id === file.id ? "ai-memory-item--active" : ""}`}
+                                    onClick={() => void handleSelectMemoryFile(file)}
+                                  >
+                                    <div className="ai-memory-item__header">
+                                      <span className="ai-memory-item__agent">{file.agentName}</span>
+                                      <span className="ai-memory-item__size">{formatFileSize(file.fileSize)}</span>
+                                    </div>
+                                    <div className="ai-memory-item__name">{file.fileName}</div>
+                                    <div className="ai-memory-item__path">{file.filePath}</div>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="ai-memory-preview">
+                                {selectedMemoryFile ? (
+                                  <>
+                                    <div className="ai-memory-preview__header">
+                                      <div className="ai-memory-preview__title">
+                                        <strong>{selectedMemoryFile.fileName}</strong>
+                                        <span>{selectedMemoryFile.agentName}</span>
+                                      </div>
+                                      <div className="ai-memory-preview__meta">
+                                        <span>{formatFileSize(selectedMemoryFile.fileSize)}</span>
+                                        <span>{formatModifiedTime(selectedMemoryFile.modifiedTime)}</span>
+                                      </div>
+                                    </div>
+                                    <div className="ai-memory-preview__content">
+                                      {memoryLoading ? (
+                                        <div className="ai-memory-preview__loading">Loading...</div>
+                                      ) : (
+                                        <pre>{memoryContent}</pre>
+                                      )}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div className="ai-memory-preview__empty">
+                                    <FileText size={48} strokeWidth={1} />
+                                    <span>Select a memory file to preview</span>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </>
                       ) : null}
                     </section>
                   ) : null}
@@ -4921,6 +5195,7 @@ export default function App() {
                   onMouseDown={() => terminalRef.current?.focus()}
                   style={{ background: activeTerminalTheme.theme.background }}
                 />
+                {terminalDisconnectOverlay}
               </div>
             </section>
           ) : (
@@ -4932,6 +5207,7 @@ export default function App() {
                   onMouseDown={() => terminalRef.current?.focus()}
                   style={{ background: activeTerminalTheme.theme.background }}
                 />
+                {terminalDisconnectOverlay}
               </div>
             </section>
           )}
@@ -5039,7 +5315,7 @@ export default function App() {
               <button
                 type="button"
                 className="context-menu__item context-menu__item--danger"
-                onClick={() => void handleDeleteLocalFile(fileMenu.entry)}
+                onClick={() => handleRequestDeleteEntry("local", fileMenu.entry)}
               >
                 <Trash2 size={18} />
                 <span>{messages.delete}</span>
@@ -5054,13 +5330,42 @@ export default function App() {
               <button
                 type="button"
                 className="context-menu__item context-menu__item--danger"
-                onClick={() => void handleDeleteRemoteFile(fileMenu.entry)}
+                onClick={() => handleRequestDeleteEntry("remote", fileMenu.entry)}
               >
                 <Trash2 size={18} />
                 <span>{messages.delete}</span>
               </button>
             </>
           )}
+        </div>
+      ) : null}
+
+      {deleteConfirm ? (
+        <div className="update-modal-backdrop" onMouseDown={() => setDeleteConfirm(null)}>
+          <section className="confirm-modal" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="confirm-modal__header">
+              <span className="confirm-modal__icon">
+                <Trash2 size={18} />
+              </span>
+              <h3>{messages.confirmDeleteTitle}</h3>
+            </div>
+
+            <p className="confirm-modal__message">
+              {deleteConfirm.side === "local"
+                ? messages.confirmDeleteLocalMessage(deleteConfirm.entry.path)
+                : messages.confirmDeleteRemoteMessage(joinChildPath(remotePath, deleteConfirm.entry.name))}
+            </p>
+
+            <div className="confirm-modal__actions">
+              <button type="button" className="secondary-button" onClick={() => setDeleteConfirm(null)}>
+                {messages.cancel}
+              </button>
+              <button type="button" className="confirm-modal__danger" onClick={() => void handleConfirmDeleteEntry()}>
+                <Trash2 size={14} />
+                {messages.delete}
+              </button>
+            </div>
+          </section>
         </div>
       ) : null}
 
