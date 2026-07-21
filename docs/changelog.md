@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.34
+
+Compared with `v0.0.33`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Keep sftp hidden-files toggle label on one line
+
 ## v0.0.33
 
 Compared with `v0.0.32`.
