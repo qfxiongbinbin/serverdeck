@@ -75,6 +75,40 @@ export function TerminalFileNavigator({
   const paneRef = useRef<HTMLElement | null>(null);
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [pathDraft, setPathDraft] = useState(path);
+
+  useEffect(() => {
+    setPathDraft(path);
+  }, [path]);
+
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // Commit the path on Enter/blur instead of on every keystroke, so typing a
+  // path does not trigger one directory listing per key press.
+  function commitPathDraft() {
+    const next = pathDraft.trim();
+    if (!next || next === path) {
+      setPathDraft(path);
+      return;
+    }
+
+    onPathChange(next);
+  }
+
+  function handlePathKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    event.stopPropagation();
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitPathDraft();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setPathDraft(path);
+    }
+  }
 
   const orderedItems = useMemo(() => {
     const entries = [...items];
@@ -209,7 +243,13 @@ export function TerminalFileNavigator({
 
       <div className="terminal-file-navigator__pathbar">
         <span className="terminal-file-navigator__prompt">$</span>
-        <input value={path} onChange={(event) => onPathChange(event.target.value)} />
+        <input
+          value={pathDraft}
+          onChange={(event) => setPathDraft(event.target.value)}
+          onKeyDown={handlePathKeyDown}
+          onBlur={commitPathDraft}
+          spellCheck={false}
+        />
       </div>
 
       <div className="terminal-file-navigator__columns" role="row">

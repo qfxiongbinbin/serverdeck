@@ -81,6 +81,19 @@ struct AiProviderImportSuggestion {
     note: String,
 }
 
+// author: BrianXiong
+// time: 2026/05/07/23:30:00
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AiMemoryFile {
+    id: String,
+    agent_name: String,
+    file_name: String,
+    file_path: String,
+    file_size: u64,
+    modified_time: u64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AppPreferencesPayload {
@@ -172,6 +185,15 @@ struct TerminalOutputPayload {
     data: Option<String>,
     bytes: Option<Vec<u8>>,
     stream: String,
+}
+
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerminalExitPayload {
+    session_id: String,
+    exit_code: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -982,7 +1004,37 @@ fn list_archive_entries(path: &Path) -> Result<Vec<String>, String> {
         .collect())
 }
 
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+// OpenSSH connection multiplexing: reuse one authenticated connection per
+// host across terminal/SFTP/monitor commands. The first connection becomes a
+// background master (kept alive 60s after the last client), subsequent ssh
+// and sftp invocations attach to its socket and skip TCP+auth entirely.
+fn control_master_options() -> Vec<String> {
+    let Some(home) = home_dir() else {
+        return Vec::new();
+    };
+
+    let socket_dir = home.join(".serverdeck").join("cm");
+    if fs::create_dir_all(&socket_dir).is_err() {
+        return Vec::new();
+    }
+
+    vec![
+        "-o".to_string(),
+        "ControlMaster=auto".to_string(),
+        "-o".to_string(),
+        format!("ControlPath={}/%C", socket_dir.display()),
+        "-o".to_string(),
+        "ControlPersist=60".to_string(),
+    ]
+}
+
 fn append_ssh_options(command: &mut Command, host: &HostRecord, ssh_options: &SshConnectionOptions) {
+    for option in control_master_options() {
+        command.arg(option);
+    }
+
     command
         .arg("-o")
         .arg("StrictHostKeyChecking=accept-new")
@@ -1065,6 +1117,10 @@ fn build_sftp_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> 
     } else {
         Command::new(resolve_binary("sftp").unwrap_or_else(|_| PathBuf::from("sftp")))
     };
+
+    for option in control_master_options() {
+        command.arg(option);
+    }
 
     command
         .arg("-o")
@@ -1654,6 +1710,17 @@ fn wire_terminal_pty_exit(
                         ),
                         "system",
                     );
+                    // author: BrianXiong
+                    // time: 2026/07/21/00:00:00
+                    // Structured exit event so the UI can flip the tab into a
+                    // disconnected state and offer a reconnect action.
+                    let _ = app.emit(
+                        "terminal-exit",
+                        TerminalExitPayload {
+                            session_id: session_id.clone(),
+                            exit_code: Some(exit_status.exit_code()),
+                        },
+                    );
                     break;
                 }
                 Ok(None) => continue,
@@ -1663,6 +1730,13 @@ fn wire_terminal_pty_exit(
                         &session_id,
                         format!("\r\n[serverdeck] session wait failed: {}\r\n", error),
                         "system",
+                    );
+                    let _ = app.emit(
+                        "terminal-exit",
+                        TerminalExitPayload {
+                            session_id: session_id.clone(),
+                            exit_code: None,
+                        },
                     );
                     break;
                 }
@@ -2249,6 +2323,9 @@ fn start_terminal_session(
     };
 
     cmd.arg("-tt");
+    for option in control_master_options() {
+        cmd.arg(option);
+    }
     cmd.arg("-o");
     cmd.arg("StrictHostKeyChecking=accept-new");
     cmd.arg("-o");
@@ -2479,6 +2556,85 @@ fn detect_ai_provider_imports() -> Result<Vec<AiProviderImportSuggestion>, Strin
 
 #[tauri::command]
 // author: BrianXiong
+// time: 2026/05/07/23:30:00
+fn scan_ai_memory_files() -> Result<Vec<AiMemoryFile>, String> {
+    let mut files = Vec::new();
+    let home = home_dir().ok_or("Cannot resolve home directory")?;
+
+    // Define AI agents and their memory file locations
+    let memory_locations: Vec<(&str, Vec<PathBuf>)> = vec![
+        ("Claude", vec![
+            home.join("CLAUDE.md"),
+            home.join(".claude/CLAUDE.md"),
+        ]),
+        ("Codex", vec![
+            home.join(".codex/AGENTS.md"),
+        ]),
+        ("Alma", vec![
+            home.join(".config/alma/MEMORY.md"),
+            home.join(".config/alma/USER.md"),
+        ]),
+        ("Hermes", vec![
+            home.join(".hermes/SOUL.md"),
+        ]),
+    ];
+
+    for (agent_name, paths) in memory_locations {
+        for path in paths {
+            if path.exists() && path.is_file() {
+                if let Ok(metadata) = fs::metadata(&path) {
+                    let modified_time = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                        .map(|duration| duration.as_secs())
+                        .unwrap_or(0);
+
+                    let file_name = path
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+
+                    files.push(AiMemoryFile {
+                        id: format!("{}:{}", agent_name.to_lowercase(), file_name),
+                        agent_name: agent_name.to_string(),
+                        file_name,
+                        file_path: path.display().to_string(),
+                        file_size: metadata.len(),
+                        modified_time,
+                    });
+                }
+            }
+        }
+    }
+
+    // Sort by agent name, then by file name
+    files.sort_by(|a, b| {
+        a.agent_name.cmp(&b.agent_name).then(a.file_name.cmp(&b.file_name))
+    });
+
+    Ok(files)
+}
+
+#[tauri::command]
+// author: BrianXiong
+// time: 2026/05/07/23:30:00
+fn read_ai_memory_file(path: String) -> Result<String, String> {
+    let expanded = expand_path(&path);
+
+    if !expanded.exists() {
+        return Err(format!("File not found: {}", expanded.display()));
+    }
+
+    if !expanded.is_file() {
+        return Err(format!("Path is not a file: {}", expanded.display()));
+    }
+
+    fs::read_to_string(&expanded).map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+// author: BrianXiong
 // time: 2026/04/05/16:20:45
 fn get_terminal_session_cwd(state: State<AppState>, session_id: String) -> Result<String, String> {
     let sessions = state
@@ -2619,6 +2775,8 @@ fn main() {
             agent_read_file,
             fetch_ai_provider_models,
             detect_ai_provider_imports,
+            scan_ai_memory_files,
+            read_ai_memory_file,
             list_hosts,
             save_host,
             delete_host,

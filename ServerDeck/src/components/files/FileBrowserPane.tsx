@@ -101,6 +101,40 @@ export function FileBrowserPane({
   const paneRef = useRef<HTMLElement | null>(null);
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [pathDraft, setPathDraft] = useState(path);
+
+  useEffect(() => {
+    setPathDraft(path);
+  }, [path]);
+
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // Commit the path on Enter/blur instead of on every keystroke, so typing a
+  // path does not trigger a directory listing (and an SFTP round-trip) per key.
+  function commitPathDraft() {
+    const next = pathDraft.trim();
+    if (!next || next === path) {
+      setPathDraft(path);
+      return;
+    }
+
+    onPathChange(next);
+  }
+
+  function handlePathKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    event.stopPropagation();
+
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commitPathDraft();
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      setPathDraft(path);
+    }
+  }
 
   const orderedItems = useMemo(() => {
     const entries = [...items];
@@ -234,7 +268,14 @@ export function FileBrowserPane({
         <button type="button" className="row-button" onClick={onGoUp} disabled={disabled}>
           {upLabel}
         </button>
-        <input value={path} onChange={(event) => onPathChange(event.target.value)} disabled={disabled} />
+        <input
+          value={pathDraft}
+          onChange={(event) => setPathDraft(event.target.value)}
+          onKeyDown={handlePathKeyDown}
+          onBlur={commitPathDraft}
+          spellCheck={false}
+          disabled={disabled}
+        />
       </div>
 
       <div className="browser-list">
