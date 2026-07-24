@@ -51,6 +51,7 @@ import {
   deleteLocalEntry,
   deleteHost,
   deleteRemoteEntry,
+  duplicateHost,
   detectAiProviderImports,
   downloadFromRemote,
   fetchAiProviderModels,
@@ -3457,11 +3458,10 @@ export default function App() {
     setStatusTone("neutral");
 
     try {
-      const duplicated = await saveHost({
-        ...targetHost,
-        id: crypto.randomUUID(),
-        label: `${getDisplayHostTitle(targetHost)} ${messages.hostCopySuffix}`
-      });
+      const duplicated = await duplicateHost(
+        targetHost.id,
+        `${getDisplayHostTitle(targetHost)} ${messages.hostCopySuffix}`
+      );
       setContextMenu(null);
       setStatus(messages.duplicatedHost(getDisplayHostTitle(targetHost)));
       setStatusTone("success");
@@ -3523,7 +3523,7 @@ export default function App() {
       if (!targetHost.address.trim()) {
         throw new Error(messages.selectOrFillHostFirst);
       }
-      if (targetHost.authType === "password" && !(targetHost.password || "").trim()) {
+      if (targetHost.authType === "password" && !(targetHost.password || "").trim() && !targetHost.hasPassword) {
         throw new Error(messages.passwordRequired);
       }
       if (targetHost.authType === "key" && !(targetHost.privateKeyPath || "").trim()) {
@@ -4474,6 +4474,7 @@ export default function App() {
                           <input
                             type="password"
                             value={draft.password ?? ""}
+                            placeholder={draft.hasPassword ? messages.passwordStoredPlaceholder : undefined}
                             onChange={(event) => setDraft({ ...draft, password: event.target.value })}
                           />
                         </label>

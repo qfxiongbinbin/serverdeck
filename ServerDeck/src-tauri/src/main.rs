@@ -34,6 +34,81 @@ struct HostRecord {
     auth_type: String,
     password: Option<String>,
     private_key_path: Option<String>,
+    // author: BrianXiong
+    // time: 2026/07/21/00:00:00
+    // True when a password for this host is stored in the system keychain.
+    // Passwords themselves are never sent to the UI anymore.
+    #[serde(default)]
+    has_password: bool,
+}
+
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+// Passwords live in the macOS Keychain. The hosts table only stores this
+// marker so we can tell "password saved in keychain" apart from "no password"
+// without touching the keychain on every host listing.
+const KEYCHAIN_SERVICE: &str = "ServerDeck";
+const KEYCHAIN_PASSWORD_MARKER: &str = "__serverdeck_keychain__";
+
+fn keychain_entry(host_id: &str) -> Result<keyring::Entry, String> {
+    keyring::Entry::new(KEYCHAIN_SERVICE, host_id).map_err(|error| error.to_string())
+}
+
+fn keychain_set_password(host_id: &str, password: &str) -> Result<(), String> {
+    keychain_entry(host_id)?
+        .set_password(password)
+        .map_err(|error| error.to_string())
+}
+
+fn keychain_get_password(host_id: &str) -> Option<String> {
+    keychain_entry(host_id)
+        .ok()?
+        .get_password()
+        .ok()
+        .filter(|value| !value.is_empty())
+}
+
+fn keychain_delete_password(host_id: &str) {
+    if let Ok(entry) = keychain_entry(host_id) {
+        let _ = entry.delete_credential();
+    }
+}
+
+// Resolve the password to use for a connection: an explicit password on the
+// record wins (e.g. a value the user just typed but has not saved), otherwise
+// fall back to the keychain entry for this host.
+fn resolve_host_password(host: &HostRecord) -> String {
+    if host.auth_type != "password" {
+        return String::new();
+    }
+
+    if let Some(password) = &host.password {
+        if !password.is_empty() && password != KEYCHAIN_PASSWORD_MARKER {
+            return password.clone();
+        }
+    }
+
+    if let Some(password) = keychain_get_password(&host.id) {
+        return password;
+    }
+
+    // Last resort: legacy plaintext still in the DB because a keychain write
+    // failed. Keeps existing setups working until migration succeeds.
+    if let Ok(conn) = open_db() {
+        if let Ok(stored) = conn.query_row(
+            "SELECT password FROM hosts WHERE id = ?1",
+            params![host.id],
+            |row| row.get::<_, Option<String>>(0),
+        ) {
+            if let Some(value) = stored {
+                if !value.is_empty() && value != KEYCHAIN_PASSWORD_MARKER {
+                    return value;
+                }
+            }
+        }
+    }
+
+    String::new()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,7 +339,40 @@ pub(crate) fn open_db() -> Result<Connection, String> {
     let conn = Connection::open(path).map_err(|error| error.to_string())?;
     init_db(&conn)?;
     migrate_legacy_hosts_if_needed(&conn)?;
+    migrate_plaintext_passwords_to_keychain(&conn)?;
     Ok(conn)
+}
+
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+// One-time (idempotent) migration: move any plaintext password still sitting
+// in the hosts table into the macOS Keychain and replace it with the marker.
+// If the keychain write fails the plaintext row is left untouched so the app
+// keeps working; the migration retries on the next database open.
+fn migrate_plaintext_passwords_to_keychain(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn
+        .prepare("SELECT id, password FROM hosts WHERE password IS NOT NULL AND password != '' AND password != ?1")
+        .map_err(|error| error.to_string())?;
+
+    let rows = stmt
+        .query_map(params![KEYCHAIN_PASSWORD_MARKER], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    for (id, password) in rows {
+        if keychain_set_password(&id, &password).is_ok() {
+            conn.execute(
+                "UPDATE hosts SET password = ?1 WHERE id = ?2",
+                params![KEYCHAIN_PASSWORD_MARKER, id],
+            )
+            .map_err(|error| error.to_string())?;
+        }
+    }
+
+    Ok(())
 }
 
 // author: BrianXiong
@@ -543,6 +651,13 @@ fn load_hosts_from_db(conn: &Connection) -> Result<Vec<HostRecord>, String> {
 
     let rows = stmt
         .query_map([], |row| {
+            let stored_password: Option<String> = row.get(7)?;
+            // author: BrianXiong
+            // time: 2026/07/21/00:00:00
+            // Never hand passwords (or the keychain marker) to the UI — only
+            // a boolean that says whether one is stored.
+            let has_password = matches!(&stored_password, Some(value) if !value.is_empty());
+
             Ok(HostRecord {
                 id: row.get(0)?,
                 label: row.get(1)?,
@@ -551,8 +666,9 @@ fn load_hosts_from_db(conn: &Connection) -> Result<Vec<HostRecord>, String> {
                 port: row.get(4)?,
                 username: row.get(5)?,
                 auth_type: row.get(6)?,
-                password: row.get(7)?,
+                password: None,
                 private_key_path: row.get(8)?,
+                has_password,
             })
         })
         .map_err(|error| error.to_string())?;
@@ -1063,9 +1179,10 @@ fn append_ssh_options(command: &mut Command, host: &HostRecord, ssh_options: &Ss
 
 fn build_ssh_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> Command {
     let destination = format!("{}@{}", host.username, host.address);
-    let mut command = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != "" {
+    let password = resolve_host_password(host);
+    let mut command = if host.auth_type == "password" && !password.is_empty() {
         let mut sshpass = Command::new(resolve_binary("sshpass").unwrap_or_else(|_| PathBuf::from("sshpass")));
-        sshpass.arg("-p").arg(host.password.clone().unwrap_or_default());
+        sshpass.arg("-p").arg(&password);
         sshpass.arg(resolve_binary("ssh").unwrap_or_else(|_| PathBuf::from("ssh")));
         sshpass
     } else {
@@ -1116,9 +1233,10 @@ fn parse_process_observations(output: &str, key: &str) -> Vec<ProcessObservation
 }
 
 fn build_sftp_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> Command {
-    let mut command = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != "" {
+    let password = resolve_host_password(host);
+    let mut command = if host.auth_type == "password" && !password.is_empty() {
         let mut sshpass = Command::new(resolve_binary("sshpass").unwrap_or_else(|_| PathBuf::from("sshpass")));
-        sshpass.arg("-p").arg(host.password.clone().unwrap_or_default());
+        sshpass.arg("-p").arg(&password);
         sshpass.arg(resolve_binary("sftp").unwrap_or_else(|_| PathBuf::from("sftp")));
         sshpass
     } else {
@@ -1772,13 +1890,43 @@ fn list_hosts() -> Result<Vec<HostRecord>, String> {
 }
 
 #[tauri::command]
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+// Passwords are written to the macOS Keychain; the DB only stores a marker.
+// An empty password on save means "keep the stored one" so editing a host
+// never requires re-typing its password.
 fn save_host(mut host: HostRecord) -> Result<HostRecord, String> {
     if host.id.trim().is_empty() {
         host.id = now_millis();
     }
 
     let conn = open_db()?;
+
+    if host.auth_type == "password" {
+        let provided = host.password.clone().unwrap_or_default();
+        if !provided.is_empty() && provided != KEYCHAIN_PASSWORD_MARKER {
+            keychain_set_password(&host.id, &provided)?;
+            host.password = Some(KEYCHAIN_PASSWORD_MARKER.to_string());
+        } else {
+            // Keep whatever is currently stored for this host (marker or legacy value).
+            let existing: Option<String> = conn
+                .query_row(
+                    "SELECT password FROM hosts WHERE id = ?1",
+                    params![host.id],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+                .unwrap_or(None);
+            host.password = existing;
+        }
+    } else {
+        keychain_delete_password(&host.id);
+        host.password = None;
+    }
+
     save_hosts_to_db(&conn, &[host.clone()])?;
+
+    host.has_password = matches!(&host.password, Some(value) if !value.is_empty());
+    host.password = None;
     Ok(host)
 }
 
@@ -1787,7 +1935,39 @@ fn delete_host(id: String) -> Result<bool, String> {
     let conn = open_db()?;
     conn.execute("DELETE FROM hosts WHERE id = ?1", params![id])
         .map_err(|error| error.to_string())?;
+    keychain_delete_password(&id);
     Ok(true)
+}
+
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+// Duplicate a host including its keychain-stored password, so copies of
+// password-auth hosts stay connectable without re-typing the password.
+#[tauri::command]
+fn duplicate_host(id: String, label: String) -> Result<HostRecord, String> {
+    let conn = open_db()?;
+    let hosts = load_hosts_from_db(&conn)?;
+    let source = hosts
+        .into_iter()
+        .find(|host| host.id == id)
+        .ok_or_else(|| "Host not found".to_string())?;
+
+    let mut duplicated = source.clone();
+    duplicated.id = now_millis();
+    duplicated.label = label;
+
+    if duplicated.auth_type == "password" {
+        if let Some(password) = keychain_get_password(&id) {
+            keychain_set_password(&duplicated.id, &password)?;
+            duplicated.password = Some(KEYCHAIN_PASSWORD_MARKER.to_string());
+        }
+    }
+
+    save_hosts_to_db(&conn, &[duplicated.clone()])?;
+
+    duplicated.has_password = matches!(&duplicated.password, Some(value) if !value.is_empty());
+    duplicated.password = None;
+    Ok(duplicated)
 }
 
 #[tauri::command]
@@ -2391,7 +2571,8 @@ fn start_terminal_session(
     eprintln!("[DEBUG] Auth type: {}", host.auth_type);
 
     let destination = format!("{}@{}", host.username, host.address);
-    let mut cmd = if host.auth_type == "password" && host.password.clone().unwrap_or_default() != "" {
+    let password = resolve_host_password(&host);
+    let mut cmd = if host.auth_type == "password" && !password.is_empty() {
         eprintln!("[DEBUG] Using sshpass for password auth");
         let mut c = CommandBuilder::new(
             resolve_binary("sshpass")
@@ -2402,7 +2583,7 @@ fn start_terminal_session(
                 })?,
         );
         c.arg("-p");
-        c.arg(host.password.clone().unwrap_or_default());
+        c.arg(&password);
         c.arg(
             resolve_binary("ssh")
                 .map(|path| path.to_string_lossy().into_owned())
@@ -2882,6 +3063,7 @@ fn main() {
             list_hosts,
             save_host,
             delete_host,
+            duplicate_host,
             test_connection,
             observe_server,
             list_local_directory,
