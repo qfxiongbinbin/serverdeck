@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.35
+
+Compared with `v0.0.34`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Repair sftp header controls layout
+
 ## v0.0.34
 
 Compared with `v0.0.33`.
