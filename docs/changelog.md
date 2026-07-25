@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.36
+
+Compared with `v0.0.35`.
+
+### Added
+
+- Store host passwords in system keychain
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.35
 
 Compared with `v0.0.34`.
