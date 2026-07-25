@@ -166,6 +166,7 @@ type Messages = {
   authPassword: string;
   authKey: string;
   password: string;
+  passwordStoredPlaceholder: string;
   privateKeyPath: string;
   working: string;
   testSsh: string;
@@ -513,6 +514,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     authPassword: "Password",
     authKey: "Private Key",
     password: "Password",
+    passwordStoredPlaceholder: "Saved in Keychain — leave blank to keep",
     privateKeyPath: "Private Key Path",
     working: "Working...",
     testSsh: "Test SSH",
@@ -858,6 +860,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     authPassword: "密码",
     authKey: "私钥",
     password: "密码",
+    passwordStoredPlaceholder: "已存入钥匙串,留空表示不修改",
     privateKeyPath: "私钥路径",
     working: "处理中...",
     testSsh: "测试 SSH",
@@ -1203,6 +1206,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     authPassword: "パスワード",
     authKey: "秘密鍵",
     password: "パスワード",
+    passwordStoredPlaceholder: "キーチェーンに保存済み。変更しない場合は空欄",
     privateKeyPath: "秘密鍵パス",
     working: "処理中...",
     testSsh: "SSH をテスト",

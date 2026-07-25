@@ -10,6 +10,11 @@ export type SavedHost = {
   authType: "password" | "key";
   password?: string;
   privateKeyPath?: string;
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // True when a password is stored in the system keychain for this host.
+  // The password itself is never returned to the UI.
+  hasPassword?: boolean;
 };
 
 export type FileEntry = {
@@ -225,6 +230,24 @@ export async function saveHost(host: SavedHost) {
 
   saveBrowserHosts(next);
   return next[existingIndex >= 0 ? existingIndex : next.length - 1];
+}
+
+// author: BrianXiong
+// time: 2026/07/21/00:00:00
+export async function duplicateHost(id: string, label: string) {
+  if (hasTauri()) {
+    return tauriInvoke<SavedHost>("duplicate_host", { id, label });
+  }
+
+  const items = loadBrowserHosts();
+  const source = items.find((item) => item.id === id);
+  if (!source) {
+    throw new Error("Host not found");
+  }
+
+  const duplicated = { ...source, id: crypto.randomUUID(), label };
+  saveBrowserHosts([...items, duplicated]);
+  return duplicated;
 }
 
 export async function deleteHost(id: string) {
