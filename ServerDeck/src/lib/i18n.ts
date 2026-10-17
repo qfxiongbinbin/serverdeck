@@ -292,6 +292,8 @@ type Messages = {
   sftpWelcomeTitle: string;
   sftpWelcomeDescription: string;
   sftpBackToServers: string;
+  sftpFollowCwd: string;
+  sftpOpenInTerminal: string;
   selectHost: string;
   selectHostPlaceholder: string;
   local: string;
@@ -688,6 +690,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sftpWelcomeTitle: "Welcome to SFTP",
     sftpWelcomeDescription: "Pick a server below to connect. Authentication only starts after you choose one.",
     sftpBackToServers: "Back to servers",
+    sftpFollowCwd: "Follow terminal directory",
+    sftpOpenInTerminal: "Open this directory in terminal",
     selectHost: "Select Host",
     selectHostPlaceholder: "Select host",
     local: "Local",
@@ -1082,6 +1086,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sftpWelcomeTitle: "欢迎使用 SFTP",
     sftpWelcomeDescription: "选择下面的一台服务器开始连接，认证只会在你选择之后进行。",
     sftpBackToServers: "返回服务器列表",
+    sftpFollowCwd: "跟随终端目录",
+    sftpOpenInTerminal: "在此目录打开终端",
     selectHost: "选择主机",
     selectHostPlaceholder: "请选择主机",
     local: "本地",
@@ -1476,6 +1482,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sftpWelcomeTitle: "SFTPへようこそ",
     sftpWelcomeDescription: "下のサーバーを選んで接続します。認証は選択後にのみ開始されます。",
     sftpBackToServers: "サーバー一覧へ戻る",
+    sftpFollowCwd: "ターミナルのディレクトリに追従",
+    sftpOpenInTerminal: "このディレクトリでターミナルを開く",
     selectHost: "ホストを選択",
     selectHostPlaceholder: "ホストを選択",
     local: "ローカル",
