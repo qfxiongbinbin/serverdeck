@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.43
+
+Compared with `v0.0.42`.
+
+### Added
+
+- Add reusable command snippets with variables
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.42
 
 Compared with `v0.0.41`.
