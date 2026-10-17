@@ -46,6 +46,24 @@ ServerDeck は**シングルユーザー・ローカルファースト**のサ�
 
 詳細な計画は社内ナレッジベースで管理し、リリース済みの変更は [`docs/changelog.md`](docs/changelog.md) に記載しています。
 
+## エージェント連携と CLI
+
+アプリの起動中、ServerDeck は同一ユーザー専用のローカルソケット
+（`~/.serverdeck/agent.sock`、モード `0600`）を公開します。スクリプトや
+コーディングエージェントは、保存済みのホスト・鍵・ジャンプホスト設定を
+そのまま再利用でき、接続情報をハードコードする必要がありません。
+
+```bash
+cd ServerDeck
+npm run serverdeck -- ping                    # アプリが起動しているか確認
+npm run serverdeck -- list                    # 保存済みホストを一覧表示
+npm run serverdeck -- exec <host> -- "df -h"  # ssh 経由でコマンドを実行
+```
+
+`<host>` はラベル・アドレス・id のいずれかを受け付け、CLI の終了コードは
+リモートコマンドの終了コードになります。`SERVERDECK_SOCKET` でソケットパスを
+上書きできます。同じソケットを使う MCP サーバーは次の計画です。
+
 ## リポジトリ構成
 
 - `ServerDeck/` — アプリケーション本体のソースコード
