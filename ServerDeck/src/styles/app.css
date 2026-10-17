@@ -690,6 +690,133 @@ select {
   overflow: hidden;
 }
 
+/* author: BrianXiong */
+/* time: 2026/10/18/00:10:00 */
+/* Port forwards view */
+.forwards-screen {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.forwards-screen__inner {
+  display: grid;
+  gap: 18px;
+  padding: 28px clamp(20px, 4vw, 56px) 40px;
+}
+
+.forwards-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.forwards-header h2 {
+  margin: 0 0 6px;
+  color: var(--content-text);
+  font-size: 22px;
+}
+
+.forwards-header span {
+  color: var(--content-muted);
+  font-size: 13px;
+}
+
+.forwards-empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  max-width: 640px;
+  padding: 28px;
+  border: 1px dashed var(--content-border);
+  border-radius: 14px;
+  background: var(--content-subtle-bg);
+  color: var(--content-muted);
+}
+
+.forwards-empty strong {
+  color: var(--content-text);
+  font-size: 14px;
+}
+
+.forwards-list {
+  display: grid;
+  gap: 10px;
+}
+
+.forward-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--content-border);
+  border-radius: 12px;
+  background: var(--content-subtle-bg);
+}
+
+.forward-row__dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--content-muted);
+  opacity: 0.45;
+}
+
+.forward-row__dot--running {
+  background: var(--success);
+  opacity: 1;
+  box-shadow: 0 0 0 3px rgba(48, 196, 141, 0.16);
+}
+
+.forward-row__body {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.forward-row__titleline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.forward-row__titleline strong {
+  overflow: hidden;
+  color: var(--content-text);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forward-row__kind {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--content-border);
+  border-radius: 999px;
+  color: var(--content-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.forward-row__meta {
+  overflow: hidden;
+  color: var(--content-muted);
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.forward-row__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .transfer-panel {
   border-top: 1px solid var(--content-border);
   background: var(--content-raised-bg);

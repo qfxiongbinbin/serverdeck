@@ -461,3 +461,57 @@ export async function closeTerminalSession(sessionId: string) {
   }
   return true;
 }
+
+// author: BrianXiong
+// time: 2026/10/18/00:10:00
+export type PortForward = {
+  id: string;
+  label: string;
+  kind: "local" | "remote" | "dynamic";
+  bindHost: string;
+  bindPort: number;
+  targetHost: string;
+  targetPort: number;
+  hostId: string;
+  autoStart: boolean;
+};
+
+export type PortForwardStatus = {
+  forward: PortForward;
+  running: boolean;
+};
+
+export async function listPortForwards() {
+  if (hasTauri()) {
+    return tauriInvoke<PortForwardStatus[]>("list_port_forwards");
+  }
+  return [] as PortForwardStatus[];
+}
+
+export async function savePortForward(forward: PortForward) {
+  if (hasTauri()) {
+    return tauriInvoke<PortForward>("save_port_forward", { forward });
+  }
+  return forward;
+}
+
+export async function deletePortForward(id: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("delete_port_forward", { id });
+  }
+  return true;
+}
+
+export async function startPortForward(id: string, sshOptions: SshConnectionOptions) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("start_port_forward", { id, sshOptions });
+  }
+  return true;
+}
+
+export async function stopPortForward(id: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("stop_port_forward", { id });
+  }
+  return true;
+}

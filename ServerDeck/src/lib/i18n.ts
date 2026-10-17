@@ -69,6 +69,35 @@ type Messages = {
   terminalOpenFailed: string;
   closedTerminalTab: (title: string) => string;
   monitor: string;
+  forwards: string;
+  forwardsDescription: string;
+  newForward: string;
+  editForward: string;
+  forwardLabel: string;
+  forwardKind: string;
+  forwardKindLocal: string;
+  forwardKindRemote: string;
+  forwardKindDynamic: string;
+  forwardHost: string;
+  forwardBindHost: string;
+  forwardBindPort: string;
+  forwardTargetHost: string;
+  forwardTargetPort: string;
+  forwardAutoStart: string;
+  forwardAutoStartDescription: string;
+  forwardStart: string;
+  forwardStop: string;
+  forwardsEmpty: string;
+  forwardsEmptyDescription: string;
+  forwardsHostMissing: string;
+  forwardsLoadFailed: string;
+  forwardsSaved: string;
+  forwardsSaveFailed: string;
+  forwardsStarted: (name: string) => string;
+  forwardsStopped: (name: string) => string;
+  forwardsToggleFailed: string;
+  forwardsDeleted: string;
+  forwardsConfirmDelete: string;
   monitorDescription: string;
   monitorLoading: string;
   monitorLoadingDescription: string;
@@ -362,6 +391,35 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalOpenFailed: "Terminal open failed",
     closedTerminalTab: (title) => `Closed terminal tab ${title}`,
     monitor: "Monitor",
+    forwards: "Port Forwards",
+    forwardsDescription: "Reusable tunnels that reach remote services from this Mac.",
+    newForward: "New forward",
+    editForward: "Edit forward",
+    forwardLabel: "Name",
+    forwardKind: "Type",
+    forwardKindLocal: "Local (-L)",
+    forwardKindRemote: "Remote (-R)",
+    forwardKindDynamic: "Dynamic SOCKS (-D)",
+    forwardHost: "Through host",
+    forwardBindHost: "Bind address",
+    forwardBindPort: "Bind port",
+    forwardTargetHost: "Target host",
+    forwardTargetPort: "Target port",
+    forwardAutoStart: "Auto start",
+    forwardAutoStartDescription: "Open this tunnel when ServerDeck launches.",
+    forwardStart: "Start",
+    forwardStop: "Stop",
+    forwardsEmpty: "No port forwards yet",
+    forwardsEmptyDescription: "Create a tunnel to reach a remote database, web UI, or anything else behind a firewall.",
+    forwardsHostMissing: "Host missing",
+    forwardsLoadFailed: "Failed to load port forwards",
+    forwardsSaved: "Port forward saved",
+    forwardsSaveFailed: "Failed to save port forward",
+    forwardsStarted: (name: string) => `Tunnel started: ${name}`,
+    forwardsStopped: (name: string) => `Tunnel stopped: ${name}`,
+    forwardsToggleFailed: "Failed to toggle tunnel",
+    forwardsDeleted: "Port forward deleted",
+    forwardsConfirmDelete: "Confirm delete",
     monitorDescription: "Observe key server status and refresh it on demand.",
     monitorLoading: "Loading server observation",
     monitorLoadingDescription: "Collecting a quick status snapshot from the remote server.",
@@ -653,6 +711,35 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalOpenFailed: "打开终端失败",
     closedTerminalTab: (title) => `已关闭终端标签 ${title}`,
     monitor: "监控",
+    forwards: "端口转发",
+    forwardsDescription: "可复用的隧道，用这台 Mac 访问远端服务。",
+    newForward: "新建转发",
+    editForward: "编辑转发",
+    forwardLabel: "名称",
+    forwardKind: "类型",
+    forwardKindLocal: "本地 (-L)",
+    forwardKindRemote: "远程 (-R)",
+    forwardKindDynamic: "动态 SOCKS (-D)",
+    forwardHost: "经由主机",
+    forwardBindHost: "监听地址",
+    forwardBindPort: "监听端口",
+    forwardTargetHost: "目标地址",
+    forwardTargetPort: "目标端口",
+    forwardAutoStart: "自动启动",
+    forwardAutoStartDescription: "ServerDeck 启动时自动打开该隧道。",
+    forwardStart: "启动",
+    forwardStop: "停止",
+    forwardsEmpty: "还没有端口转发",
+    forwardsEmptyDescription: "创建隧道来访问远端数据库、Web 后台，或任何被防火墙挡住的服务。",
+    forwardsHostMissing: "主机已不存在",
+    forwardsLoadFailed: "加载端口转发失败",
+    forwardsSaved: "端口转发已保存",
+    forwardsSaveFailed: "保存端口转发失败",
+    forwardsStarted: (name: string) => `隧道已启动：${name}`,
+    forwardsStopped: (name: string) => `隧道已停止：${name}`,
+    forwardsToggleFailed: "切换隧道失败",
+    forwardsDeleted: "端口转发已删除",
+    forwardsConfirmDelete: "确认删除",
     monitorDescription: "观测服务器关键状态，并支持手动刷新。",
     monitorLoading: "正在加载服务器观测数据",
     monitorLoadingDescription: "正在从远程服务器采集一份快速状态快照。",
@@ -944,6 +1031,35 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalOpenFailed: "ターミナルを開けませんでした",
     closedTerminalTab: (title) => `ターミナルタブ ${title} を閉じました`,
     monitor: "監視",
+    forwards: "ポートフォワード",
+    forwardsDescription: "この Mac からリモートサービスへ接続するための再利用可能なトンネル。",
+    newForward: "新規フォワード",
+    editForward: "フォワードを編集",
+    forwardLabel: "名前",
+    forwardKind: "種類",
+    forwardKindLocal: "ローカル (-L)",
+    forwardKindRemote: "リモート (-R)",
+    forwardKindDynamic: "ダイナミック SOCKS (-D)",
+    forwardHost: "経由ホスト",
+    forwardBindHost: "バインドアドレス",
+    forwardBindPort: "バインドポート",
+    forwardTargetHost: "ターゲットホスト",
+    forwardTargetPort: "ターゲットポート",
+    forwardAutoStart: "自動起動",
+    forwardAutoStartDescription: "ServerDeck の起動時にこのトンネルを開きます。",
+    forwardStart: "開始",
+    forwardStop: "停止",
+    forwardsEmpty: "ポートフォワードがありません",
+    forwardsEmptyDescription: "ファイアウォールの内側にあるデータベースや Web UI に接続するトンネルを作成します。",
+    forwardsHostMissing: "ホストが見つかりません",
+    forwardsLoadFailed: "ポートフォワードの読み込みに失敗しました",
+    forwardsSaved: "ポートフォワードを保存しました",
+    forwardsSaveFailed: "ポートフォワードの保存に失敗しました",
+    forwardsStarted: (name: string) => `トンネルを開始しました: ${name}`,
+    forwardsStopped: (name: string) => `トンネルを停止しました: ${name}`,
+    forwardsToggleFailed: "トンネルの切り替えに失敗しました",
+    forwardsDeleted: "ポートフォワードを削除しました",
+    forwardsConfirmDelete: "削除を確認",
     monitorDescription: "サーバーの主要な状態を確認し、必要に応じて手動更新します。",
     monitorLoading: "サーバー監視情報を読み込み中",
     monitorLoadingDescription: "リモートサーバーから簡易ステータスを収集中です。",
