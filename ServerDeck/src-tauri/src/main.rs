@@ -3555,6 +3555,139 @@ fn import_ssh_config(aliases: Vec<String>) -> Result<SshConfigImportReport, Stri
     import_ssh_config_entries(&open_db()?, &path, &aliases)
 }
 
+// author: BrianXiong
+// time: 2026/10/18/01:00:00
+// Known hosts are listed through `ssh-keygen -l` so hashed entries, key types
+// and fingerprints come straight from OpenSSH instead of a hand-rolled parser.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KnownHostRecord {
+    host: String,
+    key_type: String,
+    fingerprint: String,
+    bits: String,
+}
+
+fn known_hosts_path() -> Option<PathBuf> {
+    home_dir().map(|home| home.join(".ssh").join("known_hosts"))
+}
+
+// author: BrianXiong
+// time: 2026/10/18/01:00:00
+// `ssh-keygen -l -f known_hosts` prints "<bits> <fingerprint> <host...> (<TYPE>)".
+fn parse_known_hosts_listing(stdout: &str) -> Vec<KnownHostRecord> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let bits = parts.next()?.to_string();
+            let fingerprint = parts.next()?.to_string();
+            let rest: Vec<&str> = parts.collect();
+            if rest.is_empty() {
+                return None;
+            }
+
+            let last = rest[rest.len() - 1];
+            let key_type = if last.starts_with('(') && last.ends_with(')') {
+                last.trim_matches(|character| character == '(' || character == ')').to_string()
+            } else {
+                String::new()
+            };
+            let host_end = if key_type.is_empty() { rest.len() } else { rest.len() - 1 };
+            let host = rest[..host_end].join(" ");
+            if host.is_empty() {
+                return None;
+            }
+
+            Some(KnownHostRecord {
+                host,
+                key_type,
+                fingerprint,
+                bits,
+            })
+        })
+        .collect()
+}
+
+// author: BrianXiong
+// time: 2026/10/18/01:00:00
+// Rewrites known_hosts without the matching entries. Matching by raw first field
+// keeps hashed entries (`|1|salt|hash`) removable from the UI as well.
+fn remove_known_host_entries(path: &Path, host: &str) -> Result<bool, String> {
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let mut removed = false;
+
+    let remaining: Vec<&str> = content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                return true;
+            }
+
+            let Some(first_field) = trimmed.split_whitespace().next() else {
+                return true;
+            };
+            let matches = first_field.split(',').any(|candidate| candidate == host);
+            if matches {
+                removed = true;
+            }
+            !matches
+        })
+        .collect();
+
+    if removed {
+        let mut next = remaining.join("\n");
+        if !next.is_empty() {
+            next.push('\n');
+        }
+        fs::write(path, next).map_err(|error| error.to_string())?;
+    }
+
+    Ok(removed)
+}
+
+#[tauri::command]
+fn list_known_hosts() -> Result<Vec<KnownHostRecord>, String> {
+    let path = known_hosts_path().ok_or_else(|| "Cannot resolve home directory".to_string())?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let output = Command::new(resolve_binary("ssh-keygen")?)
+        .arg("-l")
+        .arg("-f")
+        .arg(&path)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "Failed to read known_hosts".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    Ok(parse_known_hosts_listing(&String::from_utf8_lossy(&output.stdout)))
+}
+
+#[tauri::command]
+fn remove_known_host(host: String) -> Result<bool, String> {
+    let target = host.trim();
+    if target.is_empty() {
+        return Err("Host is required".to_string());
+    }
+
+    let path = known_hosts_path().ok_or_else(|| "Cannot resolve home directory".to_string())?;
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    remove_known_host_entries(&path, target)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -3609,7 +3742,9 @@ fn main() {
             start_port_forward,
             stop_port_forward,
             preview_ssh_config,
-            import_ssh_config
+            import_ssh_config,
+            list_known_hosts,
+            remove_known_host
         ])
         .build(tauri::generate_context!())
         .expect("error while building ServerDeck");
@@ -3979,6 +4114,43 @@ Host target
         let hosts = load_hosts_from_db(&conn).expect("load hosts");
         let target = hosts.iter().find(|host| host.label == "target").expect("target host");
         assert_eq!(target.address, "10.0.0.42");
+
+        fs::remove_file(&path).ok();
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/18/01:00:00
+    #[test]
+    fn parse_known_hosts_listing_reads_entries() {
+        let listing = "2048 SHA256:abc123 1.2.3.4,5.6.7.8 (RSA)\n256 SHA256:def456 [10.0.0.9]:2222 (ED25519)\n|1|salt|hash SHA256:ghi789 |1|salt|hash (ED25519)\n";
+        let entries = parse_known_hosts_listing(listing);
+
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].host, "1.2.3.4,5.6.7.8");
+        assert_eq!(entries[0].fingerprint, "SHA256:abc123");
+        assert_eq!(entries[0].bits, "2048");
+        assert_eq!(entries[0].key_type, "RSA");
+        assert_eq!(entries[1].host, "[10.0.0.9]:2222");
+        assert_eq!(entries[2].host, "|1|salt|hash");
+    }
+
+    #[test]
+    fn remove_known_host_entries_drops_matching_lines() {
+        let path = std::env::temp_dir().join(format!("serverdeck-known-hosts-{}", Uuid::new_v4()));
+        fs::write(
+            &path,
+            "1.2.3.4 ssh-rsa AAAA\n[10.0.0.9]:2222 ssh-ed25519 BBBB\n|1|salt|hash ssh-ed25519 CCCC\n",
+        )
+        .expect("write known hosts");
+
+        assert!(remove_known_host_entries(&path, "1.2.3.4").expect("remove plain"));
+        assert!(remove_known_host_entries(&path, "|1|salt|hash").expect("remove hashed"));
+        assert!(!remove_known_host_entries(&path, "9.9.9.9").expect("no match"));
+
+        let remaining = fs::read_to_string(&path).expect("read known hosts");
+        assert!(!remaining.contains("1.2.3.4"));
+        assert!(!remaining.contains("|1|salt|hash"));
+        assert!(remaining.contains("[10.0.0.9]:2222"));
 
         fs::remove_file(&path).ok();
     }

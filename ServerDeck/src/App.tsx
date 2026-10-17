@@ -21,6 +21,7 @@ import {
   Download,
   FolderOpen,
   Info,
+  KeyRound,
   Link2,
   PanelLeftClose,
   PanelLeftOpen,
@@ -83,6 +84,9 @@ import {
   stopPortForward,
   previewSshConfig,
   importSshConfig,
+  listKnownHosts,
+  removeKnownHost,
+  type KnownHostRecord,
   type SshConfigPreview,
   type AppPreferences,
   type LocalFilePreview,
@@ -106,6 +110,7 @@ import {
   type AppLanguage
 } from "./lib/i18n";
 import { formatFileSize, getParentPath, joinChildPath } from "./lib/fileBrowser";
+import { detectSshErrorHint, type SshErrorHint } from "./lib/sshErrors";
 import { isSettingsWindowView, openSettingsWindow } from "./lib/appWindow";
 import {
   defaultTerminalThemeId,
@@ -245,7 +250,7 @@ type AppSettings = {
 
 type UpdateStage = "idle" | "downloading" | "ready";
 type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
-type SettingsSectionId = "general" | "projects" | "terminal" | "about" | "danger";
+type SettingsSectionId = "general" | "projects" | "terminal" | "ssh" | "about" | "danger";
 type ProjectEditorMode = "new" | "edit";
 type LocalTerminalSource = "default" | "project" | "directory";
 
@@ -785,6 +790,8 @@ export default function App() {
   const [sshConfigPreview, setSshConfigPreview] = useState<SshConfigPreview | null>(null);
   const [sshConfigSelected, setSshConfigSelected] = useState<string[]>([]);
   const [sshConfigBusy, setSshConfigBusy] = useState(false);
+  const [knownHosts, setKnownHosts] = useState<KnownHostRecord[]>([]);
+  const [knownHostsLoading, setKnownHostsLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
   const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
@@ -1174,10 +1181,11 @@ export default function App() {
       { id: "general" as const, label: messages.general, icon: Wrench },
       { id: "projects" as const, label: messages.projects, icon: FolderOpen },
       { id: "terminal" as const, label: messages.terminal, icon: TerminalSquare },
+      { id: "ssh" as const, label: messages.sshSettings, icon: KeyRound },
       { id: "about" as const, label: messages.about, icon: Info },
       { id: "danger" as const, label: messages.dangerZone, icon: ShieldAlert }
     ],
-    [messages.about, messages.dangerZone, messages.general, messages.projects, messages.terminal]
+    [messages.about, messages.dangerZone, messages.general, messages.projects, messages.sshSettings, messages.terminal]
   );
 
   // author: BrianXiong
@@ -2754,7 +2762,7 @@ export default function App() {
       setStatus(message);
       setStatusTone("success");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : messages.connectionTestFailed);
+      setStatus(formatSshFailure(error instanceof Error ? error.message : messages.connectionTestFailed));
       setStatusTone("error");
     }
   }
@@ -2886,6 +2894,75 @@ export default function App() {
         .filter((entry) => entry.state !== "unchanged")
         .map((entry) => entry.alias)
     );
+  }
+
+  function sshHintText(hint: SshErrorHint): string {
+    switch (hint) {
+      case "dns":
+        return messages.sshErrorDns;
+      case "refused":
+        return messages.sshErrorRefused;
+      case "timeout":
+        return messages.sshErrorTimeout;
+      case "unreachable":
+        return messages.sshErrorUnreachable;
+      case "publicKey":
+        return messages.sshErrorPublicKey;
+      case "password":
+        return messages.sshErrorPassword;
+      case "hostKey":
+        return messages.sshErrorHostKey;
+      case "tooManyAttempts":
+        return messages.sshErrorTooManyAttempts;
+      case "connectionReset":
+        return messages.sshErrorConnectionReset;
+      case "sshpassMissing":
+        return messages.sshErrorSshpassMissing;
+    }
+  }
+
+  // author: BrianXiong
+  // time: 2026/10/18/01:00:00
+  // Prefixes raw ssh stderr with a plain-language hint so failures are
+  // actionable, while keeping the original message available.
+  function formatSshFailure(raw: string): string {
+    const hint = detectSshErrorHint(raw);
+    if (!hint) {
+      return raw;
+    }
+
+    return `${sshHintText(hint)} — ${raw}`;
+  }
+
+  async function refreshKnownHosts() {
+    setKnownHostsLoading(true);
+
+    try {
+      setKnownHosts(await listKnownHosts());
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.knownHostsLoadFailed));
+      setStatusTone("error");
+    } finally {
+      setKnownHostsLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (activeSettingsSection === "ssh") {
+      void refreshKnownHosts();
+    }
+  }, [activeSettingsSection]);
+
+  async function handleRemoveKnownHost(host: string) {
+    try {
+      await removeKnownHost(host);
+      await refreshKnownHosts();
+      setStatus(messages.knownHostsRemoved(host));
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.knownHostsRemoveFailed));
+      setStatusTone("error");
+    }
   }
 
   async function handleImportSshConfig() {
@@ -3038,7 +3115,7 @@ export default function App() {
       setStatus(message);
       setStatusTone("success");
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : messages.connectionTestFailed);
+      setStatus(formatSshFailure(error instanceof Error ? error.message : messages.connectionTestFailed));
       setStatusTone("error");
     } finally {
       setBusy(false);
@@ -4645,6 +4722,74 @@ export default function App() {
                             );
                           })}
                         </div>
+                      </div>
+                    </section>
+                  ) : null}
+
+                  {activeSettingsSection === "ssh" ? (
+                    <section className="settings-panel">
+                      <div className="settings-panel__header">
+                        <KeyRound size={18} />
+                        <div>
+                          <h3>{messages.sshSettings}</h3>
+                          <span>{messages.sshSettingsDescription}</span>
+                        </div>
+                      </div>
+
+                      <div className="settings-panel__toolbar">
+                        <span className="settings-panel__toolbar-label">{messages.knownHosts}</span>
+                        <button
+                          type="button"
+                          className="secondary-button secondary-button--compact"
+                          onClick={() => void refreshKnownHosts()}
+                          disabled={knownHostsLoading}
+                        >
+                          <RefreshCw size={14} />
+                          {messages.knownHostsRefresh}
+                        </button>
+                      </div>
+
+                      <div className="settings-card settings-card--projects">
+                        {knownHostsLoading ? (
+                          <div className="project-empty-state">
+                            <strong>{messages.loading}</strong>
+                          </div>
+                        ) : knownHosts.length === 0 ? (
+                          <div className="project-empty-state">
+                            <strong>{messages.knownHostsEmpty}</strong>
+                            <span>{messages.knownHostsDescription}</span>
+                          </div>
+                        ) : (
+                          knownHosts.map((entry) => (
+                            <div key={`${entry.host}-${entry.keyType}-${entry.fingerprint}`} className="project-row">
+                              <div className="project-row__icon">
+                                <KeyRound size={18} />
+                              </div>
+
+                              <div className="project-row__body">
+                                <div className="project-row__titleline">
+                                  <strong>{entry.host}</strong>
+                                  {entry.keyType ? <span>{entry.keyType}</span> : null}
+                                </div>
+                                <div className="project-row__path">
+                                  {entry.fingerprint}
+                                  {entry.bits ? ` · ${entry.bits} bits` : ""}
+                                </div>
+                              </div>
+
+                              <div className="project-row__actions">
+                                <button
+                                  type="button"
+                                  className="danger-button"
+                                  onClick={() => void handleRemoveKnownHost(entry.host)}
+                                >
+                                  <Trash2 size={14} />
+                                  {messages.delete}
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
                       </div>
                     </section>
                   ) : null}
