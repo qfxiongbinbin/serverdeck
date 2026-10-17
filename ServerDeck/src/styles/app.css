@@ -1085,6 +1085,74 @@ select {
   tab-size: 2;
 }
 
+/* author: BrianXiong */
+/* time: 2026/10/18/03:40:00 */
+/* SFTP path bookmarks */
+.sftp-bookmarks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 23px 10px;
+}
+
+.sftp-bookmark {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--content-border);
+  border-radius: 999px;
+  background: var(--content-subtle-bg);
+  overflow: hidden;
+}
+
+.sftp-bookmark__open {
+  padding: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--content-text);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sftp-bookmark__open:hover {
+  color: var(--blue);
+}
+
+.sftp-bookmark__remove {
+  padding: 2px 8px;
+  border: 0;
+  border-left: 1px solid var(--content-border);
+  background: transparent;
+  color: var(--content-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sftp-bookmark__remove:hover {
+  color: var(--error);
+}
+
+.sftp-bookmark__add {
+  padding: 4px 10px;
+  border: 1px dashed var(--content-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--content-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.sftp-bookmark__add:hover {
+  border-color: var(--blue);
+  color: var(--content-text);
+}
+
 .transfer-panel {
   border-top: 1px solid var(--content-border);
   background: var(--content-raised-bg);

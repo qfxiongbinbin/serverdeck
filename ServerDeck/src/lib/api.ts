@@ -670,3 +670,33 @@ export async function writeRemoteTextFile(
   }
   return true;
 }
+
+// author: BrianXiong
+// time: 2026/10/18/03:40:00
+export type SftpBookmark = {
+  id: string;
+  hostId: string;
+  path: string;
+  label: string;
+};
+
+export async function listSftpBookmarks(hostId: string) {
+  if (hasTauri()) {
+    return tauriInvoke<SftpBookmark[]>("list_sftp_bookmarks", { hostId });
+  }
+  return [] as SftpBookmark[];
+}
+
+export async function saveSftpBookmark(bookmark: SftpBookmark) {
+  if (hasTauri()) {
+    return tauriInvoke<SftpBookmark>("save_sftp_bookmark", { bookmark });
+  }
+  return bookmark;
+}
+
+export async function deleteSftpBookmark(id: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("delete_sftp_bookmark", { id });
+  }
+  return true;
+}
