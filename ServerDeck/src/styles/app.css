@@ -1822,6 +1822,56 @@ select {
   color: #4f7fd1;
 }
 
+.sftp-welcome {
+  gap: 14px;
+  overflow-y: auto;
+}
+
+.sftp-welcome__hosts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
+  width: min(640px, 100%);
+  margin-top: 6px;
+}
+
+.sftp-welcome__host {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  text-align: left;
+  border: 1px solid var(--content-border);
+  border-radius: 10px;
+  background: var(--content-subtle-bg);
+  color: var(--content-text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.sftp-welcome__host:hover {
+  border-color: #4f7fd1;
+  background: var(--content-control-bg);
+}
+
+.sftp-welcome__host strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.sftp-welcome__host span {
+  font-size: 12px;
+  color: var(--content-muted);
+}
+
+.sftp-welcome__empty {
+  color: var(--content-muted);
+}
+
+.sftp-back-button {
+  height: 36px;
+  white-space: nowrap;
+}
+
 .hosts-toolbar {
   display: flex;
   align-items: center;

@@ -61,11 +61,25 @@ fn keychain_set_password(host_id: &str, password: &str) -> Result<(), String> {
 }
 
 fn keychain_get_password(host_id: &str) -> Option<String> {
-    keychain_entry(host_id)
-        .ok()?
-        .get_password()
-        .ok()
-        .filter(|value| !value.is_empty())
+    let entry = match keychain_entry(host_id) {
+        Ok(entry) => entry,
+        Err(error) => {
+            eprintln!("[keychain] failed to build entry for host {host_id}: {error}");
+            return None;
+        }
+    };
+
+    match entry.get_password() {
+        Ok(value) if !value.is_empty() => Some(value),
+        Ok(_) => {
+            eprintln!("[keychain] empty password stored for host {host_id}");
+            None
+        }
+        Err(error) => {
+            eprintln!("[keychain] read failed for host {host_id}: {error}");
+            None
+        }
+    }
 }
 
 fn keychain_delete_password(host_id: &str) {
@@ -1232,6 +1246,25 @@ fn parse_process_observations(output: &str, key: &str) -> Vec<ProcessObservation
         .collect()
 }
 
+// author: BrianXiong
+// time: 2026/08/19/17:30:00
+// Batch-mode SFTP sessions cannot prompt for a password: when a password-auth
+// host has no resolvable password (its keychain entry is gone and no stored
+// fallback exists) the connection can only fail with a cryptic
+// "Permission denied" in the file panel. Fail fast with an actionable
+// message instead so the user knows to re-enter the password once.
+fn ensure_sftp_password_available(host: &HostRecord) -> Result<(), String> {
+    if host.auth_type == "password" && resolve_host_password(host).is_empty() {
+        let display = if host.label.trim().is_empty() { &host.address } else { &host.label };
+        return Err(format!(
+            "No password available for host {display}: its keychain entry is missing. \
+             Open the host settings and re-enter the password once to restore access."
+        ));
+    }
+
+    Ok(())
+}
+
 fn build_sftp_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> Command {
     let password = resolve_host_password(host);
     let mut command = if host.auth_type == "password" && !password.is_empty() {
@@ -1326,6 +1359,8 @@ fn run_sftp_batch(
     ssh_options: &SshConnectionOptions,
     batch: &str,
 ) -> Result<std::process::Output, String> {
+    ensure_sftp_password_available(host)?;
+
     let destination = format!("{}@{}", host.username, host.address);
     let mut child = build_sftp_command(host, ssh_options)
         .arg("-b")
@@ -1371,6 +1406,8 @@ fn run_sftp_batch_with_job(
     ssh_options: &SshConnectionOptions,
     batch: &str,
 ) -> Result<std::process::Output, String> {
+    ensure_sftp_password_available(host)?;
+
     let destination = format!("{}@{}", host.username, host.address);
     let mut child = build_sftp_command(host, ssh_options)
         .arg("-b")
@@ -1547,6 +1584,8 @@ fn run_sftp_batch_with_download_job(
     ssh_options: &SshConnectionOptions,
     batch: &str,
 ) -> Result<std::process::Output, String> {
+    ensure_sftp_password_available(host)?;
+
     let destination = format!("{}@{}", host.username, host.address);
     let mut child = build_sftp_command(host, ssh_options)
         .arg("-b")
@@ -1972,6 +2011,8 @@ fn duplicate_host(id: String, label: String) -> Result<HostRecord, String> {
 
 #[tauri::command]
 fn test_connection(host: HostRecord, ssh_options: SshConnectionOptions) -> Result<String, String> {
+    ensure_sftp_password_available(&host)?;
+
     let output = build_ssh_command(&host, &ssh_options)
         .arg("echo serverdeck-connected")
         .output()
@@ -3090,4 +3131,61 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running ServerDeck");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // author: BrianXiong
+    // time: 2026/08/19/17:40:00
+    // A password-auth host whose keychain entry does not exist must fail fast
+    // with the actionable message instead of silently degrading into a doomed
+    // batch-mode sftp attempt. The random id guarantees the entry is missing.
+    #[test]
+    fn password_host_without_keychain_entry_fails_fast() {
+        let host = HostRecord {
+            id: "00000000-0000-4000-8000-000000000000".to_string(),
+            label: "Probe Host".to_string(),
+            project_id: "default".to_string(),
+            address: "203.0.113.10".to_string(),
+            port: 22,
+            username: "root".to_string(),
+            auth_type: "password".to_string(),
+            password: None,
+            private_key_path: None,
+            has_password: true,
+        };
+
+        let result = ensure_sftp_password_available(&host);
+        assert!(result.is_err());
+        let message = result.unwrap_err();
+        assert!(message.contains("Probe Host"), "message should name the host: {message}");
+        assert!(message.contains("keychain"), "message should mention the keychain: {message}");
+    }
+
+    // author: BrianXiong
+    // time: 2026/08/19/17:40:00
+    // An explicit password (e.g. just typed in the editor, not saved yet)
+    // must always pass the guard, and key-auth hosts never need one.
+    #[test]
+    fn explicit_password_and_key_auth_pass_guard() {
+        let mut host = HostRecord {
+            id: "00000000-0000-4000-8000-000000000001".to_string(),
+            label: String::new(),
+            project_id: "default".to_string(),
+            address: "203.0.113.11".to_string(),
+            port: 22,
+            username: "root".to_string(),
+            auth_type: "password".to_string(),
+            password: Some("typed-in-editor".to_string()),
+            private_key_path: None,
+            has_password: false,
+        };
+        assert!(ensure_sftp_password_available(&host).is_ok());
+
+        host.auth_type = "key".to_string();
+        host.password = None;
+        assert!(ensure_sftp_password_available(&host).is_ok());
+    }
 }

@@ -802,6 +802,11 @@ export default function App() {
   const [monitorTabs, setMonitorTabs] = useState<MonitorTab[]>([]);
   const [hosts, setHosts] = useState<SavedHost[]>([]);
   const [selectedId, setSelectedId] = useState("");
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // The SFTP view keeps its own host selection (empty by default) so entering
+  // the view never triggers keychain/SSH auth until the user picks a server.
+  const [sftpHostId, setSftpHostId] = useState("");
   const [draft, setDraft] = useState<SavedHost>(blankHost);
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -909,6 +914,11 @@ export default function App() {
   const selectedHost = useMemo(
     () => hosts.find((item) => item.id === selectedId) ?? null,
     [hosts, selectedId]
+  );
+
+  const sftpHost = useMemo(
+    () => hosts.find((item) => item.id === sftpHostId) ?? null,
+    [hosts, sftpHostId]
   );
 
   const activeTerminalTab = useMemo(
@@ -2175,7 +2185,7 @@ export default function App() {
   }, [isLocalTerminalView, isSftpView, localPath, localPreviewOpen, localRefreshTick, messages.failedLoadLocalDirectory]);
 
   useEffect(() => {
-    if (!isSftpView || !selectedHost) {
+    if (!isSftpView || !sftpHost) {
       setRemoteEntries([]);
       setRemoteError("");
       return;
@@ -2184,7 +2194,7 @@ export default function App() {
     let cancelled = false;
     setRemoteLoading(true);
     setRemoteError("");
-    void listRemoteDirectory(selectedHost, remotePath, sshOptions)
+    void listRemoteDirectory(sftpHost, remotePath, sshOptions)
       .then((items) => {
         if (!cancelled) setRemoteEntries(items);
       })
@@ -2201,19 +2211,19 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, selectedHost, remotePath, remoteRefreshTick, sshOptions]);
+  }, [isSftpView, sftpHost, remotePath, remoteRefreshTick, sshOptions]);
 
   // author: BrianXiong
   // time: 2026/07/21/00:00:00
   // Resolve the placeholder "." into the real remote home directory so the
   // path bar shows an absolute path users can read, edit and copy.
   useEffect(() => {
-    if (!isSftpView || !selectedHost || remotePath !== ".") {
+    if (!isSftpView || !sftpHost || remotePath !== ".") {
       return;
     }
 
     let cancelled = false;
-    void resolveRemotePath(selectedHost, ".", sshOptions)
+    void resolveRemotePath(sftpHost, ".", sshOptions)
       .then((absolutePath) => {
         const next = absolutePath.trim();
         if (!cancelled && next && next !== ".") {
@@ -2225,7 +2235,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, remotePath, selectedHost, sshOptions]);
+  }, [isSftpView, remotePath, sftpHost, sshOptions]);
 
   useEffect(() => {
     setLocalPreview(null);
@@ -3262,9 +3272,9 @@ export default function App() {
   }
 
   async function handleUploadEntry(entry: FileEntry) {
-    if (!selectedHost) return;
+    if (!sftpHost) return;
     const jobId = startTransferJob(entry.name, "upload", messages.uploadingTo(remotePath), {
-      host: selectedHost,
+      host: sftpHost,
       remoteDir: remotePath,
       totalBytes: entry.size,
     });
@@ -3272,7 +3282,7 @@ export default function App() {
     setStatus(messages.uploadingTo(remotePath));
     setStatusTone("neutral");
     try {
-      await startUploadToRemote(selectedHost, entry.path, remotePath, sshOptions, jobId);
+      await startUploadToRemote(sftpHost, entry.path, remotePath, sshOptions, jobId);
     } catch (error) {
       const message = getErrorMessage(error, messages.uploadFailed(entry.name));
       setStatus(message);
@@ -3310,7 +3320,7 @@ export default function App() {
   }
 
   async function handleDownloadEntry(entry: FileEntry) {
-    if (!selectedHost) return;
+    if (!sftpHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
     const jobId = startTransferJob(entry.name, "download", messages.downloadingTo(localPath), {
       localTargetPath: joinChildPath(localPath, entry.name),
@@ -3320,7 +3330,7 @@ export default function App() {
     setStatus(messages.downloadingTo(localPath));
     setStatusTone("neutral");
     try {
-      await startDownloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir, sshOptions, jobId);
+      await startDownloadFromRemote(sftpHost, remoteTarget, localPath, entry.is_dir, sshOptions, jobId);
     } catch (error) {
       const message = getErrorMessage(error, messages.downloadFailed(entry.name));
       setStatus(message);
@@ -3338,9 +3348,9 @@ export default function App() {
   }
 
   async function handleDeleteRemoteFile(entry: FileEntry) {
-    if (!selectedHost) return;
+    if (!sftpHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
-    await deleteRemoteEntry(selectedHost, remoteTarget, entry.is_dir, sshOptions);
+    await deleteRemoteEntry(sftpHost, remoteTarget, entry.is_dir, sshOptions);
     setStatus(messages.deletedRemote(entry.name));
     setStatusTone("success");
     setFileMenu(null);
@@ -3375,7 +3385,7 @@ export default function App() {
   }
 
   function handleSelectSftpHost(hostId: string) {
-    setSelectedId(hostId);
+    setSftpHostId(hostId);
     setRemotePath(".");
     setRemoteEntries([]);
     setRemoteError("");
@@ -4528,6 +4538,16 @@ export default function App() {
                 </div>
 
                 <div className="sftp-screen__controls">
+                  {sftpHost ? (
+                    <button
+                      type="button"
+                      className="secondary-button sftp-back-button"
+                      onClick={() => handleSelectSftpHost("")}
+                    >
+                      ← {messages.sftpBackToServers}
+                    </button>
+                  ) : null}
+
                   <label className="sftp-hidden-toggle">
                     <input
                       type="checkbox"
@@ -4539,7 +4559,7 @@ export default function App() {
 
                   <label className="sftp-host-select">
                     <span>{messages.selectHost}</span>
-                    <select value={selectedId} onChange={(event) => handleSelectSftpHost(event.target.value)}>
+                    <select value={sftpHostId} onChange={(event) => handleSelectSftpHost(event.target.value)}>
                       <option value="">{messages.selectHostPlaceholder}</option>
                       {hosts.map((host) => (
                         <option key={host.id} value={host.id}>
@@ -4551,7 +4571,40 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="sftp-browser-grid">
+              {!sftpHost ? (
+                <div className="sftp-screen__inner sftp-welcome">
+                  <div className="sftp-screen__icon">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="4" width="18" height="14" rx="2" />
+                      <path d="M8 21h8" />
+                      <path d="M12 18v3" />
+                      <path d="m9.5 9.5 2 2-2 2" />
+                      <path d="M13.5 13.5h2" />
+                    </svg>
+                  </div>
+                  <h2>{messages.sftpWelcomeTitle}</h2>
+                  <p>{messages.sftpWelcomeDescription}</p>
+                  {hosts.length ? (
+                    <div className="sftp-welcome__hosts">
+                      {hosts.map((host) => (
+                        <button
+                          key={host.id}
+                          type="button"
+                          className="sftp-welcome__host"
+                          onClick={() => handleSelectSftpHost(host.id)}
+                        >
+                          <strong>{getDisplayHostTitle(host)}</strong>
+                          <span>{host.username}@{host.address}:{host.port}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="sftp-welcome__empty">{messages.noHostsHint}</p>
+                  )}
+                </div>
+              ) : null}
+
+              {sftpHost ? <div className="sftp-browser-grid">
                 <FileBrowserPane
                   title={messages.local}
                   refreshLabel={messages.refresh}
@@ -4589,8 +4642,8 @@ export default function App() {
                   items={showHiddenFiles ? remoteEntries : remoteEntries.filter((entry) => !entry.name.startsWith("."))}
                   loading={remoteLoading}
                   error={remoteError}
-                  emptyText={selectedHost ? messages.noRemoteFiles : messages.selectHostPlaceholder}
-                  disabled={!selectedHost}
+                  emptyText={sftpHost ? messages.noRemoteFiles : messages.selectHostPlaceholder}
+                  disabled={!sftpHost}
                   onPathChange={setRemotePath}
                   onContextMenu={(event, entry) => {
                     event.preventDefault();
@@ -4602,7 +4655,7 @@ export default function App() {
                   onOpenDir={(entry) => setRemotePath((current) => joinChildPath(current, entry.name))}
                   onOpenFile={(entry) => void handleDownloadEntry(entry)}
                 />
-              </div>
+              </div> : null}
 
               {transferJobs.length ? <div className="transfer-panel">
                 <div className="transfer-panel__header">

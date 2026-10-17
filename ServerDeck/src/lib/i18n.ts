@@ -183,6 +183,9 @@ type Messages = {
   terminalSearchPlaceholder: string;
   showHiddenFiles: string;
   sftpDescription: string;
+  sftpWelcomeTitle: string;
+  sftpWelcomeDescription: string;
+  sftpBackToServers: string;
   selectHost: string;
   selectHostPlaceholder: string;
   local: string;
@@ -531,6 +534,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalSearchPlaceholder: "Find in terminal",
     showHiddenFiles: "Show hidden files",
     sftpDescription: "Choose a host before browsing remote files.",
+    sftpWelcomeTitle: "Welcome to SFTP",
+    sftpWelcomeDescription: "Pick a server below to connect. Authentication only starts after you choose one.",
+    sftpBackToServers: "Back to servers",
     selectHost: "Select Host",
     selectHostPlaceholder: "Select host",
     local: "Local",
@@ -877,6 +883,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalSearchPlaceholder: "在终端中搜索",
     showHiddenFiles: "显示隐藏文件",
     sftpDescription: "浏览远程文件前请先选择一台主机。",
+    sftpWelcomeTitle: "欢迎使用 SFTP",
+    sftpWelcomeDescription: "选择下面的一台服务器开始连接，认证只会在你选择之后进行。",
+    sftpBackToServers: "返回服务器列表",
     selectHost: "选择主机",
     selectHostPlaceholder: "请选择主机",
     local: "本地",
@@ -1223,6 +1232,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalSearchPlaceholder: "ターミナル内を検索",
     showHiddenFiles: "隠しファイルを表示",
     sftpDescription: "リモートファイルを閲覧する前にホストを選択してください。",
+    sftpWelcomeTitle: "SFTPへようこそ",
+    sftpWelcomeDescription: "下のサーバーを選んで接続します。認証は選択後にのみ開始されます。",
+    sftpBackToServers: "サーバー一覧へ戻る",
     selectHost: "ホストを選択",
     selectHostPlaceholder: "ホストを選択",
     local: "ローカル",
