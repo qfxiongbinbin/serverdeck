@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import { getVersion } from "@tauri-apps/api/app";
 import { emit, listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
@@ -15,7 +14,6 @@ import "@xterm/xterm/css/xterm.css";
 import {
   Activity,
   ArrowLeft,
-  Bot,
   Home,
   ChevronRight,
   Copy,
@@ -39,7 +37,6 @@ import {
   Users,
   X,
   RefreshCw,
-  FileText,
   ExternalLink
 } from "lucide-react";
 import {
@@ -52,9 +49,7 @@ import {
   deleteHost,
   deleteRemoteEntry,
   duplicateHost,
-  detectAiProviderImports,
   downloadFromRemote,
-  fetchAiProviderModels,
   getTerminalSessionCwd,
   listLocalDirectory,
   pickLocalDirectory,
@@ -75,12 +70,6 @@ import {
   startTerminalSession,
   testConnection,
   writeTerminalInput,
-  scanAiMemoryFiles,
-  readAiMemoryFile,
-  type AiMemoryFile,
-  type AiProviderConfig,
-  type AiProviderImportSuggestion,
-  type AiProviderFetchRequest,
   type FileEntry,
   type ManagedProject,
   type AppPreferences,
@@ -93,21 +82,8 @@ import {
   type TransferUpdatePayload
 } from "./lib/api";
 import { FileBrowserPane } from "./components/files/FileBrowserPane";
-import { AgentWorkspace, type ModelOption } from "./components/agent/AgentWorkspace";
-import { AiProviderEditorModal } from "./components/ai/AiProviderEditorModal";
 import { ProjectEditorModal } from "./components/projects/ProjectEditorModal";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
-import {
-  appendAgentUserMessage,
-  createAgentSession,
-  deleteAgentSession,
-  getAgentSessionDetail,
-  listAgentSessions,
-  runAgentTurn,
-  type AgentStreamEvent,
-  type AgentSession,
-  type AgentSessionDetail
-} from "./lib/agentApi";
 import {
   getDocumentLanguageTag,
   languageOptions,
@@ -127,7 +103,6 @@ const appLogo = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
 const HOME_TAB_ID = "home";
 const HOSTS_TAB_ID = "hosts";
 const SFTP_TAB_ID = "sftp";
-const AGENT_TAB_ID = "agent";
 const SETTINGS_TAB_ID = "settings";
 const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 const LOCAL_TERMINAL_RECENT_PROJECTS_KEY = "serverdeck.localTerminalRecentProjects";
@@ -135,7 +110,6 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   appTheme: "dark",
   language: "en",
   projects: [],
-  aiProviders: [],
   localTerminalDefaultPath: "",
   sshConnectTimeoutSeconds: 5,
   sshServerAliveIntervalSeconds: 30,
@@ -229,7 +203,6 @@ type AppSettings = {
   appTheme: "light" | "dark";
   language: AppLanguage;
   projects: ManagedProject[];
-  aiProviders: AiProviderConfig[];
   localTerminalDefaultPath: string;
   sshConnectTimeoutSeconds: number;
   sshServerAliveIntervalSeconds: number;
@@ -240,24 +213,10 @@ type AppSettings = {
 
 type UpdateStage = "idle" | "downloading" | "ready";
 type UpdateCheckState = "idle" | "checking" | "available" | "upToDate" | "error" | "unsupported";
-type SettingsSectionId = "general" | "projects" | "terminal" | "ai" | "about" | "danger";
+type SettingsSectionId = "general" | "projects" | "terminal" | "about" | "danger";
 type ProjectEditorMode = "new" | "edit";
 type LocalTerminalSource = "default" | "project" | "directory";
-type AiProviderEditorMode = "new" | "edit";
-type AiSettingsSectionId = "providers" | "models" | "usage" | "skills" | "memory";
 
-const blankAiProvider: AiProviderConfig = {
-  id: "",
-  name: "",
-  providerType: "custom-openai",
-  baseUrl: "",
-  apiKey: "",
-  model: "",
-  availableModels: [],
-  enabledModels: [],
-  enabled: true,
-  isDefault: false
-};
 
 const terminalFontSizeOptions = [
   { label: "S", value: 12 },
@@ -364,35 +323,6 @@ function normalizeAppSettings(parsed: Partial<AppSettings>): AppSettings {
             }))
             .filter((project) => project.name.trim())
         : DEFAULT_APP_SETTINGS.projects,
-    aiProviders:
-      Array.isArray(parsed.aiProviders)
-        ? parsed.aiProviders
-            .map((provider) => ({
-              id: typeof provider?.id === "string" && provider.id.trim() ? provider.id : crypto.randomUUID(),
-              name: typeof provider?.name === "string" ? provider.name : "",
-              providerType:
-                provider?.providerType === "openai" ||
-                provider?.providerType === "anthropic" ||
-                provider?.providerType === "gemini" ||
-                provider?.providerType === "openrouter" ||
-                provider?.providerType === "azure-openai" ||
-                provider?.providerType === "custom-openai"
-                  ? provider.providerType
-                  : "custom-openai",
-              baseUrl: typeof provider?.baseUrl === "string" ? provider.baseUrl : "",
-              apiKey: typeof provider?.apiKey === "string" ? provider.apiKey : "",
-              model: typeof provider?.model === "string" ? provider.model : "",
-              availableModels: Array.isArray(provider?.availableModels)
-                ? provider.availableModels.filter((item): item is string => typeof item === "string")
-                : [],
-              enabledModels: Array.isArray(provider?.enabledModels)
-                ? provider.enabledModels.filter((item): item is string => typeof item === "string")
-                : [],
-              enabled: typeof provider?.enabled === "boolean" ? provider.enabled : true,
-              isDefault: typeof provider?.isDefault === "boolean" ? provider.isDefault : false
-            }))
-            .filter((provider) => provider.name.trim())
-        : DEFAULT_APP_SETTINGS.aiProviders,
     localTerminalDefaultPath:
       typeof parsed.localTerminalDefaultPath === "string"
         ? parsed.localTerminalDefaultPath
@@ -431,25 +361,6 @@ function hasTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
-function buildAgentModelValue(providerId: string, model: string) {
-  if (!providerId || !model) {
-    return "";
-  }
-
-  return `${providerId}:${model}`;
-}
-
-function parseAgentModelValue(value: string) {
-  const separatorIndex = value.indexOf(":");
-  if (separatorIndex <= 0 || separatorIndex >= value.length - 1) {
-    return null;
-  }
-
-  return {
-    providerId: value.slice(0, separatorIndex),
-    model: value.slice(separatorIndex + 1)
-  };
-}
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
@@ -802,6 +713,11 @@ export default function App() {
   const [monitorTabs, setMonitorTabs] = useState<MonitorTab[]>([]);
   const [hosts, setHosts] = useState<SavedHost[]>([]);
   const [selectedId, setSelectedId] = useState("");
+  // author: BrianXiong
+  // time: 2026/07/21/00:00:00
+  // The SFTP view keeps its own host selection (empty by default) so entering
+  // the view never triggers keychain/SSH auth until the user picks a server.
+  const [sftpHostId, setSftpHostId] = useState("");
   const [draft, setDraft] = useState<SavedHost>(blankHost);
   const [search, setSearch] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -827,22 +743,9 @@ export default function App() {
   const [updateError, setUpdateError] = useState("");
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_APP_SETTINGS);
   const [activeSettingsSection, setActiveSettingsSection] = useState<SettingsSectionId>("general");
-  const [activeAiSettingsSection, setActiveAiSettingsSection] = useState<AiSettingsSectionId>("providers");
   const [projectEditorOpen, setProjectEditorOpen] = useState(false);
   const [projectEditorMode, setProjectEditorMode] = useState<ProjectEditorMode>("new");
   const [projectDraft, setProjectDraft] = useState<ManagedProject>(blankProject);
-  const [aiProviderEditorOpen, setAiProviderEditorOpen] = useState(false);
-  const [aiProviderEditorMode, setAiProviderEditorMode] = useState<AiProviderEditorMode>("new");
-  const [aiProviderDraft, setAiProviderDraft] = useState<AiProviderConfig>(blankAiProvider);
-  const [aiProviderModelsLoading, setAiProviderModelsLoading] = useState(false);
-  const [aiProviderModelsError, setAiProviderModelsError] = useState("");
-  const [aiImportSuggestions, setAiImportSuggestions] = useState<AiProviderImportSuggestion[]>([]);
-  // author: BrianXiong
-  // time: 2026/05/07/23:30:00
-  const [aiMemoryFiles, setAiMemoryFiles] = useState<AiMemoryFile[]>([]);
-  const [selectedMemoryFile, setSelectedMemoryFile] = useState<AiMemoryFile | null>(null);
-  const [memoryContent, setMemoryContent] = useState("");
-  const [memoryLoading, setMemoryLoading] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [localTerminalMenuOpen, setLocalTerminalMenuOpen] = useState(false);
   const [localTerminalProjectSearch, setLocalTerminalProjectSearch] = useState("");
@@ -866,17 +769,6 @@ export default function App() {
   const [localPreview, setLocalPreview] = useState<LocalFilePreview | null>(null);
   const [localPreviewLoading, setLocalPreviewLoading] = useState(false);
   const [localPreviewError, setLocalPreviewError] = useState("");
-  const [agentSessions, setAgentSessions] = useState<AgentSession[]>([]);
-  const [agentSessionsLoading, setAgentSessionsLoading] = useState(false);
-  const [activeAgentSessionId, setActiveAgentSessionId] = useState("");
-  const [activeAgentSessionDetail, setActiveAgentSessionDetail] = useState<AgentSessionDetail | null>(null);
-  const [agentSessionDetailLoading, setAgentSessionDetailLoading] = useState(false);
-  const [agentSelectedProjectId, setAgentSelectedProjectId] = useState("");
-  const [agentSelectedModelValue, setAgentSelectedModelValue] = useState("");
-  const [agentTaskInput, setAgentTaskInput] = useState("");
-  const [agentFollowUpInput, setAgentFollowUpInput] = useState("");
-  const [agentCreateBusy, setAgentCreateBusy] = useState(false);
-  const [agentSendBusy, setAgentSendBusy] = useState(false);
   const [preferencesHydrated, setPreferencesHydrated] = useState(false);
   const [terminalSearchOpen, setTerminalSearchOpen] = useState(false);
   const [terminalSearchQuery, setTerminalSearchQuery] = useState("");
@@ -903,12 +795,16 @@ export default function App() {
   const isHomeView = activeTabId === HOME_TAB_ID;
   const isHostsView = activeTabId === HOSTS_TAB_ID;
   const isSftpView = activeTabId === SFTP_TAB_ID;
-  const isAgentView = activeTabId === AGENT_TAB_ID;
   const isSettingsView = activeTabId === SETTINGS_TAB_ID;
 
   const selectedHost = useMemo(
     () => hosts.find((item) => item.id === selectedId) ?? null,
     [hosts, selectedId]
+  );
+
+  const sftpHost = useMemo(
+    () => hosts.find((item) => item.id === sftpHostId) ?? null,
+    [hosts, sftpHostId]
   );
 
   const activeTerminalTab = useMemo(
@@ -1129,17 +1025,6 @@ export default function App() {
     [messages.dark, messages.light]
   );
 
-  const aiProviderTypeLabels = useMemo(
-    () => ({
-      openai: "OpenAI",
-      anthropic: messages.anthropic,
-      gemini: messages.gemini,
-      openrouter: messages.openrouter,
-      "azure-openai": messages.azureOpenai,
-      "custom-openai": messages.openaiCompatible
-    }),
-    [messages.anthropic, messages.azureOpenai, messages.gemini, messages.openaiCompatible, messages.openrouter]
-  );
 
   const getDisplayHostTitle = useCallback(
     (host: SavedHost) => getHostTitle(host, messages.untitledHost),
@@ -1174,51 +1059,6 @@ export default function App() {
     [settings.projects]
   );
 
-  const agentProjects = useMemo(
-    () => localTerminalProjects,
-    [localTerminalProjects]
-  );
-
-  const agentAvailableModels = useMemo<ModelOption[]>(() => {
-    return settings.aiProviders
-      .filter((provider) => provider.enabled)
-      .flatMap((provider) => {
-        const sourceModels = provider.enabledModels.length
-          ? provider.enabledModels
-          : provider.availableModels.length
-            ? provider.availableModels
-            : provider.model
-              ? [provider.model]
-              : [];
-        const models = [...new Set(sourceModels.filter((item) => item.trim()))];
-
-        return models.map((model) => ({
-          providerId: provider.id,
-          providerName: provider.name.trim() || provider.providerType,
-          model
-        }));
-      });
-  }, [settings.aiProviders]);
-
-  const defaultAgentModelValue = useMemo(() => {
-    const defaultProvider = settings.aiProviders.find((provider) => provider.enabled && provider.isDefault);
-    if (defaultProvider) {
-      const sourceModels = defaultProvider.enabledModels.length
-        ? defaultProvider.enabledModels
-        : defaultProvider.availableModels.length
-          ? defaultProvider.availableModels
-          : defaultProvider.model
-            ? [defaultProvider.model]
-            : [];
-      const defaultModel = sourceModels.find((item) => item.trim()) ?? "";
-      if (defaultModel) {
-        return buildAgentModelValue(defaultProvider.id, defaultModel);
-      }
-    }
-
-    const firstOption = agentAvailableModels[0];
-    return firstOption ? buildAgentModelValue(firstOption.providerId, firstOption.model) : "";
-  }, [agentAvailableModels, settings.aiProviders]);
 
   const recentLocalProjects = useMemo(
     () => recentLocalProjectIds
@@ -1243,371 +1083,18 @@ export default function App() {
       { id: "general" as const, label: messages.general, icon: Wrench },
       { id: "projects" as const, label: messages.projects, icon: FolderOpen },
       { id: "terminal" as const, label: messages.terminal, icon: TerminalSquare },
-      { id: "ai" as const, label: messages.ai, icon: Bot },
       { id: "about" as const, label: messages.about, icon: Info },
       { id: "danger" as const, label: messages.dangerZone, icon: ShieldAlert }
     ],
-    [messages.about, messages.ai, messages.dangerZone, messages.general, messages.projects, messages.terminal]
+    [messages.about, messages.dangerZone, messages.general, messages.projects, messages.terminal]
   );
 
   // author: BrianXiong
   // time: 2026/04/08/16:24:00
-  const refreshAgentSessions = useCallback(async () => {
-    setAgentSessionsLoading(true);
 
-    try {
-      const sessions = await listAgentSessions();
-      setAgentSessions(sessions);
-      setActiveAgentSessionId((current) => {
-        if (current && sessions.some((session) => session.id === current)) {
-          return current;
-        }
-
-        return sessions[0]?.id ?? "";
-      });
-    } catch (error) {
-      setStatus(getErrorMessage(error, "Failed to load agent sessions"));
-      setStatusTone("error");
-    } finally {
-      setAgentSessionsLoading(false);
-    }
-  }, []);
-
-  const syncAgentSessionFromStore = useCallback(async (sessionId: string) => {
-    const detail = await getAgentSessionDetail(sessionId);
-    setAgentSessions((current) => {
-      const nextSessions = current.some((session) => session.id === detail.session.id)
-        ? current.map((session) => (session.id === detail.session.id ? detail.session : session))
-        : [detail.session, ...current];
-
-      return [...nextSessions].sort((left, right) => right.updatedAt - left.updatedAt);
-    });
-    setActiveAgentSessionDetail((current) => (current?.session.id === sessionId ? detail : current));
-    return detail;
-  }, []);
-
-  const handleAgentStreamEvent = useCallback((event: AgentStreamEvent) => {
-    console.info("[AGENT] stream event", {
-      sessionId: event.sessionId,
-      phase: event.phase,
-      messageId: event.messageId,
-      createdAt: event.createdAt,
-      deltaLength: event.delta?.length ?? 0,
-      hasContent: Boolean(event.content),
-      error: event.error ?? ""
-    });
-
-    if (event.phase === "start") {
-      flushSync(() => {
-        setAgentSessions((current) => current.map((session) => (
-          session.id === event.sessionId
-            ? { ...session, status: "streaming", updatedAt: event.createdAt }
-            : session
-        )));
-        setActiveAgentSessionDetail((current) => {
-          if (!current || current.session.id !== event.sessionId) {
-            return current;
-          }
-
-          const alreadyExists = current.messages.some((message) => message.id === event.messageId);
-          if (alreadyExists) {
-            return {
-              ...current,
-              session: { ...current.session, status: "streaming", updatedAt: event.createdAt }
-            };
-          }
-
-          return {
-            ...current,
-            session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
-            messages: [
-              ...current.messages,
-              {
-                id: event.messageId,
-                sessionId: event.sessionId,
-                role: "assistant",
-                content: "",
-                createdAt: event.createdAt
-              }
-            ]
-          };
-        });
-      });
-      return;
-    }
-
-    if (event.phase === "delta") {
-      flushSync(() => {
-        setActiveAgentSessionDetail((current) => {
-          if (!current || current.session.id !== event.sessionId) {
-            return current;
-          }
-
-          const hasTargetMessage = current.messages.some((message) => message.id === event.messageId);
-          const nextMessages = hasTargetMessage
-            ? current.messages.map((message) => (
-              message.id === event.messageId
-                ? { ...message, role: "assistant", content: `${message.content}${event.delta ?? ""}` }
-                : message
-            ))
-            : [
-              ...current.messages,
-              {
-                id: event.messageId,
-                sessionId: event.sessionId,
-                role: "assistant",
-                content: event.delta ?? "",
-                createdAt: event.createdAt
-              }
-            ];
-
-          return {
-            ...current,
-            session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
-            messages: nextMessages
-          };
-        });
-      });
-      return;
-    }
-
-    if (event.phase === "tool") {
-      if (event.toolCall?.visibility === "internal") {
-        return;
-      }
-
-      flushSync(() => {
-        setActiveAgentSessionDetail((current) => {
-          if (!current || current.session.id !== event.sessionId) {
-            return current;
-          }
-
-          const nextMessages = current.messages.some((message) => message.id === event.messageId)
-            ? current.messages.map((message) => (
-              message.id === event.messageId
-                ? {
-                  ...message,
-                  role: "tool",
-                  content: event.content ?? message.content,
-                  createdAt: event.createdAt
-                }
-                : message
-            ))
-            : [
-              ...current.messages,
-              {
-                id: event.messageId,
-                sessionId: event.sessionId,
-                role: "tool",
-                content: event.content ?? "",
-                createdAt: event.createdAt
-              }
-            ];
-
-          const nextToolCalls = event.toolCall
-            ? current.toolCalls.some((call) => call.id === event.toolCall?.id)
-              ? current.toolCalls.map((call) => (call.id === event.toolCall?.id ? event.toolCall : call))
-              : [...current.toolCalls, event.toolCall]
-            : current.toolCalls;
-
-          return {
-            ...current,
-            session: { ...current.session, status: "streaming", updatedAt: event.createdAt },
-            messages: nextMessages,
-            toolCalls: nextToolCalls
-          };
-        });
-      });
-      return;
-    }
-
-    if (event.phase === "done") {
-      void syncAgentSessionFromStore(event.sessionId).catch((error) => {
-        setStatus(getErrorMessage(error, "Failed to load agent session"));
-        setStatusTone("error");
-      });
-      return;
-    }
-
-    setActiveAgentSessionDetail((current) => {
-      if (!current || current.session.id !== event.sessionId) {
-        return current;
-      }
-
-      const alreadyExists = current.messages.some((message) => message.id === event.messageId);
-      if (alreadyExists) {
-        return current;
-      }
-
-      return {
-        ...current,
-        session: { ...current.session, status: "error" },
-        messages: [
-          ...current.messages,
-          {
-            id: event.messageId,
-            sessionId: event.sessionId,
-            role: "assistant",
-            content: `Request failed:\n\n${event.error || "Agent request failed"}`,
-            createdAt: event.createdAt
-          }
-        ]
-      };
-    });
-
-    setStatus(event.error || "Agent request failed");
-    setStatusTone("error");
-    void syncAgentSessionFromStore(event.sessionId).catch(() => {});
-  }, [syncAgentSessionFromStore]);
 
   // author: BrianXiong
   // time: 2026/04/08/16:24:00
-  const handleCreateAgentSession = useCallback(async () => {
-    const project = agentProjects.find((item) => item.id === agentSelectedProjectId) ?? null;
-    if (!project) {
-      setStatus(messages.agentProjectRequired);
-      setStatusTone("error");
-      return;
-    }
-
-    if (!agentTaskInput.trim()) {
-      setStatus(messages.agentTaskRequired);
-      setStatusTone("error");
-      return;
-    }
-
-    const selectedModel = parseAgentModelValue(agentSelectedModelValue || defaultAgentModelValue);
-    if (!selectedModel) {
-      setStatus(messages.agentModelRequired);
-      setStatusTone("error");
-      return;
-    }
-
-    setAgentCreateBusy(true);
-    setStatusTone("neutral");
-
-    try {
-      console.info("[AGENT] create session", {
-        projectId: project.id,
-        selectedModel: selectedModel,
-        taskLength: agentTaskInput.trim().length
-      });
-      const detail = await createAgentSession({
-        projectId: project.id,
-        rootPath: project.path,
-        providerId: selectedModel.providerId,
-        model: selectedModel.model,
-        goal: agentTaskInput.trim()
-      });
-
-      const nextSessions = [detail.session, ...agentSessions.filter((session) => session.id !== detail.session.id)]
-        .sort((left, right) => right.updatedAt - left.updatedAt);
-      setAgentSessions(nextSessions);
-      setActiveAgentSessionId(detail.session.id);
-      setActiveAgentSessionDetail(detail);
-      setAgentTaskInput("");
-      setAgentFollowUpInput("");
-      setActiveTabId(AGENT_TAB_ID);
-      setStatus(messages.agentStartSession);
-      setStatusTone("success");
-      console.info("[AGENT] run first turn", { sessionId: detail.session.id });
-      await runAgentTurn(detail.session.id, {
-        onEvent: handleAgentStreamEvent,
-        providerId: selectedModel.providerId,
-        model: selectedModel.model
-      });
-    } catch (error) {
-      console.error("[AGENT] create session failed", error);
-      setStatus(getErrorMessage(error, messages.agentTaskRequired));
-      setStatusTone("error");
-    } finally {
-      setAgentCreateBusy(false);
-    }
-  }, [agentProjects, agentSelectedProjectId, agentSelectedModelValue, agentSessions, agentTaskInput, defaultAgentModelValue, handleAgentStreamEvent, messages]);
-
-  const handleStartNewAgentSession = useCallback(() => {
-    setActiveAgentSessionId("");
-    setActiveAgentSessionDetail(null);
-    setAgentTaskInput("");
-    setAgentFollowUpInput("");
-  }, []);
-
-  const handleDeleteAgentSession = useCallback(async (sessionId: string) => {
-    try {
-      await deleteAgentSession(sessionId);
-      setAgentSessions((current) => {
-        const nextSessions = current.filter((session) => session.id !== sessionId);
-
-        if (activeAgentSessionId === sessionId) {
-          setActiveAgentSessionId(nextSessions[0]?.id ?? "");
-          setActiveAgentSessionDetail(null);
-          setAgentFollowUpInput("");
-        }
-
-        return nextSessions;
-      });
-      setStatus(messages.delete);
-      setStatusTone("success");
-    } catch (error) {
-      setStatus(getErrorMessage(error, messages.delete));
-      setStatusTone("error");
-    }
-  }, [activeAgentSessionId, messages.delete]);
-
-  // author: BrianXiong
-  // time: 2026/04/08/16:24:00
-  const handleSendAgentFollowUp = useCallback(async () => {
-    if (!activeAgentSessionId) {
-      return;
-    }
-
-    if (!agentFollowUpInput.trim()) {
-      setStatus(messages.agentTaskRequired);
-      setStatusTone("error");
-      return;
-    }
-
-    const selectedModel = parseAgentModelValue(agentSelectedModelValue || defaultAgentModelValue);
-    if (!selectedModel) {
-      setStatus(messages.agentModelRequired);
-      setStatusTone("error");
-      return;
-    }
-
-    setAgentSendBusy(true);
-    setStatusTone("neutral");
-
-    try {
-      console.info("[AGENT] append follow-up", {
-        sessionId: activeAgentSessionId,
-        messageLength: agentFollowUpInput.trim().length
-      });
-      const detail = await appendAgentUserMessage(activeAgentSessionId, agentFollowUpInput.trim());
-      setActiveAgentSessionDetail(detail);
-      setAgentSessions((current) => {
-        const nextSessions = current.some((session) => session.id === detail.session.id)
-          ? current.map((session) => (session.id === detail.session.id ? detail.session : session))
-          : [detail.session, ...current];
-
-        return [...nextSessions].sort((left, right) => right.updatedAt - left.updatedAt);
-      });
-      setAgentFollowUpInput("");
-      setStatus(messages.agentSend);
-      setStatusTone("success");
-      console.info("[AGENT] run follow-up turn", { sessionId: detail.session.id });
-      await runAgentTurn(detail.session.id, {
-        onEvent: handleAgentStreamEvent,
-        providerId: detail.session.providerId || selectedModel.providerId,
-        model: detail.session.model || selectedModel.model
-      });
-    } catch (error) {
-      console.error("[AGENT] send follow-up failed", error);
-      setStatus(getErrorMessage(error, messages.agentTaskRequired));
-      setStatusTone("error");
-    } finally {
-      setAgentSendBusy(false);
-    }
-  }, [activeAgentSessionId, agentFollowUpInput, agentSelectedModelValue, defaultAgentModelValue, handleAgentStreamEvent, messages]);
 
   const filteredHosts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
@@ -1680,99 +1167,6 @@ export default function App() {
     void refreshHosts();
   }, []);
 
-  useEffect(() => {
-    void refreshAgentSessions();
-  }, [refreshAgentSessions]);
-
-  useEffect(() => {
-    if (!agentProjects.length) {
-      if (agentSelectedProjectId) {
-        setAgentSelectedProjectId("");
-      }
-      return;
-    }
-
-    if (!agentProjects.some((project) => project.id === agentSelectedProjectId)) {
-      setAgentSelectedProjectId(agentProjects[0]?.id ?? "");
-    }
-  }, [agentProjects, agentSelectedProjectId]);
-
-  useEffect(() => {
-    if (!agentAvailableModels.length) {
-      if (agentSelectedModelValue) {
-        setAgentSelectedModelValue("");
-      }
-      return;
-    }
-
-    const targetValue = agentSelectedModelValue || defaultAgentModelValue;
-    if (!targetValue) {
-      return;
-    }
-
-    const exists = agentAvailableModels.some((option) => buildAgentModelValue(option.providerId, option.model) === targetValue);
-    if (!exists || !agentSelectedModelValue) {
-      setAgentSelectedModelValue(defaultAgentModelValue);
-    }
-  }, [agentAvailableModels, agentSelectedModelValue, defaultAgentModelValue]);
-
-  useEffect(() => {
-    if (!activeAgentSessionId) {
-      setActiveAgentSessionDetail(null);
-      return;
-    }
-
-    let cancelled = false;
-    setAgentSessionDetailLoading(true);
-
-    void getAgentSessionDetail(activeAgentSessionId)
-      .then((detail) => {
-        if (!cancelled) {
-          setActiveAgentSessionDetail(detail);
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setStatus(getErrorMessage(error, "Failed to load agent session"));
-          setStatusTone("error");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setAgentSessionDetailLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeAgentSessionId]);
-
-  useEffect(() => {
-    if (!hasTauriRuntime()) {
-      return;
-    }
-
-    let cleanup: null | (() => void) = null;
-    let disposed = false;
-
-    void listen<AgentStreamEvent>("agent-stream", (event) => {
-      handleAgentStreamEvent(event.payload);
-    })
-      .then((unlisten) => {
-        if (disposed) {
-          unlisten();
-          return;
-        }
-        cleanup = unlisten;
-      })
-      .catch(() => {});
-
-    return () => {
-      disposed = true;
-      cleanup?.();
-    };
-  }, [handleAgentStreamEvent]);
 
   const checkForUpdates = useCallback(async (options?: { silent?: boolean }) => {
     if (!hasTauriRuntime()) {
@@ -2028,52 +1422,6 @@ export default function App() {
     };
   }, [localTerminalMenuOpen]);
 
-  useEffect(() => {
-    if (activeSettingsSection !== "ai") {
-      return;
-    }
-
-    void detectAiProviderImports().then(setAiImportSuggestions).catch(() => {});
-  }, [activeSettingsSection]);
-
-  // author: BrianXiong
-  // time: 2026/05/07/23:30:00
-  useEffect(() => {
-    if (activeSettingsSection !== "ai" || activeAiSettingsSection !== "memory") {
-      return;
-    }
-
-    void loadMemoryFiles();
-  }, [activeSettingsSection, activeAiSettingsSection]);
-
-  // author: BrianXiong
-  // time: 2026/05/07/23:30:00
-  async function loadMemoryFiles() {
-    try {
-      const files = await scanAiMemoryFiles();
-      setAiMemoryFiles(files);
-      if (files.length > 0 && !selectedMemoryFile) {
-        await handleSelectMemoryFile(files[0]);
-      }
-    } catch {
-      setAiMemoryFiles([]);
-    }
-  }
-
-  // author: BrianXiong
-  // time: 2026/05/07/23:30:00
-  async function handleSelectMemoryFile(file: AiMemoryFile) {
-    setSelectedMemoryFile(file);
-    setMemoryLoading(true);
-    try {
-      const content = await readAiMemoryFile(file.filePath);
-      setMemoryContent(content);
-    } catch {
-      setMemoryContent("");
-    } finally {
-      setMemoryLoading(false);
-    }
-  }
 
   // author: BrianXiong
   // time: 2026/05/07/23:30:00
@@ -2083,13 +1431,6 @@ export default function App() {
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
-  // author: BrianXiong
-  // time: 2026/05/07/23:30:00
-  function formatModifiedTime(timestamp: number): string {
-    if (timestamp === 0) return "-";
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleString();
-  }
 
   useEffect(() => {
     terminalDecodersRef.current.clear();
@@ -2175,7 +1516,7 @@ export default function App() {
   }, [isLocalTerminalView, isSftpView, localPath, localPreviewOpen, localRefreshTick, messages.failedLoadLocalDirectory]);
 
   useEffect(() => {
-    if (!isSftpView || !selectedHost) {
+    if (!isSftpView || !sftpHost) {
       setRemoteEntries([]);
       setRemoteError("");
       return;
@@ -2184,7 +1525,7 @@ export default function App() {
     let cancelled = false;
     setRemoteLoading(true);
     setRemoteError("");
-    void listRemoteDirectory(selectedHost, remotePath, sshOptions)
+    void listRemoteDirectory(sftpHost, remotePath, sshOptions)
       .then((items) => {
         if (!cancelled) setRemoteEntries(items);
       })
@@ -2201,19 +1542,19 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, selectedHost, remotePath, remoteRefreshTick, sshOptions]);
+  }, [isSftpView, sftpHost, remotePath, remoteRefreshTick, sshOptions]);
 
   // author: BrianXiong
   // time: 2026/07/21/00:00:00
   // Resolve the placeholder "." into the real remote home directory so the
   // path bar shows an absolute path users can read, edit and copy.
   useEffect(() => {
-    if (!isSftpView || !selectedHost || remotePath !== ".") {
+    if (!isSftpView || !sftpHost || remotePath !== ".") {
       return;
     }
 
     let cancelled = false;
-    void resolveRemotePath(selectedHost, ".", sshOptions)
+    void resolveRemotePath(sftpHost, ".", sshOptions)
       .then((absolutePath) => {
         const next = absolutePath.trim();
         if (!cancelled && next && next !== ".") {
@@ -2225,7 +1566,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, remotePath, selectedHost, sshOptions]);
+  }, [isSftpView, remotePath, sftpHost, sshOptions]);
 
   useEffect(() => {
     setLocalPreview(null);
@@ -2980,151 +2321,6 @@ export default function App() {
     setProjectEditorMode("new");
   }
 
-  // author: BrianXiong
-  // time: 2026/04/06/12:08:30
-  function openNewAiProviderEditor() {
-    setAiProviderEditorMode("new");
-    setAiProviderDraft(blankAiProvider);
-    setAiProviderModelsError("");
-    setAiProviderEditorOpen(true);
-  }
-
-  // author: BrianXiong
-  // time: 2026/04/06/12:08:30
-  function openEditAiProviderEditor(provider: AiProviderConfig) {
-    setAiProviderEditorMode("edit");
-    setAiProviderDraft(provider);
-    setAiProviderModelsError("");
-    setAiProviderEditorOpen(true);
-  }
-
-  // author: BrianXiong
-  // time: 2026/04/06/12:08:30
-  function closeAiProviderEditor() {
-    setAiProviderEditorOpen(false);
-    setAiProviderDraft(blankAiProvider);
-    setAiProviderModelsError("");
-    setAiProviderModelsLoading(false);
-    setAiProviderEditorMode("new");
-  }
-
-  async function handleFetchAiProviderModels() {
-    setAiProviderModelsLoading(true);
-    setAiProviderModelsError("");
-
-    try {
-      const request: AiProviderFetchRequest = {
-        providerType: aiProviderDraft.providerType,
-        baseUrl: aiProviderDraft.baseUrl,
-        apiKey: aiProviderDraft.apiKey
-      };
-      const models = await fetchAiProviderModels(request);
-      setAiProviderDraft((current) => ({
-        ...current,
-        availableModels: models,
-        enabledModels: current.enabledModels.length ? current.enabledModels.filter((model) => models.includes(model)) : models,
-        model: current.model && models.includes(current.model) ? current.model : models[0] ?? current.model
-      }));
-    } catch (error) {
-      setAiProviderModelsError(getErrorMessage(error, messages.fetchModelsFailed));
-    } finally {
-      setAiProviderModelsLoading(false);
-    }
-  }
-
-  // author: BrianXiong
-  // time: 2026/04/06/12:08:30
-  function handleSaveAiProvider() {
-    const name = aiProviderDraft.name.trim();
-    if (!name) {
-      return;
-    }
-
-    const nextProvider: AiProviderConfig = {
-      ...aiProviderDraft,
-      id: aiProviderDraft.id || crypto.randomUUID(),
-      name,
-      baseUrl: aiProviderDraft.baseUrl.trim(),
-      apiKey: aiProviderDraft.apiKey.trim(),
-      model: aiProviderDraft.model.trim()
-    };
-
-    setSettings((current) => {
-      const nextProviders = aiProviderEditorMode === "edit"
-        ? current.aiProviders.map((provider) => (provider.id === nextProvider.id ? nextProvider : provider))
-        : [nextProvider, ...current.aiProviders];
-
-      return {
-        ...current,
-        aiProviders: nextProvider.isDefault
-          ? nextProviders.map((provider) => ({ ...provider, isDefault: provider.id === nextProvider.id }))
-          : nextProviders
-      };
-    });
-
-    closeAiProviderEditor();
-  }
-
-  // author: BrianXiong
-  // time: 2026/04/06/12:08:30
-  function handleDeleteAiProvider(providerId: string) {
-    setSettings((current) => ({
-      ...current,
-      aiProviders: current.aiProviders.filter((provider) => provider.id !== providerId)
-    }));
-
-    if (aiProviderDraft.id === providerId) {
-      closeAiProviderEditor();
-    }
-  }
-
-  // author: BrianXiong
-  // time: 2026/04/06/12:08:30
-  function handleSetDefaultAiProvider(providerId: string) {
-    setSettings((current) => ({
-      ...current,
-      aiProviders: current.aiProviders.map((provider) => ({
-        ...provider,
-        isDefault: provider.id === providerId
-      }))
-    }));
-  }
-
-  async function handleImportAiProvider(sourceId: AiProviderImportSuggestion["sourceId"]) {
-    try {
-      let suggestions = aiImportSuggestions;
-      if (!suggestions.length) {
-        suggestions = await detectAiProviderImports();
-        setAiImportSuggestions(suggestions);
-      }
-
-      const suggestion = suggestions.find((item) => item.sourceId === sourceId);
-      if (!suggestion) {
-        return;
-      }
-
-      setAiProviderEditorMode("new");
-      setAiProviderDraft({
-        ...blankAiProvider,
-        id: crypto.randomUUID(),
-        name: suggestion.title,
-        providerType: suggestion.providerType,
-        baseUrl: suggestion.baseUrl,
-        apiKey: suggestion.apiKey,
-        model: suggestion.model,
-        availableModels: suggestion.model ? [suggestion.model] : [],
-        enabledModels: suggestion.model ? [suggestion.model] : []
-      });
-      setAiProviderModelsError(suggestion.note);
-      setAiProviderEditorOpen(true);
-      setStatus(messages.aiImportApplied(suggestion.title));
-      setStatusTone("success");
-    } catch (error) {
-      setStatus(getErrorMessage(error, messages.fetchModelsFailed));
-      setStatusTone("error");
-    }
-  }
-
   function handleSaveProject() {
     const name = projectDraft.name.trim();
     if (!name) {
@@ -3262,9 +2458,9 @@ export default function App() {
   }
 
   async function handleUploadEntry(entry: FileEntry) {
-    if (!selectedHost) return;
+    if (!sftpHost) return;
     const jobId = startTransferJob(entry.name, "upload", messages.uploadingTo(remotePath), {
-      host: selectedHost,
+      host: sftpHost,
       remoteDir: remotePath,
       totalBytes: entry.size,
     });
@@ -3272,7 +2468,7 @@ export default function App() {
     setStatus(messages.uploadingTo(remotePath));
     setStatusTone("neutral");
     try {
-      await startUploadToRemote(selectedHost, entry.path, remotePath, sshOptions, jobId);
+      await startUploadToRemote(sftpHost, entry.path, remotePath, sshOptions, jobId);
     } catch (error) {
       const message = getErrorMessage(error, messages.uploadFailed(entry.name));
       setStatus(message);
@@ -3310,7 +2506,7 @@ export default function App() {
   }
 
   async function handleDownloadEntry(entry: FileEntry) {
-    if (!selectedHost) return;
+    if (!sftpHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
     const jobId = startTransferJob(entry.name, "download", messages.downloadingTo(localPath), {
       localTargetPath: joinChildPath(localPath, entry.name),
@@ -3320,7 +2516,7 @@ export default function App() {
     setStatus(messages.downloadingTo(localPath));
     setStatusTone("neutral");
     try {
-      await startDownloadFromRemote(selectedHost, remoteTarget, localPath, entry.is_dir, sshOptions, jobId);
+      await startDownloadFromRemote(sftpHost, remoteTarget, localPath, entry.is_dir, sshOptions, jobId);
     } catch (error) {
       const message = getErrorMessage(error, messages.downloadFailed(entry.name));
       setStatus(message);
@@ -3338,9 +2534,9 @@ export default function App() {
   }
 
   async function handleDeleteRemoteFile(entry: FileEntry) {
-    if (!selectedHost) return;
+    if (!sftpHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
-    await deleteRemoteEntry(selectedHost, remoteTarget, entry.is_dir, sshOptions);
+    await deleteRemoteEntry(sftpHost, remoteTarget, entry.is_dir, sshOptions);
     setStatus(messages.deletedRemote(entry.name));
     setStatusTone("success");
     setFileMenu(null);
@@ -3375,7 +2571,7 @@ export default function App() {
   }
 
   function handleSelectSftpHost(hostId: string) {
-    setSelectedId(hostId);
+    setSftpHostId(hostId);
     setRemotePath(".");
     setRemoteEntries([]);
     setRemoteError("");
@@ -4138,15 +3334,6 @@ export default function App() {
 
             <button
               type="button"
-              className={`side-nav ${isAgentView ? "side-nav--active" : ""}`}
-              onClick={() => setActiveTabId(AGENT_TAB_ID)}
-            >
-              <Bot size={18} />
-              <span>{messages.agent}</span>
-            </button>
-
-            <button
-              type="button"
               className={`side-nav ${isHostsView ? "side-nav--active" : ""}`}
               onClick={() => setActiveTabId(HOSTS_TAB_ID)}
             >
@@ -4197,10 +3384,6 @@ export default function App() {
                 <h1>ServerDeck</h1>
 
                 <div className="home-screen__actions">
-                  <button type="button" className="primary-button" onClick={() => setActiveTabId(AGENT_TAB_ID)}>
-                    <Bot size={16} />
-                    {messages.agent}
-                  </button>
                   <button type="button" className="secondary-button" onClick={() => setActiveTabId(HOSTS_TAB_ID)}>
                     <Server size={16} />
                     {messages.hosts}
@@ -4528,6 +3711,16 @@ export default function App() {
                 </div>
 
                 <div className="sftp-screen__controls">
+                  {sftpHost ? (
+                    <button
+                      type="button"
+                      className="secondary-button sftp-back-button"
+                      onClick={() => handleSelectSftpHost("")}
+                    >
+                      ← {messages.sftpBackToServers}
+                    </button>
+                  ) : null}
+
                   <label className="sftp-hidden-toggle">
                     <input
                       type="checkbox"
@@ -4539,7 +3732,7 @@ export default function App() {
 
                   <label className="sftp-host-select">
                     <span>{messages.selectHost}</span>
-                    <select value={selectedId} onChange={(event) => handleSelectSftpHost(event.target.value)}>
+                    <select value={sftpHostId} onChange={(event) => handleSelectSftpHost(event.target.value)}>
                       <option value="">{messages.selectHostPlaceholder}</option>
                       {hosts.map((host) => (
                         <option key={host.id} value={host.id}>
@@ -4551,7 +3744,40 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="sftp-browser-grid">
+              {!sftpHost ? (
+                <div className="sftp-screen__inner sftp-welcome">
+                  <div className="sftp-screen__icon">
+                    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="3" y="4" width="18" height="14" rx="2" />
+                      <path d="M8 21h8" />
+                      <path d="M12 18v3" />
+                      <path d="m9.5 9.5 2 2-2 2" />
+                      <path d="M13.5 13.5h2" />
+                    </svg>
+                  </div>
+                  <h2>{messages.sftpWelcomeTitle}</h2>
+                  <p>{messages.sftpWelcomeDescription}</p>
+                  {hosts.length ? (
+                    <div className="sftp-welcome__hosts">
+                      {hosts.map((host) => (
+                        <button
+                          key={host.id}
+                          type="button"
+                          className="sftp-welcome__host"
+                          onClick={() => handleSelectSftpHost(host.id)}
+                        >
+                          <strong>{getDisplayHostTitle(host)}</strong>
+                          <span>{host.username}@{host.address}:{host.port}</span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="sftp-welcome__empty">{messages.noHostsHint}</p>
+                  )}
+                </div>
+              ) : null}
+
+              {sftpHost ? <div className="sftp-browser-grid">
                 <FileBrowserPane
                   title={messages.local}
                   refreshLabel={messages.refresh}
@@ -4589,8 +3815,8 @@ export default function App() {
                   items={showHiddenFiles ? remoteEntries : remoteEntries.filter((entry) => !entry.name.startsWith("."))}
                   loading={remoteLoading}
                   error={remoteError}
-                  emptyText={selectedHost ? messages.noRemoteFiles : messages.selectHostPlaceholder}
-                  disabled={!selectedHost}
+                  emptyText={sftpHost ? messages.noRemoteFiles : messages.selectHostPlaceholder}
+                  disabled={!sftpHost}
                   onPathChange={setRemotePath}
                   onContextMenu={(event, entry) => {
                     event.preventDefault();
@@ -4602,7 +3828,7 @@ export default function App() {
                   onOpenDir={(entry) => setRemotePath((current) => joinChildPath(current, entry.name))}
                   onOpenFile={(entry) => void handleDownloadEntry(entry)}
                 />
-              </div>
+              </div> : null}
 
               {transferJobs.length ? <div className="transfer-panel">
                 <div className="transfer-panel__header">
@@ -4640,53 +3866,6 @@ export default function App() {
                 </div>
               </div> : null}
             </section>
-          ) : isAgentView ? (
-            <AgentWorkspace
-              title={messages.agent}
-              description={messages.agentDescription}
-              sessionsLabel={messages.agentSessions}
-              projectLabel={messages.agentProject}
-              taskLabel={messages.agentTask}
-              taskPlaceholder={messages.agentTaskPlaceholder}
-              startLabel={messages.agentStartSession}
-              conversationLabel={messages.agentConversation}
-              messagePlaceholder={messages.agentMessagePlaceholder}
-              sendLabel={messages.agentSend}
-              noSessionsLabel={messages.noAgentSessions}
-              noSessionsDescription={messages.noAgentSessionsDescription}
-              noProjectsLabel={messages.noProjectPaths}
-              loadingLabel={messages.loading}
-              thinkingLabel={messages.agentThinking}
-              noMessagesLabel={messages.agentNoMessages}
-              runningLabel={messages.agentRunning}
-              completedLabel={messages.agentCompleted}
-              deleteLabel={messages.delete}
-              archiveLabel={messages.agentArchive}
-              projects={agentProjects}
-              selectedProjectId={agentSelectedProjectId}
-              taskInput={agentTaskInput}
-              followUpInput={agentFollowUpInput}
-              sessions={agentSessions}
-              activeSessionId={activeAgentSessionId}
-              activeSessionDetail={activeAgentSessionDetail}
-              sessionsLoading={agentSessionsLoading}
-              detailLoading={agentSessionDetailLoading}
-              createBusy={agentCreateBusy}
-              sendBusy={agentSendBusy}
-              availableModels={agentAvailableModels}
-              selectedModel={agentSelectedModelValue || defaultAgentModelValue}
-              modelLabel={messages.agentModel}
-              onSelectProject={setAgentSelectedProjectId}
-              onTaskInputChange={setAgentTaskInput}
-              onStartNewSession={handleStartNewAgentSession}
-              onCreateSession={() => void handleCreateAgentSession()}
-              onSelectSession={setActiveAgentSessionId}
-              onDeleteSession={(sessionId) => void handleDeleteAgentSession(sessionId)}
-              onArchiveSession={(sessionId) => console.log("Archive session:", sessionId)}
-              onFollowUpInputChange={setAgentFollowUpInput}
-              onSendFollowUp={() => void handleSendAgentFollowUp()}
-              onSelectModel={setAgentSelectedModelValue}
-            />
           ) : isSettingsView ? (
             <section className="settings-screen">
               <div className="settings-layout">
@@ -4967,195 +4146,6 @@ export default function App() {
                           })}
                         </div>
                       </div>
-                    </section>
-                  ) : null}
-
-                  {activeSettingsSection === "ai" ? (
-                    <section className="settings-panel">
-                      <div className="settings-panel__header">
-                        <Bot size={18} />
-                        <div>
-                          <h3>{messages.ai}</h3>
-                          <span>{messages.aiDescription}</span>
-                        </div>
-                      </div>
-
-                      <div className="settings-chip-group">
-                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "providers" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("providers")}>
-                          {messages.aiProviders}
-                        </button>
-                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "models" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("models")}>
-                          {messages.aiModels}
-                        </button>
-                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "usage" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("usage")}>
-                          {messages.aiUsage}
-                        </button>
-                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "skills" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("skills")}>
-                          {messages.aiSkills}
-                        </button>
-                        <button type="button" className={`settings-chip ${activeAiSettingsSection === "memory" ? "settings-chip--active" : ""}`} onClick={() => setActiveAiSettingsSection("memory")}>
-                          {messages.aiMemory}
-                        </button>
-                      </div>
-
-                      {activeAiSettingsSection === "providers" ? (
-                        <>
-                          <div className="settings-panel__toolbar">
-                            <span className="settings-panel__toolbar-label">{messages.aiProviders}</span>
-                            <div className="settings-panel__toolbar-actions">
-                              <button type="button" className="secondary-button" onClick={openNewAiProviderEditor}>
-                                <Plus size={14} />
-                                {messages.addAiProvider}
-                              </button>
-                            </div>
-                          </div>
-
-                          <div className="settings-card settings-card--projects">
-                            {settings.aiProviders.length ? (
-                              settings.aiProviders.map((provider) => (
-                                <div key={provider.id} className="project-row">
-                                  <div className="project-row__icon">
-                                    <Bot size={18} />
-                                  </div>
-
-                                  <div className="project-row__body">
-                                    <div className="project-row__titleline">
-                                      <strong>{provider.name}</strong>
-                                      <span>{aiProviderTypeLabels[provider.providerType]}</span>
-                                      {provider.isDefault ? <span>{messages.aiProviderDefault}</span> : null}
-                                    </div>
-                                    <div className="project-row__path">{provider.model || provider.baseUrl || provider.providerType}</div>
-                                  </div>
-
-                                  <div className="project-row__actions">
-                                    {!provider.isDefault ? (
-                                      <button type="button" className="row-button" onClick={() => handleSetDefaultAiProvider(provider.id)}>
-                                        {messages.setAsDefaultProvider}
-                                      </button>
-                                    ) : null}
-                                    <button type="button" className="row-button" onClick={() => openEditAiProviderEditor(provider)}>
-                                      <Pencil size={14} />
-                                      {messages.edit}
-                                    </button>
-                                    <button type="button" className="danger-button" onClick={() => handleDeleteAiProvider(provider.id)}>
-                                      <Trash2 size={14} />
-                                      {messages.delete}
-                                    </button>
-                                  </div>
-                                </div>
-                              ))
-                            ) : (
-                              <div className="project-empty-state">
-                                <strong>{messages.noAiProviders}</strong>
-                                <span>{messages.noAiProvidersDescription}</span>
-                              </div>
-                            )}
-                          </div>
-                        </>
-                      ) : null}
-
-                      {activeAiSettingsSection === "models" ? (
-                        <div className="settings-card">
-                          <div className="settings-item settings-item--panel settings-item--stacked">
-                            <div>
-                              <strong>{messages.aiModels}</strong>
-                              <span>{messages.aiModelsDescription}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {activeAiSettingsSection === "usage" ? (
-                        <div className="settings-card">
-                          <div className="settings-item settings-item--panel settings-item--stacked">
-                            <div>
-                              <strong>{messages.aiUsage}</strong>
-                              <span>{messages.aiUsageDescription}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {activeAiSettingsSection === "skills" ? (
-                        <div className="settings-card">
-                          <div className="settings-item settings-item--panel settings-item--stacked">
-                            <div>
-                              <strong>{messages.aiSkills}</strong>
-                              <span>{messages.aiSkillsDescription}</span>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      {activeAiSettingsSection === "memory" ? (
-                        <>
-                          <div className="settings-panel__toolbar">
-                            <button type="button" className="secondary-button secondary-button--compact" onClick={() => void loadMemoryFiles()}>
-                              <RefreshCw size={14} />
-                              {messages.aiMemoryRefresh}
-                            </button>
-                          </div>
-
-                          {aiMemoryFiles.length === 0 ? (
-                            <div className="settings-card">
-                              <div className="settings-item settings-item--panel settings-item--stacked">
-                                <div className="topbar-popover__empty">
-                                  <FileText size={32} strokeWidth={1.5} />
-                                  <strong>{messages.aiMemoryEmpty}</strong>
-                                  <span>{messages.aiMemoryEmptyDescription}</span>
-                                </div>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="ai-memory-container">
-                              <div className="ai-memory-list">
-                                {aiMemoryFiles.map((file) => (
-                                  <div
-                                    key={file.id}
-                                    className={`ai-memory-item ${selectedMemoryFile?.id === file.id ? "ai-memory-item--active" : ""}`}
-                                    onClick={() => void handleSelectMemoryFile(file)}
-                                  >
-                                    <div className="ai-memory-item__header">
-                                      <span className="ai-memory-item__agent">{file.agentName}</span>
-                                      <span className="ai-memory-item__size">{formatFileSize(file.fileSize)}</span>
-                                    </div>
-                                    <div className="ai-memory-item__name">{file.fileName}</div>
-                                    <div className="ai-memory-item__path">{file.filePath}</div>
-                                  </div>
-                                ))}
-                              </div>
-                              <div className="ai-memory-preview">
-                                {selectedMemoryFile ? (
-                                  <>
-                                    <div className="ai-memory-preview__header">
-                                      <div className="ai-memory-preview__title">
-                                        <strong>{selectedMemoryFile.fileName}</strong>
-                                        <span>{selectedMemoryFile.agentName}</span>
-                                      </div>
-                                      <div className="ai-memory-preview__meta">
-                                        <span>{formatFileSize(selectedMemoryFile.fileSize)}</span>
-                                        <span>{formatModifiedTime(selectedMemoryFile.modifiedTime)}</span>
-                                      </div>
-                                    </div>
-                                    <div className="ai-memory-preview__content">
-                                      {memoryLoading ? (
-                                        <div className="ai-memory-preview__loading">Loading...</div>
-                                      ) : (
-                                        <pre>{memoryContent}</pre>
-                                      )}
-                                    </div>
-                                  </>
-                                ) : (
-                                  <div className="ai-memory-preview__empty">
-                                    <FileText size={48} strokeWidth={1} />
-                                    <span>Select a memory file to preview</span>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </>
-                      ) : null}
                     </section>
                   ) : null}
 
@@ -5704,45 +4694,6 @@ export default function App() {
         onSave={handleSaveProject}
         onPickPath={() => void handlePickProjectPath()}
         onDraftChange={setProjectDraft}
-      />
-
-      <AiProviderEditorModal
-        open={aiProviderEditorOpen}
-        mode={aiProviderEditorMode}
-        draft={aiProviderDraft}
-        aiLabel={messages.ai}
-        aiDescription={messages.aiDescription}
-        newAiProviderLabel={messages.newAiProvider}
-        editAiProviderLabel={messages.editAiProvider}
-        aiProviderNameLabel={messages.aiProviderName}
-        aiProviderNameDescription={messages.aiProviderNameDescription}
-        aiProviderTypeLabel={messages.aiProviderType}
-        aiProviderTypeDescription={messages.aiProviderTypeDescription}
-        aiProviderBaseUrlLabel={messages.aiProviderBaseUrl}
-        aiProviderBaseUrlDescription={messages.aiProviderBaseUrlDescription}
-        aiProviderApiKeyLabel={messages.aiProviderApiKey}
-        aiProviderApiKeyDescription={messages.aiProviderApiKeyDescription}
-        aiProviderModelLabel={messages.aiProviderModel}
-        aiProviderModelDescription={messages.aiProviderModelDescription}
-        fetchModelsLabel={messages.fetchModels}
-        enabledModelsLabel={messages.enabledModels}
-        enabledModelsDescription={messages.enabledModelsDescription}
-        noModelsFetchedLabel={messages.noModelsFetched}
-        fetchModelsError={aiProviderModelsError}
-        fetchModelsLoading={aiProviderModelsLoading}
-        aiProviderEnabledLabel={messages.aiProviderEnabled}
-        aiProviderEnabledDescription={messages.aiProviderEnabledDescription}
-        openaiCompatibleLabel={messages.openaiCompatible}
-        anthropicLabel={messages.anthropic}
-        geminiLabel={messages.gemini}
-        openrouterLabel={messages.openrouter}
-        azureOpenaiLabel={messages.azureOpenai}
-        cancelLabel={messages.cancel}
-        saveLabel={messages.save}
-        onClose={closeAiProviderEditor}
-        onSave={handleSaveAiProvider}
-        onFetchModels={() => void handleFetchAiProviderModels()}
-        onDraftChange={setAiProviderDraft}
       />
     </div>
   );

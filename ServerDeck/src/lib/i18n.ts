@@ -183,6 +183,9 @@ type Messages = {
   terminalSearchPlaceholder: string;
   showHiddenFiles: string;
   sftpDescription: string;
+  sftpWelcomeTitle: string;
+  sftpWelcomeDescription: string;
+  sftpBackToServers: string;
   selectHost: string;
   selectHostPlaceholder: string;
   local: string;
@@ -240,78 +243,6 @@ type Messages = {
   terminalCharset: string;
   terminalCharsetDescription: string;
   terminalTheme: string;
-  ai: string;
-  aiDescription: string;
-  agent: string;
-  agentDescription: string;
-  agentSessions: string;
-  agentProject: string;
-  agentTask: string;
-  agentTaskPlaceholder: string;
-  agentStartSession: string;
-  noAgentSessions: string;
-  noAgentSessionsDescription: string;
-  agentConversation: string;
-  agentMessagePlaceholder: string;
-  agentSend: string;
-  agentModel: string;
-  agentThinking: string;
-  agentNoMessages: string;
-  agentArchive: string;
-  agentRunning: string;
-  agentCompleted: string;
-  agentModelRequired: string;
-  agentProjectRequired: string;
-  agentTaskRequired: string;
-  aiProviders: string;
-  aiModels: string;
-  aiUsage: string;
-  aiSkills: string;
-  aiMemory: string;
-  aiMemoryDescription: string;
-  aiMemoryEmpty: string;
-  aiMemoryEmptyDescription: string;
-  aiMemoryAgent: string;
-  aiMemoryFile: string;
-  aiMemorySize: string;
-  aiMemoryModified: string;
-  aiMemoryOpenInEditor: string;
-  aiMemoryRefresh: string;
-  addAiProvider: string;
-  importClaudeCode: string;
-  importCodexCli: string;
-  noAiProviders: string;
-  noAiProvidersDescription: string;
-  aiModelsDescription: string;
-  aiUsageDescription: string;
-  aiSkillsDescription: string;
-  newAiProvider: string;
-  editAiProvider: string;
-  aiProviderName: string;
-  aiProviderNameDescription: string;
-  aiProviderType: string;
-  aiProviderTypeDescription: string;
-  aiProviderBaseUrl: string;
-  aiProviderBaseUrlDescription: string;
-  aiProviderApiKey: string;
-  aiProviderApiKeyDescription: string;
-  aiProviderModel: string;
-  aiProviderModelDescription: string;
-  aiProviderEnabled: string;
-  aiProviderEnabledDescription: string;
-  aiProviderDefault: string;
-  setAsDefaultProvider: string;
-  fetchModels: string;
-  fetchModelsFailed: string;
-  enabledModels: string;
-  enabledModelsDescription: string;
-  noModelsFetched: string;
-  aiImportApplied: (name: string) => string;
-  openaiCompatible: string;
-  anthropic: string;
-  gemini: string;
-  openrouter: string;
-  azureOpenai: string;
   selected: string;
   select: string;
   about: string;
@@ -531,6 +462,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalSearchPlaceholder: "Find in terminal",
     showHiddenFiles: "Show hidden files",
     sftpDescription: "Choose a host before browsing remote files.",
+    sftpWelcomeTitle: "Welcome to SFTP",
+    sftpWelcomeDescription: "Pick a server below to connect. Authentication only starts after you choose one.",
+    sftpBackToServers: "Back to servers",
     selectHost: "Select Host",
     selectHostPlaceholder: "Select host",
     local: "Local",
@@ -588,78 +522,6 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalCharset: "Terminal Charset",
     terminalCharsetDescription: "Select how terminal output bytes are decoded, useful for Chinese servers.",
     terminalTheme: "Terminal Theme",
-    ai: "AI",
-    aiDescription: "Manage AI providers and default model settings for future AI-native features.",
-    agent: "Agent",
-    agentDescription: "Start and organize project-scoped agent sessions before wiring execution tools.",
-    agentSessions: "Sessions",
-    agentProject: "Project",
-    agentTask: "Task",
-    agentTaskPlaceholder: "Describe what you want the agent to analyze in this project...",
-    agentStartSession: "Start Session",
-    noAgentSessions: "No agent sessions yet",
-    noAgentSessionsDescription: "Create a session to capture a project-scoped coding task.",
-    agentConversation: "Conversation",
-    agentMessagePlaceholder: "Add a follow-up question for this session...",
-    agentSend: "Send",
-    agentModel: "Select Model",
-    agentThinking: "Thinking...",
-    agentNoMessages: "No messages yet",
-    agentArchive: "Archive",
-    agentRunning: "Running",
-    agentCompleted: "Completed",
-    agentModelRequired: "Select an AI model first",
-    agentProjectRequired: "Choose a local project first",
-    agentTaskRequired: "Agent task is required",
-    aiProviders: "AI Providers",
-    aiModels: "Models",
-    aiUsage: "Usage",
-    aiSkills: "Skills",
-    aiMemory: "Memory",
-    aiMemoryDescription: "View and manage memory files from different AI agents on your system.",
-    aiMemoryEmpty: "No memory files found",
-    aiMemoryEmptyDescription: "No AI agent memory files detected in your home directory.",
-    aiMemoryAgent: "Agent",
-    aiMemoryFile: "File",
-    aiMemorySize: "Size",
-    aiMemoryModified: "Modified",
-    aiMemoryOpenInEditor: "Open in Editor",
-    aiMemoryRefresh: "Refresh",
-    addAiProvider: "Add Provider",
-    importClaudeCode: "Import Claude Code",
-    importCodexCli: "Import Codex CLI",
-    noAiProviders: "No AI providers yet",
-    noAiProvidersDescription: "Add a provider to power future AI capabilities across the app.",
-    aiModelsDescription: "Configure which models are enabled and which are used for different AI tasks.",
-    aiUsageDescription: "Usage metrics and token consumption will appear here as AI features start logging activity.",
-    aiSkillsDescription: "Manage app-level AI skills and capability bindings here.",
-    newAiProvider: "New AI Provider",
-    editAiProvider: "Edit AI Provider",
-    aiProviderName: "Provider Name",
-    aiProviderNameDescription: "A label to identify this provider in the app.",
-    aiProviderType: "Provider Type",
-    aiProviderTypeDescription: "Choose the upstream AI provider or protocol type.",
-    aiProviderBaseUrl: "Base URL",
-    aiProviderBaseUrlDescription: "API endpoint base URL. Leave blank for official defaults when applicable.",
-    aiProviderApiKey: "API Key",
-    aiProviderApiKeyDescription: "Stored locally for now. Keychain integration can be added later.",
-    aiProviderModel: "Default Model",
-    aiProviderModelDescription: "Model name used by default for this provider.",
-    aiProviderEnabled: "Enabled",
-    aiProviderEnabledDescription: "Whether this provider is available for AI features.",
-    aiProviderDefault: "Default",
-    setAsDefaultProvider: "Set as Default",
-    fetchModels: "Fetch Models",
-    fetchModelsFailed: "Failed to fetch models",
-    enabledModels: "Enabled Models",
-    enabledModelsDescription: "Choose which models from this provider can be used by the app.",
-    noModelsFetched: "No models fetched yet",
-    aiImportApplied: (name) => `Imported provider draft from ${name}`,
-    openaiCompatible: "OpenAI Compatible",
-    anthropic: "Anthropic",
-    gemini: "Gemini",
-    openrouter: "OpenRouter",
-    azureOpenai: "Azure OpenAI",
     selected: "Selected",
     select: "Select",
     about: "About",
@@ -877,6 +739,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalSearchPlaceholder: "在终端中搜索",
     showHiddenFiles: "显示隐藏文件",
     sftpDescription: "浏览远程文件前请先选择一台主机。",
+    sftpWelcomeTitle: "欢迎使用 SFTP",
+    sftpWelcomeDescription: "选择下面的一台服务器开始连接，认证只会在你选择之后进行。",
+    sftpBackToServers: "返回服务器列表",
     selectHost: "选择主机",
     selectHostPlaceholder: "请选择主机",
     local: "本地",
@@ -934,78 +799,6 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalCharset: "终端字符集",
     terminalCharsetDescription: "选择终端输出字节的解码方式，中文服务器场景下尤其有用。",
     terminalTheme: "终端主题",
-    ai: "AI",
-    aiDescription: "管理 AI Provider 和默认模型设置，为后续 AI Native 能力打基础。",
-    agent: "Agent",
-    agentDescription: "先搭建项目级 agent 会话工作台，再逐步接入执行能力。",
-    agentSessions: "会话",
-    agentProject: "项目",
-    agentTask: "任务",
-    agentTaskPlaceholder: "输入你希望 agent 在当前项目里分析的任务...",
-    agentStartSession: "开始会话",
-    noAgentSessions: "还没有 agent 会话",
-    noAgentSessionsDescription: "先创建一个会话，把项目级编码任务收进来。",
-    agentConversation: "对话",
-    agentMessagePlaceholder: "继续补充这个会话的问题...",
-    agentSend: "发送",
-    agentModel: "选择模型",
-    agentThinking: "思考中...",
-    agentNoMessages: "暂无对话消息",
-    agentArchive: "归档",
-    agentRunning: "执行中",
-    agentCompleted: "已完成",
-    agentModelRequired: "请先选择一个 AI 模型",
-    agentProjectRequired: "请先选择一个本地项目",
-    agentTaskRequired: "请输入 agent 任务",
-    aiProviders: "AI Providers",
-    aiModels: "模型",
-    aiUsage: "用量",
-    aiSkills: "技能",
-    aiMemory: "记忆",
-    aiMemoryDescription: "查看和管理系统中各 AI Agent 的记忆文件。",
-    aiMemoryEmpty: "未找到记忆文件",
-    aiMemoryEmptyDescription: "在主目录中未检测到 AI Agent 记忆文件。",
-    aiMemoryAgent: "Agent",
-    aiMemoryFile: "文件",
-    aiMemorySize: "大小",
-    aiMemoryModified: "修改时间",
-    aiMemoryOpenInEditor: "在编辑器中打开",
-    aiMemoryRefresh: "刷新",
-    addAiProvider: "添加 Provider",
-    importClaudeCode: "导入 Claude Code",
-    importCodexCli: "导入 Codex CLI",
-    noAiProviders: "还没有 AI Provider",
-    noAiProvidersDescription: "添加一个 Provider，为后续 AI 功能提供能力基础。",
-    aiModelsDescription: "在这里配置启用模型，以及不同 AI 任务默认使用的模型。",
-    aiUsageDescription: "随着 AI 功能接入，这里会展示用量和 token 消耗。",
-    aiSkillsDescription: "在这里管理应用级 AI 技能和能力绑定。",
-    newAiProvider: "新建 AI Provider",
-    editAiProvider: "编辑 AI Provider",
-    aiProviderName: "Provider 名称",
-    aiProviderNameDescription: "用于在应用内识别这个 Provider 的显示名称。",
-    aiProviderType: "Provider 类型",
-    aiProviderTypeDescription: "选择上游 AI Provider 或兼容协议类型。",
-    aiProviderBaseUrl: "Base URL",
-    aiProviderBaseUrlDescription: "API 基础地址。若使用官方默认地址，可留空。",
-    aiProviderApiKey: "API Key",
-    aiProviderApiKeyDescription: "当前先保存在本地，后续可接 Keychain。",
-    aiProviderModel: "默认模型",
-    aiProviderModelDescription: "该 Provider 默认使用的模型名称。",
-    aiProviderEnabled: "启用",
-    aiProviderEnabledDescription: "是否允许这个 Provider 被 AI 功能使用。",
-    aiProviderDefault: "默认",
-    setAsDefaultProvider: "设为默认",
-    fetchModels: "获取模型",
-    fetchModelsFailed: "获取模型失败",
-    enabledModels: "启用模型",
-    enabledModelsDescription: "选择这个 Provider 中允许被应用使用的模型。",
-    noModelsFetched: "还没有获取到模型",
-    aiImportApplied: (name) => `已从 ${name} 导入 Provider 草稿`,
-    openaiCompatible: "OpenAI 兼容",
-    anthropic: "Anthropic",
-    gemini: "Gemini",
-    openrouter: "OpenRouter",
-    azureOpenai: "Azure OpenAI",
     selected: "已选择",
     select: "选择",
     about: "关于",
@@ -1223,6 +1016,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalSearchPlaceholder: "ターミナル内を検索",
     showHiddenFiles: "隠しファイルを表示",
     sftpDescription: "リモートファイルを閲覧する前にホストを選択してください。",
+    sftpWelcomeTitle: "SFTPへようこそ",
+    sftpWelcomeDescription: "下のサーバーを選んで接続します。認証は選択後にのみ開始されます。",
+    sftpBackToServers: "サーバー一覧へ戻る",
     selectHost: "ホストを選択",
     selectHostPlaceholder: "ホストを選択",
     local: "ローカル",
@@ -1280,78 +1076,6 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     terminalCharset: "ターミナル文字コード",
     terminalCharsetDescription: "ターミナル出力バイト列のデコード方式を選択します。中国語サーバーで特に有効です。",
     terminalTheme: "ターミナルテーマ",
-    ai: "AI",
-    aiDescription: "AI Provider と既定モデル設定を管理し、今後の AI Native 機能の基盤にします。",
-    agent: "Agent",
-    agentDescription: "まずはプロジェクト単位の agent セッション基盤を作り、その後で実行能力を段階的に追加します。",
-    agentSessions: "セッション",
-    agentProject: "プロジェクト",
-    agentTask: "タスク",
-    agentTaskPlaceholder: "このプロジェクトで agent に調べてほしい内容を入力してください...",
-    agentStartSession: "セッション開始",
-    noAgentSessions: "agent セッションはまだありません",
-    noAgentSessionsDescription: "まずセッションを作成して、プロジェクト単位の coding タスクを整理します。",
-    agentConversation: "会話",
-    agentMessagePlaceholder: "このセッションに追記したい質問を入力してください...",
-    agentSend: "送信",
-    agentModel: "モデル選択",
-    agentThinking: "考え中...",
-    agentNoMessages: "メッセージはまだありません",
-    agentArchive: "アーカイブ",
-    agentRunning: "実行中",
-    agentCompleted: "完了",
-    agentModelRequired: "先に AI モデルを選択してください",
-    agentProjectRequired: "先にローカルプロジェクトを選択してください",
-    agentTaskRequired: "agent タスクを入力してください",
-    aiProviders: "AI Provider",
-    aiModels: "モデル",
-    aiUsage: "利用量",
-    aiSkills: "スキル",
-    aiMemory: "メモリ",
-    aiMemoryDescription: "システム上の各 AI エージェントのメモリファイルを表示・管理します。",
-    aiMemoryEmpty: "メモリファイルが見つかりません",
-    aiMemoryEmptyDescription: "ホームディレクトリに AI エージェントのメモリファイルが検出されませんでした。",
-    aiMemoryAgent: "エージェント",
-    aiMemoryFile: "ファイル",
-    aiMemorySize: "サイズ",
-    aiMemoryModified: "更新日時",
-    aiMemoryOpenInEditor: "エディタで開く",
-    aiMemoryRefresh: "更新",
-    addAiProvider: "Provider を追加",
-    importClaudeCode: "Claude Code を導入",
-    importCodexCli: "Codex CLI を導入",
-    noAiProviders: "AI Provider はまだありません",
-    noAiProvidersDescription: "Provider を追加して、今後の AI 機能の基盤を用意します。",
-    aiModelsDescription: "有効モデルや AI タスクごとの既定モデルをここで設定します。",
-    aiUsageDescription: "AI 機能が利用ログを記録し始めると、ここに利用量や token 消費が表示されます。",
-    aiSkillsDescription: "アプリ全体の AI スキルと能力バインディングをここで管理します。",
-    newAiProvider: "新規 AI Provider",
-    editAiProvider: "AI Provider を編集",
-    aiProviderName: "Provider 名",
-    aiProviderNameDescription: "アプリ内で識別するための表示名です。",
-    aiProviderType: "Provider 種別",
-    aiProviderTypeDescription: "上流 AI Provider または互換プロトコル種別を選択します。",
-    aiProviderBaseUrl: "Base URL",
-    aiProviderBaseUrlDescription: "API のベース URL。公式既定を使う場合は空欄でも可。",
-    aiProviderApiKey: "API Key",
-    aiProviderApiKeyDescription: "現時点ではローカル保存です。将来的に Keychain 連携可能です。",
-    aiProviderModel: "既定モデル",
-    aiProviderModelDescription: "この Provider で既定使用するモデル名です。",
-    aiProviderEnabled: "有効",
-    aiProviderEnabledDescription: "この Provider を AI 機能で利用可能にするかどうか。",
-    aiProviderDefault: "既定",
-    setAsDefaultProvider: "既定にする",
-    fetchModels: "モデル取得",
-    fetchModelsFailed: "モデル取得に失敗しました",
-    enabledModels: "有効モデル",
-    enabledModelsDescription: "この Provider でアプリが利用可能にするモデルを選択します。",
-    noModelsFetched: "まだモデルを取得していません",
-    aiImportApplied: (name) => `${name} から Provider 草稿を取り込みました`,
-    openaiCompatible: "OpenAI 互換",
-    anthropic: "Anthropic",
-    gemini: "Gemini",
-    openrouter: "OpenRouter",
-    azureOpenai: "Azure OpenAI",
     selected: "選択中",
     select: "選択",
     about: "情報",

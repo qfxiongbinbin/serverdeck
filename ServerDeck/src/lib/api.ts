@@ -77,46 +77,12 @@ export type ManagedProject = {
   projectType: "local" | "server" | "hybrid";
 };
 
-export type AiProviderConfig = {
-  id: string;
-  name: string;
-  providerType: "openai" | "anthropic" | "gemini" | "openrouter" | "azure-openai" | "custom-openai";
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  availableModels: string[];
-  enabledModels: string[];
-  enabled: boolean;
-  isDefault: boolean;
-};
-
-export type AiProviderImportSuggestion = {
-  sourceId: "claude-code" | "codex-cli";
-  title: string;
-  providerType: AiProviderConfig["providerType"];
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  note: string;
-};
-
-// author: BrianXiong
-// time: 2026/05/07/23:30:00
-export type AiMemoryFile = {
-  id: string;
-  agentName: string;
-  fileName: string;
-  filePath: string;
-  fileSize: number;
-  modifiedTime: number;
-};
 
 export type AppPreferences = {
   settings: {
     appTheme: "light" | "dark";
     language: string;
     projects: ManagedProject[];
-    aiProviders: AiProviderConfig[];
     localTerminalDefaultPath: string;
     sshConnectTimeoutSeconds: number;
     sshServerAliveIntervalSeconds: number;
@@ -127,7 +93,6 @@ export type AppPreferences = {
   recentProjectIds: string[];
 };
 
-export type AiProviderFetchRequest = Pick<AiProviderConfig, "providerType" | "baseUrl" | "apiKey">;
 
 export type ServerObservation = {
   hostname: string;
@@ -405,41 +370,6 @@ export async function saveAppPreferences(payload: AppPreferences) {
   return true;
 }
 
-export async function fetchAiProviderModels(request: AiProviderFetchRequest) {
-  if (hasTauri()) {
-    return tauriInvoke<string[]>("fetch_ai_provider_models", { request });
-  }
-
-  return [];
-}
-
-export async function detectAiProviderImports() {
-  if (hasTauri()) {
-    return tauriInvoke<AiProviderImportSuggestion[]>("detect_ai_provider_imports");
-  }
-
-  return [];
-}
-
-// author: BrianXiong
-// time: 2026/05/07/23:30:00
-export async function scanAiMemoryFiles() {
-  if (hasTauri()) {
-    return tauriInvoke<AiMemoryFile[]>("scan_ai_memory_files");
-  }
-
-  return [];
-}
-
-// author: BrianXiong
-// time: 2026/05/07/23:30:00
-export async function readAiMemoryFile(path: string) {
-  if (hasTauri()) {
-    return tauriInvoke<string>("read_ai_memory_file", { path });
-  }
-
-  return "";
-}
 
 export async function startTerminalSession(host: SavedHost, sshOptions: SshConnectionOptions) {
   if (hasTauri()) {
