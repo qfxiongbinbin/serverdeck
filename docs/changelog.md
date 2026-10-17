@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.45
+
+Compared with `v0.0.44`.
+
+### Added
+
+- Follow the terminal directory in sftp and vice versa
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.44
 
 Compared with `v0.0.43`.
