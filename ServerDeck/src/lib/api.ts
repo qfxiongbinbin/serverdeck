@@ -610,3 +610,34 @@ export async function readSshPublicKey(path: string) {
   }
   return "";
 }
+
+// author: BrianXiong
+// time: 2026/10/18/01:40:00
+export type SnippetRecord = {
+  id: string;
+  name: string;
+  content: string;
+  hostId?: string | null;
+  dangerous: boolean;
+};
+
+export async function listSnippets() {
+  if (hasTauri()) {
+    return tauriInvoke<SnippetRecord[]>("list_snippets");
+  }
+  return [] as SnippetRecord[];
+}
+
+export async function saveSnippet(snippet: SnippetRecord) {
+  if (hasTauri()) {
+    return tauriInvoke<SnippetRecord>("save_snippet", { snippet });
+  }
+  return snippet;
+}
+
+export async function deleteSnippet(id: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("delete_snippet", { id });
+  }
+  return true;
+}

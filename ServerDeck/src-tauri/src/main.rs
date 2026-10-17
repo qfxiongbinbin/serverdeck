@@ -392,6 +392,14 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           alias TEXT PRIMARY KEY,
           host_id TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS snippets (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL DEFAULT '',
+          content TEXT NOT NULL DEFAULT '',
+          host_id TEXT,
+          dangerous INTEGER NOT NULL DEFAULT 0
+        );
         "#,
     )
     .map_err(|error| error.to_string())?;
@@ -1882,6 +1890,8 @@ fn delete_host(id: String) -> Result<bool, String> {
     conn.execute("DELETE FROM port_forwards WHERE host_id = ?1", params![id])
         .map_err(|error| error.to_string())?;
     conn.execute("DELETE FROM ssh_config_links WHERE host_id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    conn.execute("UPDATE snippets SET host_id = NULL WHERE host_id = ?1", params![id])
         .map_err(|error| error.to_string())?;
     keychain_delete_password(&id);
     Ok(true)
@@ -3872,6 +3882,141 @@ fn read_ssh_public_key(path: String) -> Result<String, String> {
     fs::read_to_string(&expanded).map_err(|error| error.to_string())
 }
 
+// author: BrianXiong
+// time: 2026/10/18/01:40:00
+// Snippets are reusable commands. Content supports {{host}} / {{address}} /
+// {{user}} / {{port}} variables; dangerous patterns are flagged so the UI can
+// ask for confirmation before running them.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SnippetRecord {
+    id: String,
+    name: String,
+    content: String,
+    host_id: Option<String>,
+    dangerous: bool,
+}
+
+// author: BrianXiong
+// time: 2026/10/18/01:40:00
+// Deliberately curated: broad words like "restart" or "service" would flag
+// harmless commands, so only clearly destructive patterns are listed.
+const DANGEROUS_SNIPPET_PATTERNS: &[&str] = &[
+    "rm -rf",
+    "rm -fr",
+    "rm -r /",
+    "mkfs",
+    "dd if=",
+    "> /dev/sd",
+    "shutdown",
+    "reboot",
+    "halt",
+    "init 0",
+    "drop database",
+    "drop table",
+    "truncate table",
+    "systemctl stop",
+    "systemctl disable",
+    "docker system prune",
+    "docker volume rm",
+    "git reset --hard",
+    "git clean -fd",
+    "chmod -r 777",
+    "kill -9",
+    "pkill -9",
+    "iptables -f",
+    "curl | sh",
+    "curl -s | sh",
+    "wget | sh",
+];
+
+fn is_dangerous_snippet(content: &str) -> bool {
+    let lowered = content.to_lowercase();
+    DANGEROUS_SNIPPET_PATTERNS
+        .iter()
+        .any(|pattern| lowered.contains(pattern))
+}
+
+fn load_snippets_from_db(conn: &Connection) -> Result<Vec<SnippetRecord>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, name, content, host_id, dangerous FROM snippets ORDER BY name")
+        .map_err(|error| error.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SnippetRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                content: row.get(2)?,
+                host_id: row.get(3)?,
+                dangerous: row.get::<_, i64>(4)? != 0,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+fn save_snippet_to_db(conn: &Connection, snippet: &SnippetRecord) -> Result<(), String> {
+    conn.execute(
+        r#"
+        INSERT INTO snippets (id, name, content, host_id, dangerous)
+        VALUES (?1, ?2, ?3, ?4, ?5)
+        ON CONFLICT(id) DO UPDATE SET
+          name=excluded.name,
+          content=excluded.content,
+          host_id=excluded.host_id,
+          dangerous=excluded.dangerous
+        "#,
+        params![
+            snippet.id,
+            snippet.name,
+            snippet.content,
+            snippet.host_id,
+            if snippet.dangerous { 1i64 } else { 0i64 },
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_snippets() -> Result<Vec<SnippetRecord>, String> {
+    load_snippets_from_db(&open_db()?)
+}
+
+#[tauri::command]
+fn save_snippet(mut snippet: SnippetRecord) -> Result<SnippetRecord, String> {
+    snippet.name = snippet.name.trim().to_string();
+    snippet.content = snippet.content.trim_end().to_string();
+    snippet.host_id = snippet
+        .host_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if snippet.name.is_empty() {
+        return Err("Snippet name is required".to_string());
+    }
+    if snippet.content.trim().is_empty() {
+        return Err("Snippet content is required".to_string());
+    }
+    if snippet.id.trim().is_empty() {
+        snippet.id = Uuid::new_v4().to_string();
+    }
+
+    snippet.dangerous = is_dangerous_snippet(&snippet.content);
+    save_snippet_to_db(&open_db()?, &snippet)?;
+    Ok(snippet)
+}
+
+#[tauri::command]
+fn delete_snippet(id: String) -> Result<bool, String> {
+    let conn = open_db()?;
+    conn.execute("DELETE FROM snippets WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -3931,7 +4076,10 @@ fn main() {
             remove_known_host,
             list_ssh_keys,
             generate_ssh_key,
-            read_ssh_public_key
+            read_ssh_public_key,
+            list_snippets,
+            save_snippet,
+            delete_snippet
         ])
         .build(tauri::generate_context!())
         .expect("error while building ServerDeck");
@@ -4364,5 +4512,51 @@ Host target
         assert!(validate_ssh_key_name("../escape").is_err());
         assert!(validate_ssh_key_name("bad name").is_err());
         assert!(validate_ssh_key_name(".hidden").is_err());
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/18/01:40:00
+    #[test]
+    fn dangerous_snippet_detection_flags_destructive_commands() {
+        assert!(is_dangerous_snippet("rm -rf /data/tmp"));
+        assert!(is_dangerous_snippet("sudo DROP DATABASE huiyan;"));
+        assert!(is_dangerous_snippet("systemctl stop nginx"));
+        assert!(is_dangerous_snippet("docker system prune -af"));
+        assert!(!is_dangerous_snippet("systemctl status nginx"));
+        assert!(!is_dangerous_snippet("docker ps -a"));
+        assert!(!is_dangerous_snippet("tail -n 200 /var/log/nginx/error.log"));
+    }
+
+    #[test]
+    fn snippets_roundtrip_through_db() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_db(&conn).expect("init db");
+
+        let snippet = SnippetRecord {
+            id: "snippet-1".to_string(),
+            name: "Disk usage".to_string(),
+            content: "df -h {{host}}".to_string(),
+            host_id: Some("host-1".to_string()),
+            dangerous: is_dangerous_snippet("df -h"),
+        };
+        save_snippet_to_db(&conn, &snippet).expect("save snippet");
+
+        let saved = load_snippets_from_db(&conn).expect("load snippets");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].name, "Disk usage");
+        assert_eq!(saved[0].host_id.as_deref(), Some("host-1"));
+        assert!(!saved[0].dangerous);
+
+        let dangerous = SnippetRecord {
+            dangerous: true,
+            ..snippet.clone()
+        };
+        save_snippet_to_db(&conn, &dangerous).expect("update snippet");
+        let saved = load_snippets_from_db(&conn).expect("reload snippets");
+        assert!(saved[0].dangerous);
+
+        conn.execute("DELETE FROM snippets WHERE id = ?1", params!["snippet-1"])
+            .expect("delete snippet");
+        assert!(load_snippets_from_db(&conn).expect("reload").is_empty());
     }
 }

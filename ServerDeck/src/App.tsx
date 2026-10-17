@@ -31,6 +31,7 @@ import {
   ShieldAlert,
   Save,
   Search,
+  ScrollText,
   Server,
   SwatchBook,
   Wrench,
@@ -89,6 +90,10 @@ import {
   listSshKeys,
   generateSshKey,
   readSshPublicKey,
+  listSnippets,
+  saveSnippet,
+  deleteSnippet,
+  type SnippetRecord,
   type KnownHostRecord,
   type SshKeyRecord,
   type SshConfigPreview,
@@ -106,6 +111,7 @@ import { ProjectEditorModal } from "./components/projects/ProjectEditorModal";
 import { CommandPalette } from "./components/commands/CommandPalette";
 import { PortForwardEditorModal } from "./components/forwards/PortForwardEditorModal";
 import { SshConfigModal } from "./components/hosts/SshConfigModal";
+import { SnippetPanel } from "./components/snippets/SnippetPanel";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
 import {
   getDocumentLanguageTag,
@@ -800,6 +806,11 @@ export default function App() {
   const [sshKeyName, setSshKeyName] = useState("");
   const [sshKeyComment, setSshKeyComment] = useState("");
   const [sshKeyBusy, setSshKeyBusy] = useState(false);
+  const [snippets, setSnippets] = useState<SnippetRecord[]>([]);
+  const [snippetPanelOpen, setSnippetPanelOpen] = useState(false);
+  const [snippetBusy, setSnippetBusy] = useState(false);
+  const [snippetPendingDeleteId, setSnippetPendingDeleteId] = useState("");
+  const [snippetPendingRunId, setSnippetPendingRunId] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
   const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
@@ -916,6 +927,18 @@ export default function App() {
     () => terminalTabs.find((tab) => tab.id === activeTabId) ?? null,
     [activeTabId, terminalTabs]
   );
+  // author: BrianXiong
+  // time: 2026/10/18/01:40:00
+  // Snippets are sent to the terminal the user was last working in, which is not
+  // necessarily the active tab while the snippets panel is open.
+  const lastTerminalTabIdRef = useRef("");
+
+  useEffect(() => {
+    if (terminalTabs.some((tab) => tab.id === activeTabId)) {
+      lastTerminalTabIdRef.current = activeTabId;
+    }
+  }, [activeTabId, terminalTabs]);
+
   const isLocalTerminalView = activeTerminalTab?.kind === "local";
   const selectedLocalBrowserEntry = useMemo(
     () => localEntries.find((entry) => entry.path === localBrowserSelectedPath) ?? null,
@@ -3021,6 +3044,101 @@ export default function App() {
     }
   }
 
+  // author: BrianXiong
+  // time: 2026/10/18/01:40:00
+  const refreshSnippets = useCallback(async () => {
+    try {
+      setSnippets(await listSnippets());
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.snippetSaveFailed));
+      setStatusTone("error");
+    }
+  }, [messages]);
+
+  function openSnippetPanel() {
+    setSnippetPanelOpen(true);
+    setSnippetPendingDeleteId("");
+    setSnippetPendingRunId("");
+    void refreshSnippets();
+  }
+
+  async function handleSaveSnippet(snippet: SnippetRecord) {
+    setSnippetBusy(true);
+
+    try {
+      await saveSnippet(snippet);
+      await refreshSnippets();
+      setStatus(messages.snippetSaved);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.snippetSaveFailed));
+      setStatusTone("error");
+    } finally {
+      setSnippetBusy(false);
+    }
+  }
+
+  async function handleDeleteSnippet(id: string) {
+    setSnippetBusy(true);
+
+    try {
+      await deleteSnippet(id);
+      setSnippetPendingDeleteId("");
+      await refreshSnippets();
+      setStatus(messages.snippetDeleted);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.snippetDeleteFailed));
+      setStatusTone("error");
+    } finally {
+      setSnippetBusy(false);
+    }
+  }
+
+  function getSnippetHost(snippet: SnippetRecord): SavedHost | null {
+    if (snippet.hostId) {
+      return hosts.find((host) => host.id === snippet.hostId) ?? null;
+    }
+
+    const tab = terminalTabs.find((item) => item.id === lastTerminalTabIdRef.current) ?? null;
+    return tab?.host ?? null;
+  }
+
+  function substituteSnippetVariables(content: string, host: SavedHost | null): string {
+    const values: Record<string, string> = {
+      host: host ? host.label.trim() || host.address : "",
+      address: host?.address ?? "",
+      user: host?.username ?? "",
+      port: host?.port ? String(host.port) : ""
+    };
+
+    return content.replace(/\{\{\s*([A-Za-z0-9_]+)\s*\}\}/g, (match, name: string) => values[name.toLowerCase()] ?? match);
+  }
+
+  function handleRunSnippet(snippet: SnippetRecord, mode: "run" | "paste") {
+    const targetTab = terminalTabs.find((tab) => tab.id === lastTerminalTabIdRef.current) ?? null;
+    if (!targetTab) {
+      setStatus(messages.snippetNoTerminal);
+      setStatusTone("error");
+      return;
+    }
+
+    if (snippet.dangerous && snippetPendingRunId !== snippet.id) {
+      setSnippetPendingRunId(snippet.id);
+      setStatus(messages.snippetConfirmRun);
+      setStatusTone("neutral");
+      return;
+    }
+
+    setSnippetPendingRunId("");
+    const text = substituteSnippetVariables(snippet.content, getSnippetHost(snippet));
+    void writeTerminalInput(targetTab.sessionId, mode === "run" ? `${text}\n` : text);
+    setActiveTabId(targetTab.id);
+    setSnippetPanelOpen(false);
+    setStatus(messages.snippetSent(snippet.name));
+    setStatusTone("success");
+  }
+
   async function handleImportSshConfig() {
     if (!sshConfigSelected.length) {
       return;
@@ -3682,6 +3800,16 @@ export default function App() {
           >
             <Search size={16} />
             <span className="topbar-command-button__kbd">⌘K</span>
+          </button>
+
+          <button
+            type="button"
+            className="top-tab top-tab--ghost"
+            onClick={openSnippetPanel}
+            title={messages.snippets}
+            aria-label={messages.snippets}
+          >
+            <ScrollText size={16} />
           </button>
 
           {terminalTabs.map((tab) => (
@@ -5450,6 +5578,44 @@ export default function App() {
           </section>
         </div>
       ) : null}
+
+      <SnippetPanel
+        open={snippetPanelOpen}
+        snippets={snippets}
+        hosts={hosts}
+        labels={{
+          title: messages.snippets,
+          description: messages.snippetsDescription,
+          newSnippet: messages.newSnippet,
+          editSnippet: messages.editSnippet,
+          name: messages.snippetName,
+          content: messages.snippetContent,
+          contentPlaceholder: messages.snippetContentPlaceholder,
+          host: messages.snippetHost,
+          anyHost: messages.snippetAnyHost,
+          dangerous: messages.snippetDangerous,
+          dangerousHint: messages.snippetDangerousHint,
+          variables: messages.snippetVariables,
+          run: messages.snippetRun,
+          paste: messages.snippetPaste,
+          pasteHint: messages.snippetPasteHint,
+          empty: messages.snippetEmpty,
+          emptyDescription: messages.snippetEmptyDescription,
+          cancel: messages.cancel,
+          save: messages.save,
+          deleteLabel: messages.delete,
+          confirmDelete: messages.snippetConfirmDelete,
+          confirmRun: messages.snippetConfirmRun
+        }}
+        busy={snippetBusy}
+        pendingDeleteId={snippetPendingDeleteId}
+        pendingRunId={snippetPendingRunId}
+        onClose={() => setSnippetPanelOpen(false)}
+        onSave={(snippet) => void handleSaveSnippet(snippet)}
+        onDelete={(id) => void handleDeleteSnippet(id)}
+        onRequestDelete={setSnippetPendingDeleteId}
+        onRun={handleRunSnippet}
+      />
 
       <SshConfigModal
         open={sshConfigOpen}

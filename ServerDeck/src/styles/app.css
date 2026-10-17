@@ -941,6 +941,118 @@ select {
   min-width: 0;
 }
 
+/* author: BrianXiong */
+/* time: 2026/10/18/01:40:00 */
+/* Snippets panel */
+.snippet-panel {
+  width: min(760px, 92vw);
+}
+
+.snippet-toolbar {
+  padding: 0 22px 12px;
+}
+
+.snippet-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(56vh, 480px);
+  padding: 0 22px 18px;
+  overflow-y: auto;
+}
+
+.snippet-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--settings-border);
+  border-radius: 12px;
+  background: var(--settings-control-bg);
+}
+
+.snippet-row__body {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 4px;
+  min-width: 0;
+}
+
+.snippet-row__titleline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.snippet-row__titleline strong {
+  color: var(--settings-text);
+  font-size: 13px;
+}
+
+.snippet-row__content {
+  overflow: hidden;
+  color: var(--settings-muted);
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.snippet-row__vars {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  color: var(--settings-muted);
+  font-size: 10px;
+}
+
+.snippet-row__vars code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--settings-pill-bg);
+  color: var(--settings-pill-text);
+  font-size: 10px;
+}
+
+.snippet-row__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.snippet-badge {
+  padding: 1px 6px;
+  border: 1px solid var(--settings-border);
+  border-radius: 999px;
+  color: var(--settings-muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.snippet-badge--danger {
+  border-color: rgba(255, 106, 106, 0.4);
+  background: rgba(255, 106, 106, 0.12);
+  color: #ff8a8a;
+}
+
+.snippet-textarea {
+  min-height: 120px;
+  padding: 10px 12px;
+  border: 1px solid var(--settings-control-border);
+  border-radius: 10px;
+  background: var(--settings-control-bg);
+  color: var(--settings-control-text);
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 12px;
+  resize: vertical;
+}
+
+.snippet-hint {
+  color: var(--settings-muted);
+  font-size: 11px;
+}
+
 .transfer-panel {
   border-top: 1px solid var(--content-border);
   background: var(--content-raised-bg);

@@ -145,6 +145,31 @@ type Messages = {
   sshKeyCopied: (name: string) => string;
   sshKeyCopyFailed: string;
   sshKeyLoadFailed: string;
+  snippets: string;
+  snippetsDescription: string;
+  newSnippet: string;
+  editSnippet: string;
+  snippetName: string;
+  snippetContent: string;
+  snippetContentPlaceholder: string;
+  snippetHost: string;
+  snippetAnyHost: string;
+  snippetDangerous: string;
+  snippetDangerousHint: string;
+  snippetVariables: string;
+  snippetRun: string;
+  snippetPaste: string;
+  snippetPasteHint: string;
+  snippetEmpty: string;
+  snippetEmptyDescription: string;
+  snippetConfirmDelete: string;
+  snippetConfirmRun: string;
+  snippetSaved: string;
+  snippetSaveFailed: string;
+  snippetDeleted: string;
+  snippetDeleteFailed: string;
+  snippetNoTerminal: string;
+  snippetSent: (name: string) => string;
   monitorDescription: string;
   monitorLoading: string;
   monitorLoadingDescription: string;
@@ -514,6 +539,31 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sshKeyCopied: (name: string) => `Public key copied: ${name}`,
     sshKeyCopyFailed: "Failed to copy the public key",
     sshKeyLoadFailed: "Failed to read SSH keys",
+    snippets: "Snippets",
+    snippetsDescription: "Reusable commands with {{host}} / {{user}} / {{port}} variables. Run executes immediately, Paste only types the command.",
+    newSnippet: "New snippet",
+    editSnippet: "Edit snippet",
+    snippetName: "Name",
+    snippetContent: "Command",
+    snippetContentPlaceholder: "systemctl status nginx\nlog tail: tail -n 200 /var/log/nginx/error.log",
+    snippetHost: "Bind to host",
+    snippetAnyHost: "Any host (uses the active terminal)",
+    snippetDangerous: "Dangerous",
+    snippetDangerousHint: "Destructive commands (rm -rf, drop table, reboot…) are flagged and need a second click before running.",
+    snippetVariables: "Variables: ",
+    snippetRun: "Run",
+    snippetPaste: "Paste",
+    snippetPasteHint: "Type the command into the terminal without pressing enter",
+    snippetEmpty: "No snippets yet",
+    snippetEmptyDescription: "Save the commands you retype most often — deploy, tail logs, clear caches.",
+    snippetConfirmDelete: "Confirm delete",
+    snippetConfirmRun: "Confirm run",
+    snippetSaved: "Snippet saved",
+    snippetSaveFailed: "Failed to save the snippet",
+    snippetDeleted: "Snippet deleted",
+    snippetDeleteFailed: "Failed to delete the snippet",
+    snippetNoTerminal: "Open a terminal first — snippets are sent to the last terminal you used",
+    snippetSent: (name: string) => `Sent snippet: ${name}`,
     monitorDescription: "Observe key server status and refresh it on demand.",
     monitorLoading: "Loading server observation",
     monitorLoadingDescription: "Collecting a quick status snapshot from the remote server.",
@@ -881,6 +931,31 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sshKeyCopied: (name: string) => `已复制公钥：${name}`,
     sshKeyCopyFailed: "复制公钥失败",
     sshKeyLoadFailed: "读取 SSH 密钥失败",
+    snippets: "命令片段",
+    snippetsDescription: "可复用命令，支持 {{host}} / {{user}} / {{port}} 变量。「执行」直接回车运行，「粘贴」只输入不回车。",
+    newSnippet: "新建片段",
+    editSnippet: "编辑片段",
+    snippetName: "名称",
+    snippetContent: "命令内容",
+    snippetContentPlaceholder: "systemctl status nginx\n看日志：tail -n 200 /var/log/nginx/error.log",
+    snippetHost: "绑定主机",
+    snippetAnyHost: "任意主机（使用当前终端）",
+    snippetDangerous: "危险",
+    snippetDangerousHint: "破坏性命令（rm -rf、drop table、reboot…）会被标记，执行前需要二次确认。",
+    snippetVariables: "变量：",
+    snippetRun: "执行",
+    snippetPaste: "粘贴",
+    snippetPasteHint: "只把命令输入终端，不自动回车",
+    snippetEmpty: "还没有命令片段",
+    snippetEmptyDescription: "把每天重复敲的命令存下来——部署、看日志、清缓存。",
+    snippetConfirmDelete: "确认删除",
+    snippetConfirmRun: "确认执行",
+    snippetSaved: "片段已保存",
+    snippetSaveFailed: "保存片段失败",
+    snippetDeleted: "片段已删除",
+    snippetDeleteFailed: "删除片段失败",
+    snippetNoTerminal: "请先打开一个终端 —— 片段会发送到最近使用的终端",
+    snippetSent: (name: string) => `已发送片段：${name}`,
     monitorDescription: "观测服务器关键状态，并支持手动刷新。",
     monitorLoading: "正在加载服务器观测数据",
     monitorLoadingDescription: "正在从远程服务器采集一份快速状态快照。",
@@ -1248,6 +1323,31 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sshKeyCopied: (name: string) => `公開鍵をコピーしました: ${name}`,
     sshKeyCopyFailed: "公開鍵のコピーに失敗しました",
     sshKeyLoadFailed: "SSH 鍵の読み込みに失敗しました",
+    snippets: "スニペット",
+    snippetsDescription: "{{host}} / {{user}} / {{port}} 変数が使える再利用コマンド。「実行」は即実行、「貼り付け」は入力のみ。",
+    newSnippet: "新規スニペット",
+    editSnippet: "スニペットを編集",
+    snippetName: "名前",
+    snippetContent: "コマンド",
+    snippetContentPlaceholder: "systemctl status nginx\nログ確認: tail -n 200 /var/log/nginx/error.log",
+    snippetHost: "ホストに紐付け",
+    snippetAnyHost: "任意のホスト（現在のターミナルを使用）",
+    snippetDangerous: "危険",
+    snippetDangerousHint: "破壊的なコマンド（rm -rf、drop table、reboot など）は警告され、実行前に再確認が必要です。",
+    snippetVariables: "変数: ",
+    snippetRun: "実行",
+    snippetPaste: "貼り付け",
+    snippetPasteHint: "Enter を押さずにターミナルへ入力します",
+    snippetEmpty: "スニペットがありません",
+    snippetEmptyDescription: "毎回打ち直すコマンドを保存しましょう — デプロイ、ログ確認、キャッシュ削除など。",
+    snippetConfirmDelete: "削除を確認",
+    snippetConfirmRun: "実行を確認",
+    snippetSaved: "スニペットを保存しました",
+    snippetSaveFailed: "スニペットの保存に失敗しました",
+    snippetDeleted: "スニペットを削除しました",
+    snippetDeleteFailed: "スニペットの削除に失敗しました",
+    snippetNoTerminal: "先にターミナルを開いてください — 最後に使ったターミナルへ送信します",
+    snippetSent: (name: string) => `スニペットを送信しました: ${name}`,
     monitorDescription: "サーバーの主要な状態を確認し、必要に応じて手動更新します。",
     monitorLoading: "サーバー監視情報を読み込み中",
     monitorLoadingDescription: "リモートサーバーから簡易ステータスを収集中です。",
