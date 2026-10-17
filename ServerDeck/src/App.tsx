@@ -815,6 +815,13 @@ export default function App() {
   const [snippetBusy, setSnippetBusy] = useState(false);
   const [snippetPendingDeleteId, setSnippetPendingDeleteId] = useState("");
   const [snippetPendingRunId, setSnippetPendingRunId] = useState("");
+  // author: BrianXiong
+  // time: 2026/10/18/02:20:00
+  // Remote working directory reported by shells through OSC 7, keyed by host,
+  // so the SFTP pane can follow the terminal. Pending commands are flushed once
+  // a freshly opened terminal reports its first output.
+  const [remoteCwdByHost, setRemoteCwdByHost] = useState<Record<string, string>>({});
+  const pendingTerminalCommandsRef = useRef<Map<string, string>>(new Map());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
   const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
@@ -1730,6 +1737,12 @@ export default function App() {
       return;
     }
 
+    const trackedCwd = remoteCwdByHost[sftpHost.id];
+    if (trackedCwd) {
+      setRemotePath(trackedCwd);
+      return;
+    }
+
     let cancelled = false;
     void resolveRemotePath(sftpHost, ".", sshOptions)
       .then((absolutePath) => {
@@ -1743,7 +1756,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [isSftpView, remotePath, sftpHost, sshOptions]);
+  }, [isSftpView, remotePath, sftpHost, sshOptions, remoteCwdByHost]);
 
   useEffect(() => {
     setLocalPreview(null);
@@ -1846,6 +1859,34 @@ export default function App() {
       lineHeight: 1.12,
       scrollback: 5000,
       theme: activeTerminalTheme.theme
+    });
+
+    // author: BrianXiong
+    // time: 2026/10/18/02:20:00
+    // Shell integration (OSC 7) reports the remote working directory; when the
+    // shell does not emit it the SFTP follow feature simply stays inactive.
+    const terminalHostId =
+      activeTerminalTab.kind === "remote" && activeTerminalTab.host ? activeTerminalTab.host.id : "";
+    const oscDisposable = terminal.parser.registerOscHandler(7, (data) => {
+      const match = data.match(/^file:\/\/([^/]*)(\/.*)$/);
+      if (!match) {
+        return false;
+      }
+
+      let decodedPath = match[2];
+      try {
+        decodedPath = decodeURIComponent(decodedPath);
+      } catch {
+        // Keep the raw payload when percent-decoding fails.
+      }
+      if (!decodedPath.startsWith("/") || !terminalHostId) {
+        return false;
+      }
+
+      setRemoteCwdByHost((current) =>
+        current[terminalHostId] === decodedPath ? current : { ...current, [terminalHostId]: decodedPath }
+      );
+      return true;
     });
 
     const fitAddon = new FitAddon();
@@ -1992,6 +2033,7 @@ export default function App() {
       terminalWriteQueueRef.current = [];
       terminalViewportSyncRef.current = null;
       window.cancelAnimationFrame(clearSelectionFrame);
+      oscDisposable.dispose();
       disposable.dispose();
       scrollDisposable.dispose();
       searchAddonRef.current = null;
@@ -2062,6 +2104,14 @@ export default function App() {
 
       const existingBuffer = terminalBuffersRef.current.get(event.payload.sessionId) ?? [];
       terminalBuffersRef.current.set(event.payload.sessionId, appendTerminalBufferChunk(existingBuffer, chunk));
+
+      if (nextState === "connected" && matchingTab.state !== "connected") {
+        const queuedCommand = pendingTerminalCommandsRef.current.get(event.payload.sessionId);
+        if (queuedCommand) {
+          pendingTerminalCommandsRef.current.delete(event.payload.sessionId);
+          void writeTerminalInput(event.payload.sessionId, queuedCommand);
+        }
+      }
 
       if (matchingTab.state !== nextState || matchingTab.statusText !== nextStatusText) {
         setTerminalTabs((prev) =>
@@ -2747,6 +2797,31 @@ export default function App() {
     }
   }
 
+  // author: BrianXiong
+  // time: 2026/10/18/02:20:00
+  function shellQuotePath(path: string): string {
+    return `'${path.replace(/'/g, `'\\''`)}'`;
+  }
+
+  function handleFollowTerminalCwd() {
+    if (!sftpHost) {
+      return;
+    }
+
+    const tracked = remoteCwdByHost[sftpHost.id];
+    if (tracked) {
+      setRemotePath(tracked);
+    }
+  }
+
+  function handleOpenSftpPathInTerminal() {
+    if (!sftpHost || remotePath === ".") {
+      return;
+    }
+
+    void handleOpenTerminal(sftpHost, { queuedCommand: `cd ${shellQuotePath(remotePath)}\n` });
+  }
+
   function handleSelectSftpHost(hostId: string) {
     setSftpHostId(hostId);
     setRemotePath(".");
@@ -3313,7 +3388,10 @@ export default function App() {
     return `serverdeck-${base || "host"}-${suffix}`.toLowerCase();
   }
 
-  async function handleOpenTerminal(targetHost: SavedHost = draft, options?: { allowInteractiveAuth?: boolean }) {
+  async function handleOpenTerminal(
+    targetHost: SavedHost = draft,
+    options?: { allowInteractiveAuth?: boolean; queuedCommand?: string }
+  ) {
     setBusy(true);
     setStatusTone("neutral");
 
@@ -3337,6 +3415,9 @@ export default function App() {
         ? { ...sshOptions, tmuxSession: buildTmuxSessionName(targetHost) }
         : sshOptions;
       const sessionId = await startTerminalSession(targetHost, sessionOptions);
+      if (options?.queuedCommand) {
+        pendingTerminalCommandsRef.current.set(sessionId, options.queuedCommand);
+      }
       const tabId = crypto.randomUUID();
       const title = getDisplayHostTitle(targetHost);
 
@@ -4422,6 +4503,28 @@ export default function App() {
                     />
                     <span>{messages.showHiddenFiles}</span>
                   </label>
+
+                  {sftpHost && remoteCwdByHost[sftpHost.id] ? (
+                    <button
+                      type="button"
+                      className="secondary-button sftp-back-button"
+                      onClick={handleFollowTerminalCwd}
+                      title={remoteCwdByHost[sftpHost.id]}
+                    >
+                      {messages.sftpFollowCwd}
+                    </button>
+                  ) : null}
+
+                  {sftpHost && remotePath !== "." ? (
+                    <button
+                      type="button"
+                      className="secondary-button sftp-back-button"
+                      onClick={handleOpenSftpPathInTerminal}
+                    >
+                      <TerminalSquare size={14} />
+                      {messages.sftpOpenInTerminal}
+                    </button>
+                  ) : null}
 
                   <label className="sftp-host-select">
                     <span>{messages.selectHost}</span>
