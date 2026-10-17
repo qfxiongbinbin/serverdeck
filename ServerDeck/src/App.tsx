@@ -83,6 +83,7 @@ import {
 } from "./lib/api";
 import { FileBrowserPane } from "./components/files/FileBrowserPane";
 import { ProjectEditorModal } from "./components/projects/ProjectEditorModal";
+import { CommandPalette } from "./components/commands/CommandPalette";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
 import {
   getDocumentLanguageTag,
@@ -106,6 +107,8 @@ const SFTP_TAB_ID = "sftp";
 const SETTINGS_TAB_ID = "settings";
 const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 const LOCAL_TERMINAL_RECENT_PROJECTS_KEY = "serverdeck.localTerminalRecentProjects";
+const RECENT_HOSTS_STORAGE_KEY = "serverdeck.recentHosts";
+const RECENT_HOSTS_LIMIT = 8;
 const DEFAULT_APP_SETTINGS: AppSettings = {
   appTheme: "dark",
   language: "en",
@@ -361,6 +364,27 @@ function hasTauriRuntime() {
   return typeof window !== "undefined" && Boolean(window.__TAURI_INTERNALS__);
 }
 
+// author: BrianXiong
+// time: 2026/10/17/23:40:00
+// Recent connections only power the command palette ordering, so a storage
+// failure must never break the app: fall back to an empty list.
+function readRecentHostIds(): string[] {
+  try {
+    const raw = window.localStorage.getItem(RECENT_HOSTS_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.filter((item): item is string => typeof item === "string").slice(0, RECENT_HOSTS_LIMIT);
+  } catch {
+    return [];
+  }
+}
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error) return error.message;
@@ -720,6 +744,8 @@ export default function App() {
   const [sftpHostId, setSftpHostId] = useState("");
   const [draft, setDraft] = useState<SavedHost>(blankHost);
   const [search, setSearch] = useState("");
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [recentHostIds, setRecentHostIds] = useState<string[]>(() => readRecentHostIds());
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
   const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
@@ -773,6 +799,30 @@ export default function App() {
   const [terminalSearchOpen, setTerminalSearchOpen] = useState(false);
   const [terminalSearchQuery, setTerminalSearchQuery] = useState("");
   const [showHiddenFiles, setShowHiddenFiles] = useState(false);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(RECENT_HOSTS_STORAGE_KEY, JSON.stringify(recentHostIds));
+    } catch {
+      // Recents are a convenience only; ignore storage failures.
+    }
+  }, [recentHostIds]);
+
+  // author: BrianXiong
+  // time: 2026/10/17/23:40:00
+  // Cmd+K opens the quick connect palette from anywhere, including a focused
+  // terminal. Clearing the terminal screen moved to Cmd+Shift+K.
+  useEffect(() => {
+    const handlePaletteShortcut = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setCommandPaletteOpen((current) => !current);
+      }
+    };
+
+    window.addEventListener("keydown", handlePaletteShortcut);
+    return () => window.removeEventListener("keydown", handlePaletteShortcut);
+  }, []);
 
   const terminalEl = useRef<HTMLDivElement | null>(null);
   const localTerminalMenuRef = useRef<HTMLDivElement | null>(null);
@@ -971,7 +1021,8 @@ export default function App() {
   };
 
   // Terminal keyboard shortcuts: Cmd+1-9 switch tabs, and on an active
-  // terminal tab Cmd+W closes it, Cmd+K clears the screen, Cmd+F searches.
+  // terminal tab Cmd+W closes it, Cmd+Shift+K clears the screen, Cmd+F searches.
+  // Cmd+K itself is reserved for the quick connect palette.
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (!event.metaKey || event.ctrlKey || event.altKey) {
@@ -1000,7 +1051,7 @@ export default function App() {
         return;
       }
 
-      if (key === "k") {
+      if (key === "k" && event.shiftKey) {
         event.preventDefault();
         terminalRef.current?.clear();
         return;
@@ -2577,6 +2628,64 @@ export default function App() {
     setRemoteError("");
   }
 
+  // author: BrianXiong
+  // time: 2026/10/17/23:40:00
+  // Quick connect builds a throwaway host from "user@host:port" so a one-off
+  // machine can be reached without persisting it.
+  function handlePaletteQuickConnect(target: { username: string; address: string; port: number }) {
+    setCommandPaletteOpen(false);
+    const quickHost: SavedHost = {
+      ...blankHost,
+      id: crypto.randomUUID(),
+      label: `${target.username ? `${target.username}@` : ""}${target.address}`,
+      address: target.address,
+      port: target.port,
+      username: target.username || blankHost.username,
+      authType: "password",
+      password: ""
+    };
+
+    void handleOpenTerminal(quickHost, { allowInteractiveAuth: true });
+  }
+
+  function handlePaletteConnect(host: SavedHost) {
+    setCommandPaletteOpen(false);
+    rememberRecentHost(host.id);
+    void handleOpenTerminal(host);
+  }
+
+  function handlePaletteOpenSftp(host: SavedHost) {
+    setCommandPaletteOpen(false);
+    rememberRecentHost(host.id);
+    setActiveTabId(SFTP_TAB_ID);
+    handleSelectSftpHost(host.id);
+  }
+
+  async function handlePaletteTestConnection(host: SavedHost) {
+    setCommandPaletteOpen(false);
+    setStatusTone("neutral");
+
+    try {
+      setStatus(messages.testingHost(host.username, host.address, host.port));
+      const message = await testConnection(host, sshOptions);
+      setStatus(message);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : messages.connectionTestFailed);
+      setStatusTone("error");
+    }
+  }
+
+  function handlePaletteEditHost(host: SavedHost) {
+    setCommandPaletteOpen(false);
+    openEditDrawer(host);
+  }
+
+  function handlePaletteNewHost() {
+    setCommandPaletteOpen(false);
+    openNewDrawer();
+  }
+
   async function handleSave() {
     setBusy(true);
     setStatusTone("neutral");
@@ -2711,7 +2820,7 @@ export default function App() {
     }
   }
 
-  async function handleOpenTerminal(targetHost: SavedHost = draft) {
+  async function handleOpenTerminal(targetHost: SavedHost = draft, options?: { allowInteractiveAuth?: boolean }) {
     setBusy(true);
     setStatusTone("neutral");
 
@@ -2719,11 +2828,15 @@ export default function App() {
       if (!targetHost.address.trim()) {
         throw new Error(messages.selectOrFillHostFirst);
       }
-      if (targetHost.authType === "password" && !(targetHost.password || "").trim() && !targetHost.hasPassword) {
-        throw new Error(messages.passwordRequired);
-      }
-      if (targetHost.authType === "key" && !(targetHost.privateKeyPath || "").trim()) {
-        throw new Error(messages.keyPathRequired);
+      // Quick connect targets have no saved credentials on purpose: ssh prompts
+      // for the password inside the pty instead of failing the pre-flight check.
+      if (!options?.allowInteractiveAuth) {
+        if (targetHost.authType === "password" && !(targetHost.password || "").trim() && !targetHost.hasPassword) {
+          throw new Error(messages.passwordRequired);
+        }
+        if (targetHost.authType === "key" && !(targetHost.privateKeyPath || "").trim()) {
+          throw new Error(messages.keyPathRequired);
+        }
       }
 
       setStatus(messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port));
@@ -2745,6 +2858,7 @@ export default function App() {
       ]);
 
       terminalBuffersRef.current.set(sessionId, []);
+      rememberRecentHost(targetHost.id);
       setActiveTabId(tabId);
       setDrawerOpen(false);
       setStatus(messages.terminalSessionOpened(targetHost.username, targetHost.address));
@@ -2761,6 +2875,18 @@ export default function App() {
   // time: 2026/04/05/20:55:02
   function rememberRecentLocalProject(projectId: string) {
     setRecentLocalProjectIds((current) => [projectId, ...current.filter((item) => item !== projectId)].slice(0, 5));
+  }
+
+  // author: BrianXiong
+  // time: 2026/10/17/23:40:00
+  // Only persisted hosts are remembered; ad-hoc quick connect targets use a
+  // throwaway id and would otherwise leave dead entries behind.
+  function rememberRecentHost(hostId: string) {
+    if (!hostId || !hosts.some((host) => host.id === hostId)) {
+      return;
+    }
+
+    setRecentHostIds((current) => [hostId, ...current.filter((item) => item !== hostId)].slice(0, RECENT_HOSTS_LIMIT));
   }
 
   // author: BrianXiong
@@ -3187,6 +3313,17 @@ export default function App() {
             title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </button>
+
+          <button
+            type="button"
+            className="top-tab top-tab--ghost topbar-command-button"
+            onClick={() => setCommandPaletteOpen(true)}
+            aria-label={messages.commandPalettePlaceholder}
+            title={messages.commandPalettePlaceholder}
+          >
+            <Search size={16} />
+            <span className="topbar-command-button__kbd">⌘K</span>
           </button>
 
           {terminalTabs.map((tab) => (
@@ -4694,6 +4831,36 @@ export default function App() {
         onSave={handleSaveProject}
         onPickPath={() => void handlePickProjectPath()}
         onDraftChange={setProjectDraft}
+      />
+
+      <CommandPalette
+        open={commandPaletteOpen}
+        hosts={hosts}
+        recentHostIds={recentHostIds}
+        projectNameById={projectNameById}
+        labels={{
+          placeholder: messages.commandPalettePlaceholder,
+          noResults: messages.commandPaletteNoResults,
+          recentSection: messages.commandPaletteRecent,
+          hostsSection: messages.commandPaletteHosts,
+          actionsSection: messages.commandPaletteActions,
+          quickConnectSection: messages.commandPaletteQuickConnect,
+          temporary: messages.commandPaletteTemporary,
+          openSftp: messages.commandPaletteOpenSftp,
+          testConnection: messages.commandPaletteTestConnection,
+          editHost: messages.commandPaletteEditHost,
+          newHost: messages.newHost,
+          footer: messages.commandPaletteFooter
+        }}
+        getHostTitle={getDisplayHostTitle}
+        getHostBadge={getDisplayHostBadge}
+        onClose={() => setCommandPaletteOpen(false)}
+        onConnect={handlePaletteConnect}
+        onQuickConnect={handlePaletteQuickConnect}
+        onOpenSftp={handlePaletteOpenSftp}
+        onTestConnection={(host) => void handlePaletteTestConnection(host)}
+        onEditHost={handlePaletteEditHost}
+        onNewHost={handlePaletteNewHost}
       />
     </div>
   );

@@ -259,6 +259,17 @@ type Messages = {
   clearing: string;
   clearData: string;
   quickConnect: string;
+  commandPalettePlaceholder: string;
+  commandPaletteNoResults: string;
+  commandPaletteRecent: string;
+  commandPaletteHosts: string;
+  commandPaletteActions: string;
+  commandPaletteQuickConnect: string;
+  commandPaletteTemporary: string;
+  commandPaletteOpenSftp: string;
+  commandPaletteTestConnection: string;
+  commandPaletteEditHost: string;
+  commandPaletteFooter: string;
   editHostDetails: string;
   collaborate: string;
   moveTo: string;
@@ -538,6 +549,17 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     clearing: "Clearing...",
     clearData: "Clear Data",
     quickConnect: "Quick Connect",
+    commandPalettePlaceholder: "Search hosts or type user@host:port…",
+    commandPaletteNoResults: "No matching hosts",
+    commandPaletteRecent: "Recent",
+    commandPaletteHosts: "Hosts",
+    commandPaletteActions: "Actions",
+    commandPaletteQuickConnect: "Quick connect",
+    commandPaletteTemporary: "Temporary connection, not saved",
+    commandPaletteOpenSftp: "Open SFTP",
+    commandPaletteTestConnection: "Test connection",
+    commandPaletteEditHost: "Edit host",
+    commandPaletteFooter: "↑↓ Navigate · ↵ Connect · Tab SFTP · Esc Close",
     editHostDetails: "Edit Host Details",
     collaborate: "Collaborate",
     moveTo: "Move to",
@@ -815,6 +837,17 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     clearing: "清除中...",
     clearData: "清除数据",
     quickConnect: "快速连接",
+    commandPalettePlaceholder: "搜索主机，或直接输入 user@host:port…",
+    commandPaletteNoResults: "没有匹配的主机",
+    commandPaletteRecent: "最近连接",
+    commandPaletteHosts: "主机",
+    commandPaletteActions: "操作",
+    commandPaletteQuickConnect: "快速连接",
+    commandPaletteTemporary: "临时连接，不会保存",
+    commandPaletteOpenSftp: "打开 SFTP",
+    commandPaletteTestConnection: "测试连接",
+    commandPaletteEditHost: "编辑主机",
+    commandPaletteFooter: "↑↓ 选择 · ↵ 连接 · Tab 打开 SFTP · Esc 关闭",
     editHostDetails: "编辑主机信息",
     collaborate: "协作",
     moveTo: "移动到",
@@ -1092,6 +1125,17 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     clearing: "削除中...",
     clearData: "データを削除",
     quickConnect: "クイック接続",
+    commandPalettePlaceholder: "ホストを検索、または user@host:port を入力…",
+    commandPaletteNoResults: "一致するホストがありません",
+    commandPaletteRecent: "最近の接続",
+    commandPaletteHosts: "ホスト",
+    commandPaletteActions: "アクション",
+    commandPaletteQuickConnect: "クイック接続",
+    commandPaletteTemporary: "一時接続（保存されません）",
+    commandPaletteOpenSftp: "SFTP を開く",
+    commandPaletteTestConnection: "接続テスト",
+    commandPaletteEditHost: "ホストを編集",
+    commandPaletteFooter: "↑↓ 移動 · ↵ 接続 · Tab SFTP · Esc 閉じる",
     editHostDetails: "ホスト詳細を編集",
     collaborate: "共同作業",
     moveTo: "移動先",
