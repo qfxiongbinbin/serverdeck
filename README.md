@@ -4,7 +4,7 @@
 
   # ServerDeck — Remote Server Workbench
 
-  macOS desktop app for SSH, terminal tabs, SFTP, and in-app updates.
+  macOS desktop app for SSH, terminal tabs, SFTP, server monitoring, and in-app updates.
 
   [![Release](https://img.shields.io/github/v/release/qfxiongbinbin/serverdeck?display_name=tag&style=for-the-badge)](https://github.com/qfxiongbinbin/serverdeck/releases)
   [![License](https://img.shields.io/badge/license-Apache--2.0-blue?style=for-the-badge)](LICENSE)
@@ -19,14 +19,32 @@ ServerDeck is a macOS desktop app for remote server workflows, built with Tauri,
 
 ## Current Scope
 
-- Saved host management
+- Saved host management with project grouping
 - Multi-tab terminal sessions
 - SFTP browser with local and remote panes
 - File actions for upload, download, and delete
+- Server process monitoring (CPU, memory, disk)
 - Terminal theme and font size settings
 - GitHub Release-based update check and download flow
 
 This repository currently targets macOS first.
+
+## Roadmap
+
+ServerDeck is built as a single-user, local-first server workbench. Instead of chasing feature parity with Termius, the roadmap targets what that class of tool handles poorly for one developer's daily flow: a live `~/.ssh/config` host source, jump host chains, port-forward management, snippets with variables, an SFTP pane that follows the terminal's working directory, tmux-backed persistent sessions, and account-free local sync.
+
+| Milestone | Theme | Planned work |
+| --- | --- | --- |
+| M1 | Connect | ⌘K quick connect, live `~/.ssh/config` sync with jump host chains, key and known_hosts management, per-host alternate addresses and environment labels |
+| M2 | Flow | Port-forward manager, snippets with variables, tmux persistent sessions, split panes and workspace templates |
+| M3 | Transfer | SFTP follows the terminal working directory, path bookmarks and transfer queue, remote file editing, directory diff and one-way sync |
+| M4 | Extend | CLI, MCP server for external agents, account-free local sync and export, audit history |
+
+Current focus: **M1 — ⌘K quick connect and a live `~/.ssh/config` host source.**
+
+Out of scope by design: team vaults and collaboration, mobile apps, multi-protocol support (Telnet/RDP/VNC), account-based cloud sync, and a built-in AI chat assistant. AI workflows are delegated to external agents through the planned CLI/MCP layer.
+
+Detailed planning is maintained in the internal knowledge base; shipped changes are listed in [`docs/changelog.md`](docs/changelog.md).
 
 ## Repository Layout
 
@@ -35,6 +53,7 @@ This repository currently targets macOS first.
 - `ServerDeck/src-tauri/` — Rust backend, Tauri config, icons, and desktop commands
 - Product and technical planning docs are maintained in the knowledge base under `工作/serverdeck/`
 - `docs/release-process.md` — versioning and GitHub Release flow
+- `docs/changelog.md` — release notes for each published version
 
 ## Local Development
 
