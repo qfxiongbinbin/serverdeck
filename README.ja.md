@@ -62,7 +62,27 @@ npm run serverdeck -- exec <host> -- "df -h"  # ssh 経由でコマンドを実�
 
 `<host>` はラベル・アドレス・id のいずれかを受け付け、CLI の終了コードは
 リモートコマンドの終了コードになります。`SERVERDECK_SOCKET` でソケットパスを
-上書きできます。同じソケットを使う MCP サーバーは次の計画です。
+上書きできます。
+
+### MCP サーバー
+
+`npm run serverdeck:mcp` は MCP（stdio）サーバーを起動し、`list_hosts` と `exec`
+を Codex や Claude Code などのエージェントランタイムに公開します:
+
+```json
+{
+  "mcpServers": {
+    "serverdeck": {
+      "command": "node",
+      "args": ["/absolute/path/to/ServerDeck/scripts/serverdeck-mcp.mjs"],
+      "env": { "SERVERDECK_MCP_ALLOW_HOSTS": "web-01,db-staging" }
+    }
+  }
+}
+```
+
+`SERVERDECK_MCP_ALLOW_HOSTS` で `exec` が操作できるホストを制限でき、すべての
+ツール呼び出しは `~/.serverdeck/mcp-audit.log` に追記されます。
 
 ## リポジトリ構成
 

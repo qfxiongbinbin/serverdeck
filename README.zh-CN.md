@@ -60,7 +60,27 @@ npm run serverdeck -- exec <host> -- "df -h"  # 在远端执行一条命令
 ```
 
 `<host>` 支持主机名、地址或 id；CLI 的退出码即远端命令的退出码。
-可用 `SERVERDECK_SOCKET` 覆盖 socket 路径。基于同一 socket 的 MCP server 是下一步计划。
+可用 `SERVERDECK_SOCKET` 覆盖 socket 路径。
+
+### MCP Server
+
+`npm run serverdeck:mcp` 会启动一个 MCP（stdio）服务，把 `list_hosts` 和 `exec`
+暴露给 Codex、Claude Code 等 Agent 运行时：
+
+```json
+{
+  "mcpServers": {
+    "serverdeck": {
+      "command": "node",
+      "args": ["/absolute/path/to/ServerDeck/scripts/serverdeck-mcp.mjs"],
+      "env": { "SERVERDECK_MCP_ALLOW_HOSTS": "web-01,db-staging" }
+    }
+  }
+}
+```
+
+`SERVERDECK_MCP_ALLOW_HOSTS` 限定 `exec` 允许操作的主机；每次工具调用都会追加到
+`~/.serverdeck/mcp-audit.log` 审计日志。
 
 ## 仓库结构
 

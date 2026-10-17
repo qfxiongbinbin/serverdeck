@@ -61,8 +61,27 @@ npm run serverdeck -- exec <host> -- "df -h"  # run one command over ssh
 ```
 
 `<host>` accepts a label, address or id, and the CLI exits with the remote
-command's exit code. `SERVERDECK_SOCKET` overrides the socket path. An MCP
-server built on the same socket is planned next.
+command's exit code. `SERVERDECK_SOCKET` overrides the socket path.
+
+### MCP server
+
+`npm run serverdeck:mcp` starts an MCP (stdio) server that exposes `list_hosts`
+and `exec` to agent runtimes such as Codex or Claude Code:
+
+```json
+{
+  "mcpServers": {
+    "serverdeck": {
+      "command": "node",
+      "args": ["/absolute/path/to/ServerDeck/scripts/serverdeck-mcp.mjs"],
+      "env": { "SERVERDECK_MCP_ALLOW_HOSTS": "web-01,db-staging" }
+    }
+  }
+}
+```
+
+`SERVERDECK_MCP_ALLOW_HOSTS` restricts which hosts `exec` may touch, and every
+tool call is appended to `~/.serverdeck/mcp-audit.log`.
 
 ## Repository Layout
 

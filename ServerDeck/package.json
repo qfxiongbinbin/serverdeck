@@ -15,7 +15,8 @@
     "release:patch": "npm version patch --no-git-tag-version && npm run version:sync",
     "release:minor": "npm version minor --no-git-tag-version && npm run version:sync",
     "release:major": "npm version major --no-git-tag-version && npm run version:sync",
-    "serverdeck": "node ./scripts/serverdeck.mjs"
+    "serverdeck": "node ./scripts/serverdeck.mjs",
+    "serverdeck:mcp": "node ./scripts/serverdeck-mcp.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.0.2",
