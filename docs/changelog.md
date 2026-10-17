@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.39
+
+Compared with `v0.0.38`.
+
+### Added
+
+- Add persistent port forward manager
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.38
 
 Compared with `v0.0.37`.
