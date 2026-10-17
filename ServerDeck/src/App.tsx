@@ -148,7 +148,8 @@ const DEFAULT_APP_SETTINGS: AppSettings = {
   sshServerAliveIntervalSeconds: 30,
   terminalThemeId: defaultTerminalThemeId,
   terminalFontSize: 14,
-  terminalCharset: "utf-8"
+  terminalCharset: "utf-8",
+  tmuxPersistence: false
 };
 
 const blankHost: SavedHost = {
@@ -256,6 +257,7 @@ type AppSettings = {
   terminalThemeId: string;
   terminalFontSize: number;
   terminalCharset: TerminalCharset;
+  tmuxPersistence: boolean;
 };
 
 type UpdateStage = "idle" | "downloading" | "ready";
@@ -392,7 +394,9 @@ function normalizeAppSettings(parsed: Partial<AppSettings>): AppSettings {
         : DEFAULT_APP_SETTINGS.terminalFontSize,
     terminalCharset: isTerminalCharset(parsed.terminalCharset)
       ? parsed.terminalCharset
-      : DEFAULT_APP_SETTINGS.terminalCharset
+      : DEFAULT_APP_SETTINGS.terminalCharset,
+    tmuxPersistence:
+      typeof parsed.tmuxPersistence === "boolean" ? parsed.tmuxPersistence : DEFAULT_APP_SETTINGS.tmuxPersistence
   };
 }
 
@@ -3296,6 +3300,19 @@ export default function App() {
     }
   }
 
+  // author: BrianXiong
+  // time: 2026/10/18/02:00:00
+  // One stable tmux session per host so reconnects (and app restarts) land back
+  // in the same remote shell instead of a fresh login.
+  function buildTmuxSessionName(host: SavedHost): string {
+    const base = (host.label.trim() || host.address)
+      .replace(/[^A-Za-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 24);
+    const suffix = host.id.replace(/[^A-Za-z0-9]/g, "").slice(-6);
+    return `serverdeck-${base || "host"}-${suffix}`.toLowerCase();
+  }
+
   async function handleOpenTerminal(targetHost: SavedHost = draft, options?: { allowInteractiveAuth?: boolean }) {
     setBusy(true);
     setStatusTone("neutral");
@@ -3316,7 +3333,10 @@ export default function App() {
       }
 
       setStatus(messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port));
-      const sessionId = await startTerminalSession(targetHost, sshOptions);
+      const sessionOptions: SshConnectionOptions = settings.tmuxPersistence
+        ? { ...sshOptions, tmuxSession: buildTmuxSessionName(targetHost) }
+        : sshOptions;
+      const sessionId = await startTerminalSession(targetHost, sessionOptions);
       const tabId = crypto.randomUUID();
       const title = getDisplayHostTitle(targetHost);
 
@@ -4824,6 +4844,20 @@ export default function App() {
                               </option>
                             ))}
                           </select>
+                        </div>
+
+                        <div className="settings-item settings-item--panel">
+                          <div>
+                            <strong>{messages.tmuxPersistence}</strong>
+                            <span>{messages.tmuxPersistenceDescription}</span>
+                          </div>
+                          <input
+                            type="checkbox"
+                            checked={settings.tmuxPersistence}
+                            onChange={(event) =>
+                              setSettings((current) => ({ ...current, tmuxPersistence: event.target.checked }))
+                            }
+                          />
                         </div>
                       </div>
 

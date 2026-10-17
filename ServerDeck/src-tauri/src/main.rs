@@ -151,6 +151,12 @@ struct AppSettingsRecord {
     terminal_theme_id: String,
     terminal_font_size: u16,
     terminal_charset: String,
+    // author: BrianXiong
+    // time: 2026/10/18/02:00:00
+    // When enabled, ssh terminals attach to a per-host tmux session so a
+    // reconnect restores the remote shell state.
+    #[serde(default)]
+    tmux_persistence: bool,
 }
 
 fn default_project_id() -> String {
@@ -162,6 +168,11 @@ fn default_project_id() -> String {
 struct SshConnectionOptions {
     connect_timeout_seconds: u16,
     server_alive_interval_seconds: u16,
+    // author: BrianXiong
+    // time: 2026/10/18/02:00:00
+    // Optional tmux session to attach to (or create) after login.
+    #[serde(default)]
+    tmux_session: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -294,6 +305,7 @@ fn default_app_settings_record() -> AppSettingsRecord {
         terminal_theme_id: "midnight-operator".to_string(),
         terminal_font_size: 14,
         terminal_charset: "utf-8".to_string(),
+        tmux_persistence: false,
     }
 }
 
@@ -495,6 +507,9 @@ fn load_app_preferences() -> Result<AppPreferencesPayload, String> {
         .and_then(|value| value.parse::<u16>().ok())
         .unwrap_or(settings.terminal_font_size);
     settings.terminal_charset = get_setting(&conn, "terminalCharset")?.unwrap_or(settings.terminal_charset);
+    settings.tmux_persistence = get_setting(&conn, "tmuxPersistence")?
+        .map(|value| value == "true")
+        .unwrap_or(settings.tmux_persistence);
 
     Ok(AppPreferencesPayload {
         settings,
@@ -526,6 +541,11 @@ fn save_app_preferences(payload: AppPreferencesPayload) -> Result<bool, String> 
     set_setting(&tx, "terminalThemeId", &payload.settings.terminal_theme_id)?;
     set_setting(&tx, "terminalFontSize", &payload.settings.terminal_font_size.to_string())?;
     set_setting(&tx, "terminalCharset", &payload.settings.terminal_charset)?;
+    set_setting(
+        &tx,
+        "tmuxPersistence",
+        if payload.settings.tmux_persistence { "true" } else { "false" },
+    )?;
 
     tx.execute("DELETE FROM local_terminal_recent_projects", [])
         .map_err(|error| error.to_string())?;
@@ -2518,6 +2538,42 @@ fn open_external_url(url: String) -> Result<bool, String> {
     Ok(true)
 }
 
+// author: BrianXiong
+// time: 2026/10/18/02:00:00
+// tmux session names end up in a shell command and in `tmux ls`, so only a
+// conservative character set is kept and the length is capped.
+fn sanitize_tmux_session_name(raw: &str) -> Option<String> {
+    let cleaned: String = raw
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches('-').to_string();
+
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    Some(trimmed.chars().take(48).collect())
+}
+
+// author: BrianXiong
+// time: 2026/10/18/02:00:00
+// Attach to (or create) the tmux session, and fall back to a plain login shell
+// when tmux is not installed on the remote host.
+fn tmux_remote_command(session: &str) -> String {
+    let quoted = shell_single_quote(session);
+    format!(
+        "sh -lc 'if command -v tmux >/dev/null 2>&1; then exec tmux new -A -s {quoted}; else exec \"${{SHELL:-/bin/sh}}\" -l; fi'"
+    )
+}
+
 #[tauri::command]
 fn start_terminal_session(
     app: AppHandle,
@@ -2595,6 +2651,14 @@ fn start_terminal_session(
     }
 
     cmd.arg(&destination);
+
+    if let Some(raw_session) = ssh_options.tmux_session.as_deref() {
+        if let Some(session) = sanitize_tmux_session_name(raw_session) {
+            cmd.arg(tmux_remote_command(&session));
+            eprintln!("[DEBUG] Attaching tmux session: {}", session);
+        }
+    }
+
     eprintln!("[DEBUG] SSH command configured for: {}", destination);
 
     spawn_terminal_command(
@@ -2905,6 +2969,7 @@ fn default_ssh_connection_options() -> SshConnectionOptions {
     SshConnectionOptions {
         connect_timeout_seconds: 5,
         server_alive_interval_seconds: 30,
+        tmux_session: None,
     }
 }
 
@@ -4525,6 +4590,31 @@ Host target
         assert!(!is_dangerous_snippet("systemctl status nginx"));
         assert!(!is_dangerous_snippet("docker ps -a"));
         assert!(!is_dangerous_snippet("tail -n 200 /var/log/nginx/error.log"));
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/18/02:00:00
+    #[test]
+    fn tmux_session_name_is_sanitized() {
+        assert_eq!(
+            sanitize_tmux_session_name("  serverdeck Web-01  ").as_deref(),
+            Some("serverdeck-Web-01")
+        );
+        assert_eq!(sanitize_tmux_session_name("a.b:c").as_deref(), Some("a-b-c"));
+        assert_eq!(sanitize_tmux_session_name("   ").as_deref(), None);
+        assert_eq!(sanitize_tmux_session_name("---").as_deref(), None);
+        assert_eq!(
+            sanitize_tmux_session_name(&"x".repeat(80)).map(|value| value.len()),
+            Some(48)
+        );
+    }
+
+    #[test]
+    fn tmux_remote_command_falls_back_without_tmux() {
+        let command = tmux_remote_command("serverdeck-web-01");
+        assert!(command.contains("command -v tmux"));
+        assert!(command.contains("tmux new -A -s 'serverdeck-web-01'"));
+        assert!(command.contains("exec \"${SHELL:-/bin/sh}\" -l"));
     }
 
     #[test]

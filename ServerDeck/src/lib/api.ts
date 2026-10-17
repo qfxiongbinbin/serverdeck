@@ -68,6 +68,7 @@ export type LocalFilePreview = {
 export type SshConnectionOptions = {
   connectTimeoutSeconds: number;
   serverAliveIntervalSeconds: number;
+  tmuxSession?: string;
 };
 
 export type ManagedProject = {
@@ -90,6 +91,7 @@ export type AppPreferences = {
     terminalThemeId: string;
     terminalFontSize: number;
     terminalCharset: string;
+    tmuxPersistence: boolean;
   };
   recentProjectIds: string[];
 };
