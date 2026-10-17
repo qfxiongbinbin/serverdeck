@@ -46,6 +46,22 @@ ServerDeck 定位为**单人使用、本地优先**的服务器工作台。我�
 
 详细规划维护在内部知识库；已发布的变化见 [`docs/changelog.md`](docs/changelog.md)。
 
+## Agent 接口与 CLI
+
+应用运行期间，ServerDeck 会暴露一个「仅当前用户可访问」的本地 socket
+（`~/.serverdeck/agent.sock`，权限 `0600`），脚本和编码 Agent 可以直接复用
+已保存的主机、密钥与跳板机配置，不用在 prompt 里硬编码连接信息。
+
+```bash
+cd ServerDeck
+npm run serverdeck -- ping                    # 检查应用是否在运行
+npm run serverdeck -- list                    # 列出已保存主机
+npm run serverdeck -- exec <host> -- "df -h"  # 在远端执行一条命令
+```
+
+`<host>` 支持主机名、地址或 id；CLI 的退出码即远端命令的退出码。
+可用 `SERVERDECK_SOCKET` 覆盖 socket 路径。基于同一 socket 的 MCP server 是下一步计划。
+
 ## 仓库结构
 
 - `ServerDeck/` — 应用源码

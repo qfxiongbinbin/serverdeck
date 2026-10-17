@@ -46,6 +46,24 @@ Out of scope by design: team vaults and collaboration, mobile apps, multi-protoc
 
 Detailed planning is maintained in the internal knowledge base; shipped changes are listed in [`docs/changelog.md`](docs/changelog.md).
 
+## Agent Access & CLI
+
+While the app is running, ServerDeck exposes a same-user local socket
+(`~/.serverdeck/agent.sock`, mode `0600`) so scripts and coding agents can reuse
+the saved hosts, keys and jump host setup instead of hardcoding connection
+details.
+
+```bash
+cd ServerDeck
+npm run serverdeck -- ping                    # is the app reachable?
+npm run serverdeck -- list                    # list saved hosts
+npm run serverdeck -- exec <host> -- "df -h"  # run one command over ssh
+```
+
+`<host>` accepts a label, address or id, and the CLI exits with the remote
+command's exit code. `SERVERDECK_SOCKET` overrides the socket path. An MCP
+server built on the same socket is planned next.
+
 ## Repository Layout
 
 - `ServerDeck/` — application source

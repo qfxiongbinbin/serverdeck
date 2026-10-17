@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -4177,6 +4178,156 @@ fn write_remote_text_file(
     Ok(true)
 }
 
+// author: BrianXiong
+// time: 2026/10/18/03:00:00
+// A local, same-user Unix socket exposes the host list and non-interactive exec
+// to the CLI and to external agents. The socket lives in ~/.serverdeck with 0600
+// permissions, so only the current user can talk to it.
+const AGENT_SOCKET_FILE: &str = "agent.sock";
+
+fn agent_socket_path() -> Option<PathBuf> {
+    storage_dir().ok().map(|dir| dir.join(AGENT_SOCKET_FILE))
+}
+
+fn start_agent_socket() {
+    let Some(path) = agent_socket_path() else {
+        return;
+    };
+    if path.exists() {
+        let _ = fs::remove_file(&path);
+    }
+
+    let listener = match UnixListener::bind(&path) {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("[agent] failed to bind {}: {error}", path.display());
+            return;
+        }
+    };
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+    }
+
+    eprintln!("[agent] listening on {}", path.display());
+
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(stream) = stream else {
+                continue;
+            };
+            std::thread::spawn(move || handle_agent_stream(stream));
+        }
+    });
+}
+
+fn stop_agent_socket() {
+    if let Some(path) = agent_socket_path() {
+        let _ = fs::remove_file(path);
+    }
+}
+
+fn handle_agent_stream(mut stream: UnixStream) {
+    let reader_stream = match stream.try_clone() {
+        Ok(clone) => clone,
+        Err(_) => return,
+    };
+    let mut reader = BufReader::new(reader_stream);
+    let mut line = String::new();
+    if reader.read_line(&mut line).is_err() {
+        return;
+    }
+
+    let response = handle_agent_request(&line);
+    let _ = stream.write_all(response.as_bytes());
+    let _ = stream.write_all(b"\n");
+    let _ = stream.flush();
+}
+
+fn handle_agent_request(line: &str) -> String {
+    let request: serde_json::Value = match serde_json::from_str(line.trim()) {
+        Ok(value) => value,
+        Err(error) => {
+            return serde_json::json!({ "ok": false, "error": format!("Invalid request: {error}") }).to_string();
+        }
+    };
+
+    let command = request.get("command").and_then(|value| value.as_str()).unwrap_or("");
+    let result = match command {
+        "ping" => Ok(serde_json::json!({
+            "name": "serverdeck",
+            "version": env!("CARGO_PKG_VERSION"),
+        })),
+        "list_hosts" => agent_list_hosts(),
+        "exec" => agent_exec(&request),
+        other => Err(format!("Unknown command: {other}")),
+    };
+
+    match result {
+        Ok(data) => serde_json::json!({ "ok": true, "data": data }).to_string(),
+        Err(error) => serde_json::json!({ "ok": false, "error": error }).to_string(),
+    }
+}
+
+fn agent_list_hosts() -> Result<serde_json::Value, String> {
+    let hosts = load_hosts_from_db(&open_db()?)?;
+    let payload: Vec<serde_json::Value> = hosts
+        .iter()
+        .map(|host| {
+            serde_json::json!({
+                "id": host.id,
+                "label": host.label,
+                "address": host.address,
+                "port": host.port,
+                "username": host.username,
+                "authType": host.auth_type,
+                "projectId": host.project_id,
+                "jumpHostId": host.jump_host_id,
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "hosts": payload }))
+}
+
+// author: BrianXiong
+// time: 2026/10/18/03:00:00
+// Runs a non-interactive command over ssh; the host can be referenced by id,
+// label or address so scripts do not need to look up ids first.
+fn agent_exec(request: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let target = request
+        .get("host")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "host is required".to_string())?;
+    let command = request
+        .get("command")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| "command is required".to_string())?;
+
+    let conn = open_db()?;
+    let hosts = load_hosts_from_db(&conn)?;
+    let host = hosts
+        .iter()
+        .find(|host| host.id == target || host.label == target || host.address == target)
+        .ok_or_else(|| format!("Host not found: {target}"))?;
+
+    let output = build_ssh_command(host, &default_ssh_connection_options())?
+        .arg("sh")
+        .arg("-lc")
+        .arg(command)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    Ok(serde_json::json!({
+        "host": host.label,
+        "status": output.status.code(),
+        "stdout": String::from_utf8_lossy(&output.stdout).to_string(),
+        "stderr": String::from_utf8_lossy(&output.stderr).to_string(),
+    }))
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -4184,6 +4335,7 @@ fn main() {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
             auto_start_port_forwards(app.handle());
+            start_agent_socket();
             Ok(())
         })
         .manage(AppState {
@@ -4251,6 +4403,7 @@ fn main() {
             if let Some(state) = app_handle.try_state::<AppState>() {
                 stop_all_port_forwards(state.inner());
             }
+            stop_agent_socket();
         }
     });
 }
@@ -4725,6 +4878,26 @@ Host target
 
         let oversized = vec![b'a'; REMOTE_EDIT_MAX_BYTES + 1];
         assert!(decode_remote_text_file(&oversized).is_err());
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/18/03:00:00
+    #[test]
+    fn agent_request_handles_ping_and_reports_errors() {
+        let ping: serde_json::Value =
+            serde_json::from_str(&handle_agent_request(r#"{"command":"ping"}"#)).expect("ping json");
+        assert_eq!(ping["ok"], serde_json::json!(true));
+        assert_eq!(ping["data"]["name"], serde_json::json!("serverdeck"));
+        assert!(ping["data"]["version"].as_str().unwrap_or_default().starts_with('0'));
+
+        let unknown: serde_json::Value =
+            serde_json::from_str(&handle_agent_request(r#"{"command":"nope"}"#)).expect("unknown json");
+        assert_eq!(unknown["ok"], serde_json::json!(false));
+        assert!(unknown["error"].as_str().unwrap_or_default().contains("Unknown command"));
+
+        let invalid: serde_json::Value =
+            serde_json::from_str(&handle_agent_request("not json")).expect("invalid json");
+        assert_eq!(invalid["ok"], serde_json::json!(false));
     }
 
     #[test]
