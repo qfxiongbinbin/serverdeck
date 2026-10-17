@@ -170,6 +170,8 @@ type Messages = {
   snippetDeleteFailed: string;
   snippetNoTerminal: string;
   snippetSent: (name: string) => string;
+  tmuxPersistence: string;
+  tmuxPersistenceDescription: string;
   monitorDescription: string;
   monitorLoading: string;
   monitorLoadingDescription: string;
@@ -564,6 +566,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     snippetDeleteFailed: "Failed to delete the snippet",
     snippetNoTerminal: "Open a terminal first — snippets are sent to the last terminal you used",
     snippetSent: (name: string) => `Sent snippet: ${name}`,
+    tmuxPersistence: "Reconnect inside tmux",
+    tmuxPersistenceDescription: "Open every SSH terminal inside a per-host tmux session, so reconnects and app restarts land back in the same remote shell. Falls back to a normal login shell when tmux is unavailable.",
     monitorDescription: "Observe key server status and refresh it on demand.",
     monitorLoading: "Loading server observation",
     monitorLoadingDescription: "Collecting a quick status snapshot from the remote server.",
@@ -956,6 +960,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     snippetDeleteFailed: "删除片段失败",
     snippetNoTerminal: "请先打开一个终端 —— 片段会发送到最近使用的终端",
     snippetSent: (name: string) => `已发送片段：${name}`,
+    tmuxPersistence: "使用 tmux 恢复会话",
+    tmuxPersistenceDescription: "每台主机的 SSH 终端都开在专属 tmux 会话里，断线重连或重启应用后能回到原来的远端 shell；远端没有 tmux 时自动回退到普通登录 shell。",
     monitorDescription: "观测服务器关键状态，并支持手动刷新。",
     monitorLoading: "正在加载服务器观测数据",
     monitorLoadingDescription: "正在从远程服务器采集一份快速状态快照。",
@@ -1348,6 +1354,8 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     snippetDeleteFailed: "スニペットの削除に失敗しました",
     snippetNoTerminal: "先にターミナルを開いてください — 最後に使ったターミナルへ送信します",
     snippetSent: (name: string) => `スニペットを送信しました: ${name}`,
+    tmuxPersistence: "tmux で再接続",
+    tmuxPersistenceDescription: "SSH ターミナルをホストごとの tmux セッション内で開きます。再接続やアプリ再起動後も同じリモートシェルに戻れます。tmux がない場合は通常のログインシェルに戻ります。",
     monitorDescription: "サーバーの主要な状態を確認し、必要に応じて手動更新します。",
     monitorLoading: "サーバー監視情報を読み込み中",
     monitorLoadingDescription: "リモートサーバーから簡易ステータスを収集中です。",
