@@ -515,3 +515,42 @@ export async function stopPortForward(id: string) {
   }
   return true;
 }
+
+// author: BrianXiong
+// time: 2026/10/18/00:35:00
+export type SshConfigEntry = {
+  alias: string;
+  hostName: string;
+  user: string;
+  port: number;
+  identityFile?: string | null;
+  proxyJump?: string | null;
+  state: "new" | "updated" | "unchanged";
+  hostId?: string | null;
+};
+
+export type SshConfigPreview = {
+  configPath: string;
+  exists: boolean;
+  entries: SshConfigEntry[];
+};
+
+export type SshConfigImportReport = {
+  imported: number;
+  updated: number;
+  skipped: number;
+};
+
+export async function previewSshConfig() {
+  if (hasTauri()) {
+    return tauriInvoke<SshConfigPreview>("preview_ssh_config");
+  }
+  return { configPath: "", exists: false, entries: [] } as SshConfigPreview;
+}
+
+export async function importSshConfig(aliases: string[]) {
+  if (hasTauri()) {
+    return tauriInvoke<SshConfigImportReport>("import_ssh_config", { aliases });
+  }
+  return { imported: 0, updated: 0, skipped: 0 } as SshConfigImportReport;
+}

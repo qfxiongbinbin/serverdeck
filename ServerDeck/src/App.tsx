@@ -38,7 +38,8 @@ import {
   Users,
   X,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  FileText
 } from "lucide-react";
 import {
   clearAppData,
@@ -80,6 +81,9 @@ import {
   deletePortForward,
   startPortForward,
   stopPortForward,
+  previewSshConfig,
+  importSshConfig,
+  type SshConfigPreview,
   type AppPreferences,
   type LocalFilePreview,
   type SavedHost,
@@ -93,6 +97,7 @@ import { FileBrowserPane } from "./components/files/FileBrowserPane";
 import { ProjectEditorModal } from "./components/projects/ProjectEditorModal";
 import { CommandPalette } from "./components/commands/CommandPalette";
 import { PortForwardEditorModal } from "./components/forwards/PortForwardEditorModal";
+import { SshConfigModal } from "./components/hosts/SshConfigModal";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
 import {
   getDocumentLanguageTag,
@@ -776,6 +781,10 @@ export default function App() {
   const [forwardDraft, setForwardDraft] = useState<PortForward>(blankPortForward);
   const [forwardBusyId, setForwardBusyId] = useState("");
   const [forwardPendingDeleteId, setForwardPendingDeleteId] = useState("");
+  const [sshConfigOpen, setSshConfigOpen] = useState(false);
+  const [sshConfigPreview, setSshConfigPreview] = useState<SshConfigPreview | null>(null);
+  const [sshConfigSelected, setSshConfigSelected] = useState<string[]>([]);
+  const [sshConfigBusy, setSshConfigBusy] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
   const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
@@ -1178,6 +1187,11 @@ export default function App() {
   // author: BrianXiong
   // time: 2026/04/08/16:24:00
 
+  const sshConfigPendingCount = useMemo(
+    () => (sshConfigPreview?.entries ?? []).filter((entry) => entry.state !== "unchanged").length,
+    [sshConfigPreview]
+  );
+
   const filteredHosts = useMemo(() => {
     const keyword = search.trim().toLowerCase();
     if (!keyword) return hosts;
@@ -1265,6 +1279,27 @@ export default function App() {
       void refreshPortForwards();
     }
   }, [isForwardsView, refreshPortForwards]);
+
+  // author: BrianXiong
+  // time: 2026/10/18/00:35:00
+  // `~/.ssh/config` is re-read whenever the hosts screen opens so the toolbar
+  // can show how many aliases are new or changed.
+  const refreshSshConfigPreview = useCallback(async (options?: { silent?: boolean }) => {
+    try {
+      setSshConfigPreview(await previewSshConfig());
+    } catch (error) {
+      if (!options?.silent) {
+        setStatus(getErrorMessage(error, messages.sshConfigLoadFailed));
+        setStatusTone("error");
+      }
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    if (isHostsView) {
+      void refreshSshConfigPreview({ silent: true });
+    }
+  }, [isHostsView, refreshSshConfigPreview]);
 
 
   const checkForUpdates = useCallback(async (options?: { silent?: boolean }) => {
@@ -2809,6 +2844,73 @@ export default function App() {
     }
   }
 
+  // author: BrianXiong
+  // time: 2026/10/18/00:35:00
+  async function openSshConfigModal() {
+    setSshConfigOpen(true);
+    setSshConfigBusy(true);
+
+    try {
+      const preview = await previewSshConfig();
+      setSshConfigPreview(preview);
+      setSshConfigSelected(
+        preview.entries.filter((entry) => entry.state !== "unchanged").map((entry) => entry.alias)
+      );
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.sshConfigLoadFailed));
+      setStatusTone("error");
+    } finally {
+      setSshConfigBusy(false);
+    }
+  }
+
+  function closeSshConfigModal() {
+    setSshConfigOpen(false);
+    setSshConfigBusy(false);
+  }
+
+  function handleToggleSshConfigAlias(alias: string) {
+    setSshConfigSelected((current) =>
+      current.includes(alias) ? current.filter((item) => item !== alias) : [...current, alias]
+    );
+  }
+
+  function handleToggleAllSshConfig(selectAll: boolean) {
+    if (!selectAll) {
+      setSshConfigSelected([]);
+      return;
+    }
+
+    setSshConfigSelected(
+      (sshConfigPreview?.entries ?? [])
+        .filter((entry) => entry.state !== "unchanged")
+        .map((entry) => entry.alias)
+    );
+  }
+
+  async function handleImportSshConfig() {
+    if (!sshConfigSelected.length) {
+      return;
+    }
+
+    setSshConfigBusy(true);
+
+    try {
+      const report = await importSshConfig(sshConfigSelected);
+      await refreshHosts();
+      await refreshSshConfigPreview({ silent: true });
+      setStatus(messages.sshConfigImported(report.imported, report.updated));
+      setStatusTone("success");
+      setSshConfigOpen(false);
+      setSshConfigSelected([]);
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.sshConfigImportFailed));
+      setStatusTone("error");
+    } finally {
+      setSshConfigBusy(false);
+    }
+  }
+
   async function handleSave() {
     setBusy(true);
     setStatusTone("neutral");
@@ -3680,6 +3782,14 @@ export default function App() {
                     placeholder={messages.searchPlaceholder}
                   />
                 </div>
+
+                <button type="button" className="secondary-button" onClick={() => void openSshConfigModal()}>
+                  <FileText size={16} />
+                  {messages.sshConfig}
+                  {sshConfigPendingCount > 0 ? (
+                    <span className="ssh-config-badge">{sshConfigPendingCount}</span>
+                  ) : null}
+                </button>
 
                 <button
                   type="button"
@@ -5057,6 +5167,35 @@ export default function App() {
           </section>
         </div>
       ) : null}
+
+      <SshConfigModal
+        open={sshConfigOpen}
+        preview={sshConfigPreview}
+        selectedAliases={sshConfigSelected}
+        busy={sshConfigBusy}
+        labels={{
+          eyebrow: messages.sshConfig,
+          title: messages.sshConfig,
+          description: messages.sshConfigDescription,
+          fileLabel: messages.sshConfigFile,
+          missingFile: messages.sshConfigMissing,
+          empty: messages.sshConfigEmpty,
+          selectAll: messages.sshConfigSelectAll,
+          clearAll: messages.sshConfigClearAll,
+          importLabel: messages.sshConfigImport,
+          importingLabel: messages.working,
+          cancelLabel: messages.cancel,
+          stateNew: messages.sshConfigStateNew,
+          stateUpdated: messages.sshConfigStateUpdated,
+          stateUnchanged: messages.sshConfigStateUnchanged,
+          viaJump: messages.sshConfigViaJump,
+          noSelection: messages.sshConfigNoSelection
+        }}
+        onClose={closeSshConfigModal}
+        onToggleAlias={handleToggleSshConfigAlias}
+        onToggleAll={handleToggleAllSshConfig}
+        onImport={() => void handleImportSshConfig()}
+      />
 
       <PortForwardEditorModal
         open={forwardEditorOpen}
