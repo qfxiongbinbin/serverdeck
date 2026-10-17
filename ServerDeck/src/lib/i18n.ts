@@ -98,6 +98,22 @@ type Messages = {
   forwardsToggleFailed: string;
   forwardsDeleted: string;
   forwardsConfirmDelete: string;
+  sshConfig: string;
+  sshConfigDescription: string;
+  sshConfigFile: string;
+  sshConfigMissing: string;
+  sshConfigEmpty: string;
+  sshConfigSelectAll: string;
+  sshConfigClearAll: string;
+  sshConfigImport: string;
+  sshConfigStateNew: string;
+  sshConfigStateUpdated: string;
+  sshConfigStateUnchanged: string;
+  sshConfigViaJump: string;
+  sshConfigNoSelection: string;
+  sshConfigLoadFailed: string;
+  sshConfigImported: (imported: number, updated: number) => string;
+  sshConfigImportFailed: string;
   monitorDescription: string;
   monitorLoading: string;
   monitorLoadingDescription: string;
@@ -420,6 +436,22 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     forwardsToggleFailed: "Failed to toggle tunnel",
     forwardsDeleted: "Port forward deleted",
     forwardsConfirmDelete: "Confirm delete",
+    sshConfig: "SSH Config",
+    sshConfigDescription: "Sync hosts from ~/.ssh/config. It stays a live source, so later edits can be synced again.",
+    sshConfigFile: "File",
+    sshConfigMissing: "~/.ssh/config was not found on this Mac.",
+    sshConfigEmpty: "No concrete hosts found in ~/.ssh/config.",
+    sshConfigSelectAll: "Select all",
+    sshConfigClearAll: "Clear",
+    sshConfigImport: "Import / sync",
+    sshConfigStateNew: "New",
+    sshConfigStateUpdated: "Changed",
+    sshConfigStateUnchanged: "Unchanged",
+    sshConfigViaJump: "via",
+    sshConfigNoSelection: "Nothing selected",
+    sshConfigLoadFailed: "Failed to read ~/.ssh/config",
+    sshConfigImported: (imported: number, updated: number) => `Imported ${imported} hosts, updated ${updated}`,
+    sshConfigImportFailed: "Failed to import ~/.ssh/config",
     monitorDescription: "Observe key server status and refresh it on demand.",
     monitorLoading: "Loading server observation",
     monitorLoadingDescription: "Collecting a quick status snapshot from the remote server.",
@@ -740,6 +772,22 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     forwardsToggleFailed: "切换隧道失败",
     forwardsDeleted: "端口转发已删除",
     forwardsConfirmDelete: "确认删除",
+    sshConfig: "SSH 配置",
+    sshConfigDescription: "从 ~/.ssh/config 同步主机。该文件持续作为数据源，之后的修改还能再次同步。",
+    sshConfigFile: "文件",
+    sshConfigMissing: "这台 Mac 上没有找到 ~/.ssh/config。",
+    sshConfigEmpty: "~/.ssh/config 里没有可导入的具体主机。",
+    sshConfigSelectAll: "全选",
+    sshConfigClearAll: "清空",
+    sshConfigImport: "导入 / 同步",
+    sshConfigStateNew: "新增",
+    sshConfigStateUpdated: "有变更",
+    sshConfigStateUnchanged: "无变化",
+    sshConfigViaJump: "经",
+    sshConfigNoSelection: "未选择任何主机",
+    sshConfigLoadFailed: "读取 ~/.ssh/config 失败",
+    sshConfigImported: (imported: number, updated: number) => `已导入 ${imported} 台主机，更新 ${updated} 台`,
+    sshConfigImportFailed: "导入 ~/.ssh/config 失败",
     monitorDescription: "观测服务器关键状态，并支持手动刷新。",
     monitorLoading: "正在加载服务器观测数据",
     monitorLoadingDescription: "正在从远程服务器采集一份快速状态快照。",
@@ -1060,6 +1108,22 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     forwardsToggleFailed: "トンネルの切り替えに失敗しました",
     forwardsDeleted: "ポートフォワードを削除しました",
     forwardsConfirmDelete: "削除を確認",
+    sshConfig: "SSH 設定",
+    sshConfigDescription: "~/.ssh/config からホストを同期します。ファイルは継続的なデータソースとして扱われ、後から編集しても再同期できます。",
+    sshConfigFile: "ファイル",
+    sshConfigMissing: "この Mac に ~/.ssh/config が見つかりません。",
+    sshConfigEmpty: "~/.ssh/config に取り込める具体的なホストがありません。",
+    sshConfigSelectAll: "すべて選択",
+    sshConfigClearAll: "クリア",
+    sshConfigImport: "インポート / 同期",
+    sshConfigStateNew: "新規",
+    sshConfigStateUpdated: "変更あり",
+    sshConfigStateUnchanged: "変更なし",
+    sshConfigViaJump: "経由",
+    sshConfigNoSelection: "選択されていません",
+    sshConfigLoadFailed: "~/.ssh/config の読み込みに失敗しました",
+    sshConfigImported: (imported: number, updated: number) => `${imported} 件をインポートし、${updated} 件を更新しました`,
+    sshConfigImportFailed: "~/.ssh/config のインポートに失敗しました",
     monitorDescription: "サーバーの主要な状態を確認し、必要に応じて手動更新します。",
     monitorLoading: "サーバー監視情報を読み込み中",
     monitorLoadingDescription: "リモートサーバーから簡易ステータスを収集中です。",

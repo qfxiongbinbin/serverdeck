@@ -387,6 +387,11 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           host_id TEXT NOT NULL,
           auto_start INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS ssh_config_links (
+          alias TEXT PRIMARY KEY,
+          host_id TEXT NOT NULL
+        );
         "#,
     )
     .map_err(|error| error.to_string())?;
@@ -1876,6 +1881,8 @@ fn delete_host(id: String) -> Result<bool, String> {
     // Tunnels cannot outlive their host: drop its forward rules with it.
     conn.execute("DELETE FROM port_forwards WHERE host_id = ?1", params![id])
         .map_err(|error| error.to_string())?;
+    conn.execute("DELETE FROM ssh_config_links WHERE host_id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
     keychain_delete_password(&id);
     Ok(true)
 }
@@ -3081,6 +3088,473 @@ fn stop_port_forward(state: State<AppState>, id: String) -> Result<bool, String>
     Ok(true)
 }
 
+// author: BrianXiong
+// time: 2026/10/18/00:35:00
+// `~/.ssh/config` is treated as a live data source instead of a one-time
+// import: every preview re-reads the file, and hosts keep a link to the alias
+// they came from so later edits can be synced back.
+#[derive(Debug, Clone, PartialEq)]
+struct SshConfigHostEntry {
+    alias: String,
+    host_name: String,
+    user: String,
+    port: u16,
+    identity_file: Option<String>,
+    proxy_jump: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+struct SshConfigBlock {
+    patterns: Vec<String>,
+    host_name: Option<String>,
+    user: Option<String>,
+    port: Option<u16>,
+    identity_file: Option<String>,
+    proxy_jump: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SshConfigEntryPayload {
+    alias: String,
+    host_name: String,
+    user: String,
+    port: u16,
+    identity_file: Option<String>,
+    proxy_jump: Option<String>,
+    // "new" | "updated" | "unchanged"
+    state: String,
+    host_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SshConfigPreviewPayload {
+    config_path: String,
+    exists: bool,
+    entries: Vec<SshConfigEntryPayload>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SshConfigImportReport {
+    imported: usize,
+    updated: usize,
+    skipped: usize,
+}
+
+fn ssh_config_path() -> Option<PathBuf> {
+    home_dir().map(|home| home.join(".ssh").join("config"))
+}
+
+// author: BrianXiong
+// time: 2026/10/18/00:35:00
+fn wildcard_match(pattern: &str, value: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let value: Vec<char> = value.chars().collect();
+    let (mut pattern_index, mut value_index) = (0usize, 0usize);
+    let mut star: Option<usize> = None;
+    let mut mark = 0usize;
+
+    while value_index < value.len() {
+        if pattern_index < pattern.len() && (pattern[pattern_index] == '?' || pattern[pattern_index] == value[value_index]) {
+            pattern_index += 1;
+            value_index += 1;
+        } else if pattern_index < pattern.len() && pattern[pattern_index] == '*' {
+            star = Some(pattern_index);
+            mark = value_index;
+            pattern_index += 1;
+        } else if let Some(star_index) = star {
+            pattern_index = star_index + 1;
+            mark += 1;
+            value_index = mark;
+        } else {
+            return false;
+        }
+    }
+
+    while pattern_index < pattern.len() && pattern[pattern_index] == '*' {
+        pattern_index += 1;
+    }
+
+    pattern_index == pattern.len()
+}
+
+// author: BrianXiong
+// time: 2026/10/18/00:35:00
+// Resolves `Include` values, including globs such as `config.d/*`.
+fn collect_ssh_config_include_files(base_dir: &Path, raw_value: &str) -> Vec<PathBuf> {
+    let value = raw_value.trim();
+    if value.is_empty() {
+        return Vec::new();
+    }
+
+    let expanded = expand_path(value);
+    let candidate = if expanded.is_absolute() {
+        expanded
+    } else {
+        base_dir.join(expanded)
+    };
+
+    let candidate_text = candidate.to_string_lossy().to_string();
+    if !candidate_text.contains('*') && !candidate_text.contains('?') {
+        return if candidate.exists() { vec![candidate] } else { Vec::new() };
+    }
+
+    let dir = candidate
+        .parent()
+        .map(|parent| parent.to_path_buf())
+        .unwrap_or_else(|| base_dir.to_path_buf());
+    let file_pattern = candidate
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter(|path| {
+            path.file_name()
+                .map(|name| wildcard_match(&file_pattern, &name.to_string_lossy()))
+                .unwrap_or(false)
+        })
+        .collect();
+    files.sort();
+    files
+}
+
+fn finish_ssh_config_block(mut block: SshConfigBlock, default_user: &str, entries: &mut Vec<SshConfigHostEntry>) {
+    let Some(host_name) = block.host_name.take() else {
+        return;
+    };
+    let host_name = host_name.trim().to_string();
+    if host_name.is_empty() {
+        return;
+    }
+
+    for pattern in block.patterns.drain(..) {
+        // Wildcard hosts are pattern rules, not real machines.
+        if pattern.contains('*') || pattern.contains('?') {
+            continue;
+        }
+
+        entries.push(SshConfigHostEntry {
+            alias: pattern,
+            host_name: host_name.clone(),
+            user: block
+                .user
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or(default_user)
+                .to_string(),
+            port: block.port.unwrap_or(22),
+            identity_file: block
+                .identity_file
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_string()),
+            proxy_jump: block
+                .proxy_jump
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty() && *value != "none")
+                .map(|value| value.to_string()),
+        });
+    }
+}
+
+// author: BrianXiong
+// time: 2026/10/18/00:35:00
+fn parse_ssh_config_file(path: &Path, depth: usize, entries: &mut Vec<SshConfigHostEntry>) -> Result<(), String> {
+    if depth > 5 {
+        return Ok(());
+    }
+
+    let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let base_dir = path.parent().map(|parent| parent.to_path_buf()).unwrap_or_else(|| PathBuf::from("."));
+    let default_user = env::var("USER").unwrap_or_else(|_| "root".to_string());
+    let mut current: Option<SshConfigBlock> = None;
+
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        let (key, value) = match line.split_once(|character: char| character.is_whitespace() || character == '=') {
+            Some((key, value)) => (key.trim().to_ascii_lowercase(), value.trim()),
+            None => (line.to_ascii_lowercase(), ""),
+        };
+
+        match key.as_str() {
+            "host" => {
+                if let Some(block) = current.take() {
+                    finish_ssh_config_block(block, &default_user, entries);
+                }
+                let block = SshConfigBlock {
+                    patterns: value.split_whitespace().map(|item| item.to_string()).collect(),
+                    ..SshConfigBlock::default()
+                };
+                current = Some(block);
+            }
+            "match" => {
+                if let Some(block) = current.take() {
+                    finish_ssh_config_block(block, &default_user, entries);
+                }
+            }
+            "include" => {
+                // Includes are only expanded at the top level; inside a Host
+                // block ssh's scoping rules make them ambiguous for our model.
+                if current.is_none() {
+                    for included in collect_ssh_config_include_files(&base_dir, value) {
+                        parse_ssh_config_file(&included, depth + 1, entries)?;
+                    }
+                }
+            }
+            "hostname" => {
+                if let Some(block) = current.as_mut() {
+                    block.host_name = Some(value.to_string());
+                }
+            }
+            "user" => {
+                if let Some(block) = current.as_mut() {
+                    block.user = Some(value.to_string());
+                }
+            }
+            "port" => {
+                if let Some(block) = current.as_mut() {
+                    if let Ok(port) = value.parse::<u16>() {
+                        block.port = Some(port);
+                    }
+                }
+            }
+            "identityfile" => {
+                if let Some(block) = current.as_mut() {
+                    block.identity_file = Some(value.to_string());
+                }
+            }
+            "proxyjump" => {
+                if let Some(block) = current.as_mut() {
+                    block.proxy_jump = Some(value.to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(block) = current.take() {
+        finish_ssh_config_block(block, &default_user, entries);
+    }
+
+    Ok(())
+}
+
+fn load_ssh_config_links(conn: &Connection) -> Result<HashMap<String, String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT alias, host_id FROM ssh_config_links")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .map_err(|error| error.to_string())?;
+
+    let mut links = HashMap::new();
+    for row in rows {
+        let (alias, host_id) = row.map_err(|error| error.to_string())?;
+        links.insert(alias, host_id);
+    }
+    Ok(links)
+}
+
+fn save_ssh_config_link(conn: &Connection, alias: &str, host_id: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO ssh_config_links (alias, host_id) VALUES (?1, ?2) ON CONFLICT(alias) DO UPDATE SET host_id=excluded.host_id",
+        params![alias, host_id],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn ssh_config_identity_matches(entry: &SshConfigHostEntry, host: &HostRecord) -> bool {
+    match (&entry.identity_file, &host.private_key_path) {
+        (Some(config_path), Some(host_path)) => expand_path(config_path) == expand_path(host_path),
+        (None, None) => true,
+        (None, Some(host_path)) => host_path.trim().is_empty(),
+        (Some(_), None) => false,
+    }
+}
+
+fn ssh_config_entry_unchanged(entry: &SshConfigHostEntry, host: &HostRecord) -> bool {
+    host.address == entry.host_name
+        && host.port == entry.port
+        && host.username == entry.user
+        && ssh_config_identity_matches(entry, host)
+}
+
+fn parse_ssh_config_entries(path: &Path) -> Result<Vec<SshConfigHostEntry>, String> {
+    let mut parsed = Vec::new();
+    if path.exists() {
+        parse_ssh_config_file(path, 0, &mut parsed)?;
+    }
+
+    // Duplicate aliases: first definition wins, like ssh itself.
+    let mut seen: HashSet<String> = HashSet::new();
+    parsed.retain(|entry| seen.insert(entry.alias.clone()));
+    Ok(parsed)
+}
+
+fn build_ssh_config_preview(conn: &Connection, path: &Path) -> Result<SshConfigPreviewPayload, String> {
+    let exists = path.exists();
+    let parsed = parse_ssh_config_entries(path)?;
+    let links = load_ssh_config_links(conn)?;
+    let hosts = load_hosts_from_db(conn)?;
+
+    let entries = parsed
+        .into_iter()
+        .map(|entry| {
+            let linked_host = links
+                .get(&entry.alias)
+                .and_then(|host_id| hosts.iter().find(|host| &host.id == host_id));
+
+            let (state, host_id) = match linked_host {
+                None => ("new".to_string(), None),
+                Some(host) => {
+                    let state = if ssh_config_entry_unchanged(&entry, host) { "unchanged" } else { "updated" };
+                    (state.to_string(), Some(host.id.clone()))
+                }
+            };
+
+            SshConfigEntryPayload {
+                alias: entry.alias,
+                host_name: entry.host_name,
+                user: entry.user,
+                port: entry.port,
+                identity_file: entry.identity_file,
+                proxy_jump: entry.proxy_jump,
+                state,
+                host_id,
+            }
+        })
+        .collect();
+
+    Ok(SshConfigPreviewPayload {
+        config_path: path.to_string_lossy().to_string(),
+        exists,
+        entries,
+    })
+}
+
+// author: BrianXiong
+// time: 2026/10/18/00:35:00
+// Importing never touches credentials: existing hosts get only the config-owned
+// columns updated, so a keychain password survives a config sync.
+fn import_ssh_config_entries(
+    conn: &Connection,
+    path: &Path,
+    aliases: &[String],
+) -> Result<SshConfigImportReport, String> {
+    let wanted: HashSet<&str> = aliases.iter().map(String::as_str).collect();
+    let parsed: Vec<SshConfigHostEntry> = parse_ssh_config_entries(path)?
+        .into_iter()
+        .filter(|entry| wanted.contains(entry.alias.as_str()))
+        .collect();
+
+    let links = load_ssh_config_links(conn)?;
+    let hosts = load_hosts_from_db(conn)?;
+    let mut alias_to_host_id: HashMap<String, String> = links.clone();
+    let mut report = SshConfigImportReport {
+        imported: 0,
+        updated: 0,
+        skipped: 0,
+    };
+
+    for entry in &parsed {
+        match links.get(&entry.alias) {
+            Some(host_id) if hosts.iter().any(|host| &host.id == host_id) => {
+                let host = hosts.iter().find(|host| &host.id == host_id).expect("checked above");
+                if ssh_config_entry_unchanged(entry, host) {
+                    report.skipped += 1;
+                    continue;
+                }
+
+                conn.execute(
+                    "UPDATE hosts SET address = ?2, port = ?3, username = ?4, private_key_path = ?5 WHERE id = ?1",
+                    params![host_id, entry.host_name, entry.port, entry.user, entry.identity_file],
+                )
+                .map_err(|error| error.to_string())?;
+                report.updated += 1;
+            }
+            _ => {
+                let host_id = Uuid::new_v4().to_string();
+                alias_to_host_id.insert(entry.alias.clone(), host_id.clone());
+                let host = HostRecord {
+                    id: host_id.clone(),
+                    label: entry.alias.clone(),
+                    project_id: default_project_id(),
+                    address: entry.host_name.clone(),
+                    port: entry.port,
+                    username: entry.user.clone(),
+                    auth_type: if entry.identity_file.is_some() { "key".to_string() } else { "password".to_string() },
+                    password: None,
+                    private_key_path: entry.identity_file.clone(),
+                    jump_host_id: None,
+                    has_password: false,
+                };
+                save_hosts_to_db(conn, &[host])?;
+                report.imported += 1;
+            }
+        }
+    }
+
+    // Second pass: wire ProxyJump aliases to the hosts they point at.
+    for entry in &parsed {
+        let Some(host_id) = alias_to_host_id.get(&entry.alias) else {
+            continue;
+        };
+        let Some(jump_alias) = entry.proxy_jump.as_deref() else {
+            continue;
+        };
+        let Some(jump_host_id) = alias_to_host_id.get(jump_alias) else {
+            continue;
+        };
+        if jump_host_id == host_id {
+            continue;
+        }
+
+        conn.execute(
+            "UPDATE hosts SET jump_host_id = ?2 WHERE id = ?1",
+            params![host_id, jump_host_id],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+
+    for entry in &parsed {
+        if let Some(host_id) = alias_to_host_id.get(&entry.alias) {
+            save_ssh_config_link(conn, &entry.alias, host_id)?;
+        }
+    }
+
+    Ok(report)
+}
+
+#[tauri::command]
+fn preview_ssh_config() -> Result<SshConfigPreviewPayload, String> {
+    let path = ssh_config_path().ok_or_else(|| "Cannot resolve home directory".to_string())?;
+    build_ssh_config_preview(&open_db()?, &path)
+}
+
+#[tauri::command]
+fn import_ssh_config(aliases: Vec<String>) -> Result<SshConfigImportReport, String> {
+    let path = ssh_config_path().ok_or_else(|| "Cannot resolve home directory".to_string())?;
+    import_ssh_config_entries(&open_db()?, &path, &aliases)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -3133,7 +3607,9 @@ fn main() {
             save_port_forward,
             delete_port_forward,
             start_port_forward,
-            stop_port_forward
+            stop_port_forward,
+            preview_ssh_config,
+            import_ssh_config
         ])
         .build(tauri::generate_context!())
         .expect("error while building ServerDeck");
@@ -3398,5 +3874,112 @@ mod tests {
         conn.execute("DELETE FROM port_forwards WHERE id = ?1", params!["fwd-1"])
             .expect("delete forward");
         assert!(load_port_forwards_from_db(&conn).expect("reload").is_empty());
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/18/00:35:00
+    fn write_temp_ssh_config(content: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(format!("serverdeck-ssh-config-{}.conf", Uuid::new_v4()));
+        fs::write(&path, content).expect("write temp ssh config");
+        path
+    }
+
+    #[test]
+    fn parse_ssh_config_reads_hosts_and_skips_wildcards() {
+        let path = write_temp_ssh_config(
+            "Host bastion
+  HostName 10.0.0.1
+  User ops
+  Port 2222
+
+Host target web-alias
+  HostName 10.0.0.9
+  User root
+  ProxyJump bastion
+
+Host *.internal
+  HostName 10.0.0.20
+  User root
+",
+        );
+
+        let entries = parse_ssh_config_entries(&path).expect("parse config");
+        fs::remove_file(&path).ok();
+
+        let aliases: Vec<&str> = entries.iter().map(|entry| entry.alias.as_str()).collect();
+        assert_eq!(aliases, vec!["bastion", "target", "web-alias"]);
+
+        let bastion = entries.iter().find(|entry| entry.alias == "bastion").expect("bastion");
+        assert_eq!(bastion.host_name, "10.0.0.1");
+        assert_eq!(bastion.user, "ops");
+        assert_eq!(bastion.port, 2222);
+
+        let target = entries.iter().find(|entry| entry.alias == "target").expect("target");
+        assert_eq!(target.proxy_jump.as_deref(), Some("bastion"));
+    }
+
+    #[test]
+    fn ssh_config_import_creates_updates_and_links_jump_hosts() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_db(&conn).expect("init db");
+        let path = write_temp_ssh_config(
+            "Host bastion
+  HostName 10.0.0.1
+  User ops
+
+Host target
+  HostName 10.0.0.9
+  User root
+  ProxyJump bastion
+",
+        );
+
+        let preview = build_ssh_config_preview(&conn, &path).expect("preview");
+        assert!(preview.entries.iter().all(|entry| entry.state == "new"));
+
+        let report = import_ssh_config_entries(
+            &conn,
+            &path,
+            &["bastion".to_string(), "target".to_string()],
+        )
+        .expect("import");
+        assert_eq!(report.imported, 2);
+
+        let hosts = load_hosts_from_db(&conn).expect("load hosts");
+        let bastion = hosts.iter().find(|host| host.label == "bastion").expect("bastion host");
+        let target = hosts.iter().find(|host| host.label == "target").expect("target host");
+        assert_eq!(target.jump_host_id.as_deref(), Some(bastion.id.as_str()));
+
+        let preview = build_ssh_config_preview(&conn, &path).expect("preview after import");
+        assert!(
+            preview.entries.iter().all(|entry| entry.state == "unchanged"),
+            "unexpected preview: {preview:?}"
+        );
+
+        fs::write(
+            &path,
+            "Host bastion
+  HostName 10.0.0.1
+  User ops
+
+Host target
+  HostName 10.0.0.42
+  User root
+  ProxyJump bastion
+",
+        )
+        .expect("rewrite config");
+        let preview = build_ssh_config_preview(&conn, &path).expect("preview after edit");
+        let target_entry = preview.entries.iter().find(|entry| entry.alias == "target").expect("target entry");
+        assert_eq!(target_entry.state, "updated");
+
+        let report = import_ssh_config_entries(&conn, &path, &["target".to_string()]).expect("second import");
+        assert_eq!(report.updated, 1);
+
+        let hosts = load_hosts_from_db(&conn).expect("load hosts");
+        let target = hosts.iter().find(|host| host.label == "target").expect("target host");
+        assert_eq!(target.address, "10.0.0.42");
+
+        fs::remove_file(&path).ok();
     }
 }
