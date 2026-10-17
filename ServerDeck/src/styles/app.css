@@ -928,6 +928,19 @@ select {
   font-weight: 700;
 }
 
+.ssh-key-generate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--settings-border);
+}
+
+.ssh-key-generate input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 .transfer-panel {
   border-top: 1px solid var(--content-border);
   background: var(--content-raised-bg);

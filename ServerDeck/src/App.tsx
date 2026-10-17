@@ -86,7 +86,11 @@ import {
   importSshConfig,
   listKnownHosts,
   removeKnownHost,
+  listSshKeys,
+  generateSshKey,
+  readSshPublicKey,
   type KnownHostRecord,
+  type SshKeyRecord,
   type SshConfigPreview,
   type AppPreferences,
   type LocalFilePreview,
@@ -792,6 +796,10 @@ export default function App() {
   const [sshConfigBusy, setSshConfigBusy] = useState(false);
   const [knownHosts, setKnownHosts] = useState<KnownHostRecord[]>([]);
   const [knownHostsLoading, setKnownHostsLoading] = useState(false);
+  const [sshKeys, setSshKeys] = useState<SshKeyRecord[]>([]);
+  const [sshKeyName, setSshKeyName] = useState("");
+  const [sshKeyComment, setSshKeyComment] = useState("");
+  const [sshKeyBusy, setSshKeyBusy] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
   const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
@@ -2947,11 +2955,59 @@ export default function App() {
     }
   }
 
+  // author: BrianXiong
+  // time: 2026/10/18/01:20:00
+  async function refreshSshKeys() {
+    try {
+      setSshKeys(await listSshKeys());
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.sshKeyLoadFailed));
+      setStatusTone("error");
+    }
+  }
+
   useEffect(() => {
     if (activeSettingsSection === "ssh") {
       void refreshKnownHosts();
+      void refreshSshKeys();
     }
   }, [activeSettingsSection]);
+
+  async function handleCopySshPublicKey(key: SshKeyRecord) {
+    if (!key.publicPath) {
+      setStatus(messages.sshKeyCopyFailed);
+      setStatusTone("error");
+      return;
+    }
+
+    try {
+      const content = await readSshPublicKey(key.publicPath);
+      await navigator.clipboard.writeText(content.trim());
+      setStatus(messages.sshKeyCopied(key.name));
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.sshKeyCopyFailed));
+      setStatusTone("error");
+    }
+  }
+
+  async function handleGenerateSshKey() {
+    setSshKeyBusy(true);
+
+    try {
+      const key = await generateSshKey(sshKeyName, sshKeyComment);
+      setSshKeyName("");
+      setSshKeyComment("");
+      await refreshSshKeys();
+      setStatus(messages.sshKeyGenerated(key.name));
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.sshKeyGenerateFailed));
+      setStatusTone("error");
+    } finally {
+      setSshKeyBusy(false);
+    }
+  }
 
   async function handleRemoveKnownHost(host: string) {
     try {
@@ -4146,8 +4202,17 @@ export default function App() {
                           <span>{messages.privateKeyPath}</span>
                           <input
                             value={draft.privateKeyPath ?? ""}
+                            list="serverdeck-ssh-key-paths"
                             onChange={(event) => setDraft({ ...draft, privateKeyPath: event.target.value })}
                           />
+                          <datalist id="serverdeck-ssh-key-paths">
+                            {sshKeys
+                              .map((key) => key.privatePath)
+                              .filter((path): path is string => Boolean(path))
+                              .map((path) => (
+                                <option key={path} value={path} />
+                              ))}
+                          </datalist>
                         </label>
                       )}
                     </div>
@@ -4733,6 +4798,79 @@ export default function App() {
                         <div>
                           <h3>{messages.sshSettings}</h3>
                           <span>{messages.sshSettingsDescription}</span>
+                        </div>
+                      </div>
+
+                      <div className="settings-panel__toolbar">
+                        <span className="settings-panel__toolbar-label">{messages.sshKeys}</span>
+                        <button
+                          type="button"
+                          className="secondary-button secondary-button--compact"
+                          onClick={() => void refreshSshKeys()}
+                        >
+                          <RefreshCw size={14} />
+                          {messages.knownHostsRefresh}
+                        </button>
+                      </div>
+
+                      <div className="settings-card settings-card--projects">
+                        {sshKeys.length === 0 ? (
+                          <div className="project-empty-state">
+                            <strong>{messages.sshKeysEmpty}</strong>
+                            <span>{messages.sshKeysDescription}</span>
+                          </div>
+                        ) : (
+                          sshKeys.map((key) => (
+                            <div key={key.name} className="project-row">
+                              <div className="project-row__icon">
+                                <KeyRound size={18} />
+                              </div>
+
+                              <div className="project-row__body">
+                                <div className="project-row__titleline">
+                                  <strong>{key.name}</strong>
+                                  {key.keyType ? <span>{key.keyType}</span> : null}
+                                </div>
+                                <div className="project-row__path">
+                                  {key.fingerprint}
+                                  {key.bits ? ` · ${key.bits} bits` : ""}
+                                  {key.privatePath ? ` · ${key.privatePath}` : ""}
+                                </div>
+                              </div>
+
+                              <div className="project-row__actions">
+                                <button
+                                  type="button"
+                                  className="row-button"
+                                  onClick={() => void handleCopySshPublicKey(key)}
+                                  disabled={!key.publicPath}
+                                >
+                                  {messages.sshKeyCopyPublic}
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        )}
+
+                        <div className="ssh-key-generate">
+                          <input
+                            value={sshKeyName}
+                            onChange={(event) => setSshKeyName(event.target.value)}
+                            placeholder={messages.sshKeyNamePlaceholder}
+                          />
+                          <input
+                            value={sshKeyComment}
+                            onChange={(event) => setSshKeyComment(event.target.value)}
+                            placeholder={messages.sshKeyCommentPlaceholder}
+                          />
+                          <button
+                            type="button"
+                            className="primary-button"
+                            onClick={() => void handleGenerateSshKey()}
+                            disabled={sshKeyBusy || !sshKeyName.trim()}
+                          >
+                            {sshKeyBusy ? messages.working : messages.sshKeyGenerate}
+                          </button>
                         </div>
                       </div>
 

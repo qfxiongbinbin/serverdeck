@@ -577,3 +577,36 @@ export async function removeKnownHost(host: string) {
   }
   return true;
 }
+
+// author: BrianXiong
+// time: 2026/10/18/01:20:00
+export type SshKeyRecord = {
+  name: string;
+  keyType: string;
+  bits: string;
+  fingerprint: string;
+  comment: string;
+  privatePath?: string | null;
+  publicPath?: string | null;
+};
+
+export async function listSshKeys() {
+  if (hasTauri()) {
+    return tauriInvoke<SshKeyRecord[]>("list_ssh_keys");
+  }
+  return [] as SshKeyRecord[];
+}
+
+export async function generateSshKey(name: string, comment: string) {
+  if (hasTauri()) {
+    return tauriInvoke<SshKeyRecord>("generate_ssh_key", { name, comment });
+  }
+  throw new Error("Key generation requires the desktop app");
+}
+
+export async function readSshPublicKey(path: string) {
+  if (hasTauri()) {
+    return tauriInvoke<string>("read_ssh_public_key", { path });
+  }
+  return "";
+}

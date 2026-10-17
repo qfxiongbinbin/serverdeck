@@ -3688,6 +3688,190 @@ fn remove_known_host(host: String) -> Result<bool, String> {
     remove_known_host_entries(&path, target)
 }
 
+// author: BrianXiong
+// time: 2026/10/18/01:20:00
+// SSH keys are surfaced from ~/.ssh so a host can pick a key instead of typing
+// a path, and new ed25519 keys can be generated without leaving the app.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SshKeyRecord {
+    name: String,
+    key_type: String,
+    bits: String,
+    fingerprint: String,
+    comment: String,
+    private_path: Option<String>,
+    public_path: Option<String>,
+}
+
+fn ssh_dir() -> Option<PathBuf> {
+    home_dir().map(|home| home.join(".ssh"))
+}
+
+// author: BrianXiong
+// time: 2026/10/18/01:20:00
+// `ssh-keygen -lf key.pub` prints "<bits> <fingerprint> <comment> (<TYPE>)".
+fn parse_ssh_key_fingerprint(stdout: &str) -> Option<(String, String, String, String)> {
+    let line = stdout.lines().next()?;
+    let mut parts = line.split_whitespace();
+    let bits = parts.next()?.to_string();
+    let fingerprint = parts.next()?.to_string();
+    let rest: Vec<&str> = parts.collect();
+    if rest.is_empty() {
+        return None;
+    }
+
+    let last = rest[rest.len() - 1];
+    let key_type = if last.starts_with('(') && last.ends_with(')') {
+        last.trim_matches(|character| character == '(' || character == ')').to_string()
+    } else {
+        String::new()
+    };
+    let comment_end = if key_type.is_empty() { rest.len() } else { rest.len() - 1 };
+    let comment = rest[..comment_end].join(" ");
+
+    Some((bits, fingerprint, key_type, comment))
+}
+
+// author: BrianXiong
+// time: 2026/10/18/01:20:00
+// Key names become file names inside ~/.ssh, so only a conservative character
+// set is allowed and path traversal must be impossible.
+fn validate_ssh_key_name(name: &str) -> Result<String, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Key name is required".to_string());
+    }
+    if !trimmed
+        .chars()
+        .all(|character| character.is_ascii_alphanumeric() || character == '.' || character == '_' || character == '-')
+    {
+        return Err("Key name may only contain letters, digits, dot, dash and underscore".to_string());
+    }
+    if trimmed.starts_with('.') {
+        return Err("Key name cannot start with a dot".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn ssh_key_record_from_paths(name: &str, private_path: Option<PathBuf>, public_path: Option<PathBuf>) -> SshKeyRecord {
+    let fingerprint_source = public_path.clone().or_else(|| private_path.clone());
+    let (bits, fingerprint, key_type, comment) = fingerprint_source
+        .and_then(|path| {
+            let output = Command::new(resolve_binary("ssh-keygen").ok()?)
+                .arg("-lf")
+                .arg(&path)
+                .output()
+                .ok()?;
+            if !output.status.success() {
+                return None;
+            }
+            parse_ssh_key_fingerprint(&String::from_utf8_lossy(&output.stdout))
+        })
+        .unwrap_or_else(|| (String::new(), String::new(), String::new(), String::new()));
+
+    SshKeyRecord {
+        name: name.to_string(),
+        key_type,
+        bits,
+        fingerprint,
+        comment,
+        private_path: private_path.map(|path| path.to_string_lossy().to_string()),
+        public_path: public_path.map(|path| path.to_string_lossy().to_string()),
+    }
+}
+
+#[tauri::command]
+fn list_ssh_keys() -> Result<Vec<SshKeyRecord>, String> {
+    let Some(dir) = ssh_dir() else {
+        return Ok(Vec::new());
+    };
+    if !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let entries = fs::read_dir(&dir).map_err(|error| error.to_string())?;
+    let mut records: Vec<SshKeyRecord> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file())
+        .filter_map(|public_path| {
+            let file_name = public_path.file_name()?.to_string_lossy().to_string();
+            let name = file_name.strip_suffix(".pub")?.to_string();
+            let private_path = dir.join(&name);
+            Some(ssh_key_record_from_paths(
+                &name,
+                if private_path.is_file() { Some(private_path) } else { None },
+                Some(public_path),
+            ))
+        })
+        .collect();
+
+    records.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(records)
+}
+
+#[tauri::command]
+fn generate_ssh_key(name: String, comment: Option<String>) -> Result<SshKeyRecord, String> {
+    let key_name = validate_ssh_key_name(&name)?;
+    let Some(dir) = ssh_dir() else {
+        return Err("Cannot resolve home directory".to_string());
+    };
+    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+
+    let private_path = dir.join(&key_name);
+    let public_path = dir.join(format!("{key_name}.pub"));
+    if private_path.exists() || public_path.exists() {
+        return Err(format!("A key named {} already exists", key_name));
+    }
+
+    let comment = comment
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| format!("{}@serverdeck", env::var("USER").unwrap_or_else(|_| "user".to_string())));
+
+    let output = Command::new(resolve_binary("ssh-keygen")?)
+        .arg("-q")
+        .arg("-t")
+        .arg("ed25519")
+        .arg("-N")
+        .arg("")
+        .arg("-C")
+        .arg(&comment)
+        .arg("-f")
+        .arg(&private_path)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            "ssh-keygen failed".to_string()
+        } else {
+            stderr
+        });
+    }
+
+    Ok(ssh_key_record_from_paths(
+        &key_name,
+        Some(private_path),
+        if public_path.is_file() { Some(public_path) } else { None },
+    ))
+}
+
+#[tauri::command]
+fn read_ssh_public_key(path: String) -> Result<String, String> {
+    let Some(dir) = ssh_dir() else {
+        return Err("Cannot resolve home directory".to_string());
+    };
+    let expanded = expand_path(&path);
+    if !expanded.starts_with(&dir) {
+        return Err("Only keys inside ~/.ssh can be read".to_string());
+    }
+
+    fs::read_to_string(&expanded).map_err(|error| error.to_string())
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -3744,7 +3928,10 @@ fn main() {
             preview_ssh_config,
             import_ssh_config,
             list_known_hosts,
-            remove_known_host
+            remove_known_host,
+            list_ssh_keys,
+            generate_ssh_key,
+            read_ssh_public_key
         ])
         .build(tauri::generate_context!())
         .expect("error while building ServerDeck");
@@ -4153,5 +4340,29 @@ Host target
         assert!(remaining.contains("[10.0.0.9]:2222"));
 
         fs::remove_file(&path).ok();
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/18/01:20:00
+    #[test]
+    fn parse_ssh_key_fingerprint_reads_type_and_comment() {
+        let parsed = parse_ssh_key_fingerprint("256 SHA256:abc123 me@laptop (ED25519)").expect("fingerprint");
+        assert_eq!(parsed.0, "256");
+        assert_eq!(parsed.1, "SHA256:abc123");
+        assert_eq!(parsed.2, "ED25519");
+        assert_eq!(parsed.3, "me@laptop");
+
+        let with_spaces = parse_ssh_key_fingerprint("4096 SHA256:def456 work key (RSA)").expect("fingerprint");
+        assert_eq!(with_spaces.3, "work key");
+        assert!(parse_ssh_key_fingerprint("").is_none());
+    }
+
+    #[test]
+    fn validate_ssh_key_name_rejects_unsafe_names() {
+        assert_eq!(validate_ssh_key_name(" id_ed25519_serverdeck ").expect("valid"), "id_ed25519_serverdeck");
+        assert!(validate_ssh_key_name("").is_err());
+        assert!(validate_ssh_key_name("../escape").is_err());
+        assert!(validate_ssh_key_name("bad name").is_err());
+        assert!(validate_ssh_key_name(".hidden").is_err());
     }
 }
