@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.41
+
+Compared with `v0.0.40`.
+
+### Added
+
+- Add connection diagnostics and known_hosts management
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.40
 
 Compared with `v0.0.39`.
