@@ -107,7 +107,7 @@ async function main() {
       printUsage();
     }
 
-    const data = await call({ command: "exec", host, command: remoteCommand });
+    const data = await call({ command: "exec", host, remoteCommand });
     if (data.stdout) {
       process.stdout.write(data.stdout);
     }

@@ -4295,16 +4295,17 @@ fn agent_list_hosts() -> Result<serde_json::Value, String> {
 // author: BrianXiong
 // time: 2026/10/18/03:00:00
 // Runs a non-interactive command over ssh; the host can be referenced by id,
-// label or address so scripts do not need to look up ids first.
+// label or address so scripts do not need to look up ids first. The remote
+// command lives in its own field because `command` selects the action itself.
 fn agent_exec(request: &serde_json::Value) -> Result<serde_json::Value, String> {
     let target = request
         .get("host")
         .and_then(|value| value.as_str())
         .ok_or_else(|| "host is required".to_string())?;
     let command = request
-        .get("command")
+        .get("remoteCommand")
         .and_then(|value| value.as_str())
-        .ok_or_else(|| "command is required".to_string())?;
+        .ok_or_else(|| "remoteCommand is required".to_string())?;
 
     let conn = open_db()?;
     let hosts = load_hosts_from_db(&conn)?;
@@ -4882,6 +4883,25 @@ Host target
 
     // author: BrianXiong
     // time: 2026/10/18/03:00:00
+    // author: BrianXiong
+    // time: 2026/10/18/03:20:00
+    #[test]
+    fn agent_exec_requires_host_and_remote_command_fields() {
+        let missing_host: serde_json::Value =
+            serde_json::from_str(&handle_agent_request(r#"{"command":"exec","remoteCommand":"df -h"}"#))
+                .expect("json");
+        assert_eq!(missing_host["ok"], serde_json::json!(false));
+        assert!(missing_host["error"].as_str().unwrap_or_default().contains("host is required"));
+
+        let missing_command: serde_json::Value =
+            serde_json::from_str(&handle_agent_request(r#"{"command":"exec","host":"web-01"}"#)).expect("json");
+        assert_eq!(missing_command["ok"], serde_json::json!(false));
+        assert!(missing_command["error"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("remoteCommand is required"));
+    }
+
     #[test]
     fn agent_request_handles_ping_and_reports_errors() {
         let ping: serde_json::Value =
