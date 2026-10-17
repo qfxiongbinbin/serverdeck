@@ -643,3 +643,30 @@ export async function deleteSnippet(id: string) {
   }
   return true;
 }
+
+// author: BrianXiong
+// time: 2026/10/18/02:40:00
+export type RemoteTextFile = {
+  path: string;
+  content: string;
+  size: number;
+};
+
+export async function readRemoteTextFile(host: SavedHost, path: string, sshOptions: SshConnectionOptions) {
+  if (hasTauri()) {
+    return tauriInvoke<RemoteTextFile>("read_remote_text_file", { host, path, sshOptions });
+  }
+  throw new Error("Remote editing requires the desktop app");
+}
+
+export async function writeRemoteTextFile(
+  host: SavedHost,
+  path: string,
+  content: string,
+  sshOptions: SshConnectionOptions
+) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("write_remote_text_file", { host, path, content, sshOptions });
+  }
+  return true;
+}

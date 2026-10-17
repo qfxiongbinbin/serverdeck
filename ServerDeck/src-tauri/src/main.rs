@@ -4082,6 +4082,101 @@ fn delete_snippet(id: String) -> Result<bool, String> {
     Ok(true)
 }
 
+// author: BrianXiong
+// time: 2026/10/18/02:40:00
+// Remote text files can be edited in place: read through `ssh cat`, write back
+// through a one-shot sftp batch (sftp truncates the existing file, so its
+// permissions and owner survive the save).
+const REMOTE_EDIT_MAX_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RemoteTextFilePayload {
+    path: String,
+    content: String,
+    size: usize,
+}
+
+// author: BrianXiong
+// time: 2026/10/18/02:40:00
+fn decode_remote_text_file(bytes: &[u8]) -> Result<String, String> {
+    if bytes.len() > REMOTE_EDIT_MAX_BYTES {
+        return Err(format!(
+            "File is larger than {} KB and cannot be edited here",
+            REMOTE_EDIT_MAX_BYTES / 1024
+        ));
+    }
+    if bytes.iter().take(8192).any(|byte| *byte == 0) {
+        return Err("This file looks binary and cannot be edited as text".to_string());
+    }
+
+    String::from_utf8(bytes.to_vec()).map_err(|_| "File is not valid UTF-8".to_string())
+}
+
+// author: BrianXiong
+// time: 2026/10/18/02:40:00
+// sftp batch uses double quotes; backslashes and quotes must be escaped.
+fn sftp_batch_quote(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[tauri::command]
+fn read_remote_text_file(
+    host: HostRecord,
+    path: String,
+    ssh_options: SshConnectionOptions,
+) -> Result<RemoteTextFilePayload, String> {
+    let output = build_ssh_command(&host, &ssh_options)?
+        .arg("cat")
+        .arg(shell_single_quote(&path))
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("Failed to read {}", path)
+        } else {
+            stderr
+        });
+    }
+
+    let size = output.stdout.len();
+    let content = decode_remote_text_file(&output.stdout)?;
+    Ok(RemoteTextFilePayload { path, content, size })
+}
+
+#[tauri::command]
+fn write_remote_text_file(
+    host: HostRecord,
+    path: String,
+    content: String,
+    ssh_options: SshConnectionOptions,
+) -> Result<bool, String> {
+    let temp_path = std::env::temp_dir().join(format!("serverdeck-remote-edit-{}", Uuid::new_v4()));
+    fs::write(&temp_path, content.as_bytes()).map_err(|error| error.to_string())?;
+
+    let batch = format!(
+        "put {} {}\n",
+        sftp_batch_quote(&temp_path.to_string_lossy()),
+        sftp_batch_quote(&path)
+    );
+    let result = run_sftp_batch(&host, &ssh_options, &batch);
+    let _ = fs::remove_file(&temp_path);
+
+    let output = result?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("Failed to save {}", path)
+        } else {
+            stderr
+        });
+    }
+
+    Ok(true)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -4144,7 +4239,9 @@ fn main() {
             read_ssh_public_key,
             list_snippets,
             save_snippet,
-            delete_snippet
+            delete_snippet,
+            read_remote_text_file,
+            write_remote_text_file
         ])
         .build(tauri::generate_context!())
         .expect("error while building ServerDeck");
@@ -4615,6 +4712,25 @@ Host target
         assert!(command.contains("command -v tmux"));
         assert!(command.contains("tmux new -A -s 'serverdeck-web-01'"));
         assert!(command.contains("exec \"${SHELL:-/bin/sh}\" -l"));
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/18/02:40:00
+    #[test]
+    fn decode_remote_text_file_rejects_binary_and_oversized() {
+        assert_eq!(decode_remote_text_file(b"server { listen 80; }").expect("text"), "server { listen 80; }");
+
+        let binary = [0x7f, 0x45, 0x4c, 0x46, 0x00, 0x01];
+        assert!(decode_remote_text_file(&binary).is_err());
+
+        let oversized = vec![b'a'; REMOTE_EDIT_MAX_BYTES + 1];
+        assert!(decode_remote_text_file(&oversized).is_err());
+    }
+
+    #[test]
+    fn sftp_batch_quote_escapes_quotes() {
+        assert_eq!(sftp_batch_quote("/etc/nginx/nginx.conf"), "\"/etc/nginx/nginx.conf\"");
+        assert_eq!(sftp_batch_quote("/tmp/a \"b\".conf"), "\"/tmp/a \\\"b\\\".conf\"");
     }
 
     #[test]

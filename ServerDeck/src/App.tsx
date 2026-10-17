@@ -93,6 +93,8 @@ import {
   listSnippets,
   saveSnippet,
   deleteSnippet,
+  readRemoteTextFile,
+  writeRemoteTextFile,
   type SnippetRecord,
   type KnownHostRecord,
   type SshKeyRecord,
@@ -112,6 +114,7 @@ import { CommandPalette } from "./components/commands/CommandPalette";
 import { PortForwardEditorModal } from "./components/forwards/PortForwardEditorModal";
 import { SshConfigModal } from "./components/hosts/SshConfigModal";
 import { SnippetPanel } from "./components/snippets/SnippetPanel";
+import { RemoteFileEditorModal } from "./components/files/RemoteFileEditorModal";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
 import {
   getDocumentLanguageTag,
@@ -822,6 +825,14 @@ export default function App() {
   // a freshly opened terminal reports its first output.
   const [remoteCwdByHost, setRemoteCwdByHost] = useState<Record<string, string>>({});
   const pendingTerminalCommandsRef = useRef<Map<string, string>>(new Map());
+  const [remoteEditor, setRemoteEditor] = useState<{
+    path: string;
+    content: string;
+    originalContent: string;
+    size: number;
+  } | null>(null);
+  const [remoteEditorBusy, setRemoteEditorBusy] = useState(false);
+  const [remoteEditorSaved, setRemoteEditorSaved] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
   const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
@@ -2820,6 +2831,56 @@ export default function App() {
     }
 
     void handleOpenTerminal(sftpHost, { queuedCommand: `cd ${shellQuotePath(remotePath)}\n` });
+  }
+
+  // author: BrianXiong
+  // time: 2026/10/18/02:40:00
+  async function openRemoteFileEditor(entry: FileEntry) {
+    if (!sftpHost) {
+      return;
+    }
+
+    setFileMenu(null);
+    setStatus(messages.loading);
+    setStatusTone("neutral");
+
+    try {
+      const file = await readRemoteTextFile(sftpHost, joinChildPath(remotePath, entry.name), sshOptions);
+      setRemoteEditor({
+        path: file.path,
+        content: file.content,
+        originalContent: file.content,
+        size: file.size
+      });
+      setRemoteEditorSaved(false);
+      setStatus(messages.ready);
+      setStatusTone("neutral");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.remoteFileLoadFailed));
+      setStatusTone("error");
+    }
+  }
+
+  async function handleSaveRemoteFile() {
+    if (!sftpHost || !remoteEditor) {
+      return;
+    }
+
+    setRemoteEditorBusy(true);
+
+    try {
+      await writeRemoteTextFile(sftpHost, remoteEditor.path, remoteEditor.content, sshOptions);
+      setRemoteEditor((current) => (current ? { ...current, originalContent: current.content, size: current.content.length } : current));
+      setRemoteEditorSaved(true);
+      setRemoteRefreshTick((current) => current + 1);
+      setStatus(messages.remoteFileSaved(remoteEditor.path));
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.remoteFileSaveFailed));
+      setStatusTone("error");
+    } finally {
+      setRemoteEditorBusy(false);
+    }
   }
 
   function handleSelectSftpHost(hostId: string) {
@@ -5579,6 +5640,16 @@ export default function App() {
             </>
           ) : (
             <>
+              {!fileMenu.entry.is_dir ? (
+                <button
+                  type="button"
+                  className="context-menu__item"
+                  onClick={() => void openRemoteFileEditor(fileMenu.entry)}
+                >
+                  <Pencil size={18} />
+                  <span>{messages.editFile}</span>
+                </button>
+              ) : null}
               <button type="button" className="context-menu__item" onClick={() => void handleDownloadEntry(fileMenu.entry)}>
                 <FolderOpen size={18} />
                 <span>{messages.download}</span>
@@ -5715,6 +5786,36 @@ export default function App() {
           </section>
         </div>
       ) : null}
+
+      <RemoteFileEditorModal
+        open={Boolean(remoteEditor)}
+        path={remoteEditor?.path ?? ""}
+        content={remoteEditor?.content ?? ""}
+        originalContent={remoteEditor?.originalContent ?? ""}
+        sizeLabel={formatFileSize(remoteEditor?.size ?? 0)}
+        busy={remoteEditorBusy}
+        saved={remoteEditorSaved}
+        labels={{
+          title: messages.remoteFileTitle,
+          pathLabel: messages.remoteFilePathLabel,
+          sizeLabel: messages.remoteFileSize,
+          unsavedHint: messages.remoteFileUnsaved,
+          savedHint: messages.remoteFileSavedHint,
+          save: messages.save,
+          saving: messages.working,
+          cancel: messages.cancel
+        }}
+        onChange={(content) => {
+          setRemoteEditor((current) => (current ? { ...current, content } : current));
+          setRemoteEditorSaved(false);
+        }}
+        onSave={() => void handleSaveRemoteFile()}
+        onClose={() => {
+          setRemoteEditor(null);
+          setRemoteEditorBusy(false);
+          setRemoteEditorSaved(false);
+        }}
+      />
 
       <SnippetPanel
         open={snippetPanelOpen}

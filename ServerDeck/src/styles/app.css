@@ -1053,6 +1053,38 @@ select {
   font-size: 11px;
 }
 
+/* author: BrianXiong */
+/* time: 2026/10/18/02:40:00 */
+/* Remote file editor */
+.remote-editor {
+  width: min(880px, 92vw);
+}
+
+.remote-editor__path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.remote-editor__body {
+  padding: 0 22px 14px;
+}
+
+.remote-editor__textarea {
+  width: 100%;
+  min-height: min(52vh, 460px);
+  padding: 12px 14px;
+  border: 1px solid var(--settings-control-border);
+  border-radius: 10px;
+  background: var(--settings-control-bg);
+  color: var(--settings-control-text);
+  font-family: "SF Mono", ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  resize: vertical;
+  tab-size: 2;
+}
+
 .transfer-panel {
   border-top: 1px solid var(--content-border);
   background: var(--content-raised-bg);

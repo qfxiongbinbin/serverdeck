@@ -172,6 +172,15 @@ type Messages = {
   snippetSent: (name: string) => string;
   tmuxPersistence: string;
   tmuxPersistenceDescription: string;
+  editFile: string;
+  remoteFileTitle: string;
+  remoteFilePathLabel: string;
+  remoteFileSize: (size: string) => string;
+  remoteFileUnsaved: string;
+  remoteFileSavedHint: string;
+  remoteFileLoadFailed: string;
+  remoteFileSaveFailed: string;
+  remoteFileSaved: (path: string) => string;
   monitorDescription: string;
   monitorLoading: string;
   monitorLoadingDescription: string;
@@ -570,6 +579,15 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     snippetSent: (name: string) => `Sent snippet: ${name}`,
     tmuxPersistence: "Reconnect inside tmux",
     tmuxPersistenceDescription: "Open every SSH terminal inside a per-host tmux session, so reconnects and app restarts land back in the same remote shell. Falls back to a normal login shell when tmux is unavailable.",
+    editFile: "Edit file",
+    remoteFileTitle: "Edit remote file",
+    remoteFilePathLabel: "Path",
+    remoteFileSize: (size: string) => `size ${size}`,
+    remoteFileUnsaved: "Unsaved changes",
+    remoteFileSavedHint: "Saved",
+    remoteFileLoadFailed: "Failed to open the remote file",
+    remoteFileSaveFailed: "Failed to save the remote file",
+    remoteFileSaved: (path: string) => `Saved ${path}`,
     monitorDescription: "Observe key server status and refresh it on demand.",
     monitorLoading: "Loading server observation",
     monitorLoadingDescription: "Collecting a quick status snapshot from the remote server.",
@@ -966,6 +984,15 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     snippetSent: (name: string) => `已发送片段：${name}`,
     tmuxPersistence: "使用 tmux 恢复会话",
     tmuxPersistenceDescription: "每台主机的 SSH 终端都开在专属 tmux 会话里，断线重连或重启应用后能回到原来的远端 shell；远端没有 tmux 时自动回退到普通登录 shell。",
+    editFile: "编辑文件",
+    remoteFileTitle: "编辑远端文件",
+    remoteFilePathLabel: "路径",
+    remoteFileSize: (size: string) => `大小 ${size}`,
+    remoteFileUnsaved: "有未保存的修改",
+    remoteFileSavedHint: "已保存",
+    remoteFileLoadFailed: "打开远端文件失败",
+    remoteFileSaveFailed: "保存远端文件失败",
+    remoteFileSaved: (path: string) => `已保存 ${path}`,
     monitorDescription: "观测服务器关键状态，并支持手动刷新。",
     monitorLoading: "正在加载服务器观测数据",
     monitorLoadingDescription: "正在从远程服务器采集一份快速状态快照。",
@@ -1362,6 +1389,15 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     snippetSent: (name: string) => `スニペットを送信しました: ${name}`,
     tmuxPersistence: "tmux で再接続",
     tmuxPersistenceDescription: "SSH ターミナルをホストごとの tmux セッション内で開きます。再接続やアプリ再起動後も同じリモートシェルに戻れます。tmux がない場合は通常のログインシェルに戻ります。",
+    editFile: "ファイルを編集",
+    remoteFileTitle: "リモートファイルを編集",
+    remoteFilePathLabel: "パス",
+    remoteFileSize: (size: string) => `サイズ ${size}`,
+    remoteFileUnsaved: "未保存の変更があります",
+    remoteFileSavedHint: "保存済み",
+    remoteFileLoadFailed: "リモートファイルを開けませんでした",
+    remoteFileSaveFailed: "リモートファイルの保存に失敗しました",
+    remoteFileSaved: (path: string) => `${path} を保存しました`,
     monitorDescription: "サーバーの主要な状態を確認し、必要に応じて手動更新します。",
     monitorLoading: "サーバー監視情報を読み込み中",
     monitorLoadingDescription: "リモートサーバーから簡易ステータスを収集中です。",
