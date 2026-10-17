@@ -2,6 +2,23 @@
 
 This file records release notes for each published version.
 
+## v0.0.48
+
+Compared with `v0.0.47`.
+
+### Added
+
+- Add an mcp server for agent runtimes
+- Expose hosts and exec to scripts through a local socket and CLI
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.47
 
 Compared with `v0.0.46`.
