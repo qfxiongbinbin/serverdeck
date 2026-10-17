@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.47
+
+Compared with `v0.0.46`.
+
+### Added
+
+- Expose hosts and exec to scripts through a local socket and CLI
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.46
 
 Compared with `v0.0.45`.
