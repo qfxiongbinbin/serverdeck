@@ -554,3 +554,26 @@ export async function importSshConfig(aliases: string[]) {
   }
   return { imported: 0, updated: 0, skipped: 0 } as SshConfigImportReport;
 }
+
+// author: BrianXiong
+// time: 2026/10/18/01:00:00
+export type KnownHostRecord = {
+  host: string;
+  keyType: string;
+  fingerprint: string;
+  bits: string;
+};
+
+export async function listKnownHosts() {
+  if (hasTauri()) {
+    return tauriInvoke<KnownHostRecord[]>("list_known_hosts");
+  }
+  return [] as KnownHostRecord[];
+}
+
+export async function removeKnownHost(host: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("remove_known_host", { host });
+  }
+  return true;
+}

@@ -114,6 +114,25 @@ type Messages = {
   sshConfigLoadFailed: string;
   sshConfigImported: (imported: number, updated: number) => string;
   sshConfigImportFailed: string;
+  sshSettings: string;
+  sshSettingsDescription: string;
+  knownHosts: string;
+  knownHostsDescription: string;
+  knownHostsEmpty: string;
+  knownHostsRefresh: string;
+  knownHostsRemoved: (host: string) => string;
+  knownHostsLoadFailed: string;
+  knownHostsRemoveFailed: string;
+  sshErrorDns: string;
+  sshErrorRefused: string;
+  sshErrorTimeout: string;
+  sshErrorUnreachable: string;
+  sshErrorPublicKey: string;
+  sshErrorPassword: string;
+  sshErrorHostKey: string;
+  sshErrorTooManyAttempts: string;
+  sshErrorConnectionReset: string;
+  sshErrorSshpassMissing: string;
   monitorDescription: string;
   monitorLoading: string;
   monitorLoadingDescription: string;
@@ -452,6 +471,25 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sshConfigLoadFailed: "Failed to read ~/.ssh/config",
     sshConfigImported: (imported: number, updated: number) => `Imported ${imported} hosts, updated ${updated}`,
     sshConfigImportFailed: "Failed to import ~/.ssh/config",
+    sshSettings: "SSH & Known Hosts",
+    sshSettingsDescription: "Host key trust and connection troubleshooting.",
+    knownHosts: "Known Hosts",
+    knownHostsDescription: "Servers whose host keys have been accepted on this Mac.",
+    knownHostsEmpty: "No known hosts recorded yet",
+    knownHostsRefresh: "Refresh",
+    knownHostsRemoved: (host: string) => `Removed ${host} from known_hosts`,
+    knownHostsLoadFailed: "Failed to read known_hosts",
+    knownHostsRemoveFailed: "Failed to remove the known host",
+    sshErrorDns: "Host name cannot be resolved — check the address or DNS",
+    sshErrorRefused: "Connection refused — is sshd running on that port?",
+    sshErrorTimeout: "Connection timed out — unreachable network or firewall",
+    sshErrorUnreachable: "No route to host — the network cannot reach this address",
+    sshErrorPublicKey: "Public key rejected — check the key and authorized_keys",
+    sshErrorPassword: "Password rejected — re-enter it in the host settings",
+    sshErrorHostKey: "Host key changed or unverified — verify the fingerprint before trusting it",
+    sshErrorTooManyAttempts: "Too many authentication attempts — narrow the keys ssh offers",
+    sshErrorConnectionReset: "Connection reset by the remote side",
+    sshErrorSshpassMissing: "sshpass is missing on this Mac — install it or switch to key auth",
     monitorDescription: "Observe key server status and refresh it on demand.",
     monitorLoading: "Loading server observation",
     monitorLoadingDescription: "Collecting a quick status snapshot from the remote server.",
@@ -788,6 +826,25 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sshConfigLoadFailed: "读取 ~/.ssh/config 失败",
     sshConfigImported: (imported: number, updated: number) => `已导入 ${imported} 台主机，更新 ${updated} 台`,
     sshConfigImportFailed: "导入 ~/.ssh/config 失败",
+    sshSettings: "SSH 与 Known Hosts",
+    sshSettingsDescription: "主机指纹信任与连接排障。",
+    knownHosts: "已知主机",
+    knownHostsDescription: "这台 Mac 上已接受过主机密钥的服务器。",
+    knownHostsEmpty: "还没有记录任何已知主机",
+    knownHostsRefresh: "刷新",
+    knownHostsRemoved: (host: string) => `已从 known_hosts 移除 ${host}`,
+    knownHostsLoadFailed: "读取 known_hosts 失败",
+    knownHostsRemoveFailed: "移除已知主机失败",
+    sshErrorDns: "域名无法解析 —— 检查地址或 DNS",
+    sshErrorRefused: "连接被拒绝 —— 该端口上的 sshd 是否在运行？",
+    sshErrorTimeout: "连接超时 —— 网络不可达或被防火墙拦截",
+    sshErrorUnreachable: "无法路由到主机 —— 当前网络到不了该地址",
+    sshErrorPublicKey: "公钥认证被拒 —— 检查密钥与 authorized_keys",
+    sshErrorPassword: "密码被拒 —— 请在主机设置里重新输入",
+    sshErrorHostKey: "主机指纹变更或未验证 —— 先确认指纹再信任",
+    sshErrorTooManyAttempts: "认证尝试次数过多 —— 精简 ssh 提供的密钥",
+    sshErrorConnectionReset: "连接被远端重置",
+    sshErrorSshpassMissing: "这台 Mac 缺少 sshpass —— 安装它或改用密钥认证",
     monitorDescription: "观测服务器关键状态，并支持手动刷新。",
     monitorLoading: "正在加载服务器观测数据",
     monitorLoadingDescription: "正在从远程服务器采集一份快速状态快照。",
@@ -1124,6 +1181,25 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sshConfigLoadFailed: "~/.ssh/config の読み込みに失敗しました",
     sshConfigImported: (imported: number, updated: number) => `${imported} 件をインポートし、${updated} 件を更新しました`,
     sshConfigImportFailed: "~/.ssh/config のインポートに失敗しました",
+    sshSettings: "SSH と known_hosts",
+    sshSettingsDescription: "ホスト鍵の信頼と接続のトラブルシューティング。",
+    knownHosts: "known_hosts",
+    knownHostsDescription: "この Mac でホスト鍵を受け入れたサーバー。",
+    knownHostsEmpty: "known_hosts の記録はまだありません",
+    knownHostsRefresh: "更新",
+    knownHostsRemoved: (host: string) => `${host} を known_hosts から削除しました`,
+    knownHostsLoadFailed: "known_hosts の読み込みに失敗しました",
+    knownHostsRemoveFailed: "known_hosts の削除に失敗しました",
+    sshErrorDns: "ホスト名を解決できません — アドレスまたは DNS を確認してください",
+    sshErrorRefused: "接続が拒否されました — そのポートで sshd が動作していますか",
+    sshErrorTimeout: "接続がタイムアウトしました — ネットワーク到達不可かファイアウォール",
+    sshErrorUnreachable: "ホストへの経路がありません — このアドレスに到達できません",
+    sshErrorPublicKey: "公開鍵が拒否されました — 鍵と authorized_keys を確認してください",
+    sshErrorPassword: "パスワードが拒否されました — ホスト設定で再入力してください",
+    sshErrorHostKey: "ホスト鍵が変更または未検証です — フィンガープリントを確認してください",
+    sshErrorTooManyAttempts: "認証の試行回数が多すぎます — 提示する鍵を絞ってください",
+    sshErrorConnectionReset: "接続がリモート側でリセットされました",
+    sshErrorSshpassMissing: "この Mac に sshpass がありません — インストールするか鍵認証に切り替えてください",
     monitorDescription: "サーバーの主要な状態を確認し、必要に応じて手動更新します。",
     monitorLoading: "サーバー監視情報を読み込み中",
     monitorLoadingDescription: "リモートサーバーから簡易ステータスを収集中です。",
