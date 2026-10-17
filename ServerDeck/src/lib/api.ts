@@ -10,6 +10,7 @@ export type SavedHost = {
   authType: "password" | "key";
   password?: string;
   privateKeyPath?: string;
+  jumpHostId?: string;
   // author: BrianXiong
   // time: 2026/07/21/00:00:00
   // True when a password is stored in the system keychain for this host.
