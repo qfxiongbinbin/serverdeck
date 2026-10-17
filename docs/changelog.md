@@ -2,6 +2,23 @@
 
 This file records release notes for each published version.
 
+## v0.0.37
+
+Compared with `v0.0.36`.
+
+### Added
+
+- None
+
+### Changed
+
+- Add product roadmap to readme
+- Remove agent workspace and ai provider features
+
+### Fixed
+
+- Gate sftp view behind explicit host selection
+
 ## v0.0.36
 
 Compared with `v0.0.35`.
