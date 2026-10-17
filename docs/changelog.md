@@ -2,6 +2,23 @@
 
 This file records release notes for each published version.
 
+## v0.0.38
+
+Compared with `v0.0.37`.
+
+### Added
+
+- Add jump host chains for ssh connections
+- Add quick connect command palette
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.37
 
 Compared with `v0.0.36`.
