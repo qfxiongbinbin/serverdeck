@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.40
+
+Compared with `v0.0.39`.
+
+### Added
+
+- Treat ~/.ssh/config as a live host source
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.39
 
 Compared with `v0.0.38`.
