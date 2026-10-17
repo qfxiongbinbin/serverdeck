@@ -14,6 +14,7 @@ import "@xterm/xterm/css/xterm.css";
 import {
   Activity,
   ArrowLeft,
+  ArrowLeftRight,
   Home,
   ChevronRight,
   Copy,
@@ -72,6 +73,13 @@ import {
   writeTerminalInput,
   type FileEntry,
   type ManagedProject,
+  type PortForward,
+  type PortForwardStatus,
+  listPortForwards,
+  savePortForward,
+  deletePortForward,
+  startPortForward,
+  stopPortForward,
   type AppPreferences,
   type LocalFilePreview,
   type SavedHost,
@@ -84,6 +92,7 @@ import {
 import { FileBrowserPane } from "./components/files/FileBrowserPane";
 import { ProjectEditorModal } from "./components/projects/ProjectEditorModal";
 import { CommandPalette } from "./components/commands/CommandPalette";
+import { PortForwardEditorModal } from "./components/forwards/PortForwardEditorModal";
 import { LocalTerminalWorkspace } from "./components/terminal/LocalTerminalWorkspace";
 import {
   getDocumentLanguageTag,
@@ -104,6 +113,7 @@ const appLogo = new URL("../src-tauri/icons/icon.png", import.meta.url).href;
 const HOME_TAB_ID = "home";
 const HOSTS_TAB_ID = "hosts";
 const SFTP_TAB_ID = "sftp";
+const FORWARDS_TAB_ID = "forwards";
 const SETTINGS_TAB_ID = "settings";
 const SETTINGS_STORAGE_KEY = "serverdeck.settings";
 const LOCAL_TERMINAL_RECENT_PROJECTS_KEY = "serverdeck.localTerminalRecentProjects";
@@ -130,6 +140,20 @@ const blankHost: SavedHost = {
   username: "root",
   authType: "password",
   password: ""
+};
+
+// author: BrianXiong
+// time: 2026/10/18/00:10:00
+const blankPortForward: PortForward = {
+  id: "",
+  label: "",
+  kind: "local",
+  bindHost: "127.0.0.1",
+  bindPort: 0,
+  targetHost: "127.0.0.1",
+  targetPort: 0,
+  hostId: "",
+  autoStart: false
 };
 
 type DrawerMode = "new" | "edit";
@@ -746,6 +770,12 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [recentHostIds, setRecentHostIds] = useState<string[]>(() => readRecentHostIds());
+  const [portForwards, setPortForwards] = useState<PortForwardStatus[]>([]);
+  const [forwardEditorOpen, setForwardEditorOpen] = useState(false);
+  const [forwardEditorMode, setForwardEditorMode] = useState<"new" | "edit">("new");
+  const [forwardDraft, setForwardDraft] = useState<PortForward>(blankPortForward);
+  const [forwardBusyId, setForwardBusyId] = useState("");
+  const [forwardPendingDeleteId, setForwardPendingDeleteId] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
   const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
@@ -845,6 +875,7 @@ export default function App() {
   const isHomeView = activeTabId === HOME_TAB_ID;
   const isHostsView = activeTabId === HOSTS_TAB_ID;
   const isSftpView = activeTabId === SFTP_TAB_ID;
+  const isForwardsView = activeTabId === FORWARDS_TAB_ID;
   const isSettingsView = activeTabId === SETTINGS_TAB_ID;
 
   const selectedHost = useMemo(
@@ -1217,6 +1248,23 @@ export default function App() {
   useEffect(() => {
     void refreshHosts();
   }, []);
+
+  // author: BrianXiong
+  // time: 2026/10/18/00:10:00
+  const refreshPortForwards = useCallback(async () => {
+    try {
+      setPortForwards(await listPortForwards());
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.forwardsLoadFailed));
+      setStatusTone("error");
+    }
+  }, [messages]);
+
+  useEffect(() => {
+    if (isForwardsView) {
+      void refreshPortForwards();
+    }
+  }, [isForwardsView, refreshPortForwards]);
 
 
   const checkForUpdates = useCallback(async (options?: { silent?: boolean }) => {
@@ -2628,7 +2676,7 @@ export default function App() {
     setRemoteError("");
   }
 
-  // author: BrianXiong
+    // author: BrianXiong
   // time: 2026/10/17/23:40:00
   // Quick connect builds a throwaway host from "user@host:port" so a one-off
   // machine can be reached without persisting it.
@@ -2684,6 +2732,81 @@ export default function App() {
   function handlePaletteNewHost() {
     setCommandPaletteOpen(false);
     openNewDrawer();
+  }
+
+    // author: BrianXiong
+  // time: 2026/10/18/00:10:00
+  function openNewPortForwardEditor() {
+    setForwardEditorMode("new");
+    setForwardDraft({ ...blankPortForward, hostId: hosts[0]?.id ?? "" });
+    setForwardPendingDeleteId("");
+    setForwardEditorOpen(true);
+  }
+
+  function openEditPortForwardEditor(forward: PortForward) {
+    setForwardEditorMode("edit");
+    setForwardDraft(forward);
+    setForwardPendingDeleteId("");
+    setForwardEditorOpen(true);
+  }
+
+  function closePortForwardEditor() {
+    setForwardEditorOpen(false);
+    setForwardDraft(blankPortForward);
+    setForwardEditorMode("new");
+  }
+
+  async function handleSavePortForward() {
+    try {
+      await savePortForward(forwardDraft);
+      closePortForwardEditor();
+      await refreshPortForwards();
+      setStatus(messages.forwardsSaved);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.forwardsSaveFailed));
+      setStatusTone("error");
+    }
+  }
+
+  async function handleTogglePortForward(forward: PortForward, running: boolean) {
+    setForwardBusyId(forward.id);
+    setStatusTone("neutral");
+
+    try {
+      if (running) {
+        await stopPortForward(forward.id);
+        setStatus(messages.forwardsStopped(forward.label || forward.bindHost));
+      } else {
+        await startPortForward(forward.id, sshOptions);
+        setStatus(messages.forwardsStarted(forward.label || forward.bindHost));
+      }
+      setStatusTone("success");
+      await refreshPortForwards();
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.forwardsToggleFailed));
+      setStatusTone("error");
+      await refreshPortForwards();
+    } finally {
+      setForwardBusyId("");
+    }
+  }
+
+  async function handleDeletePortForward(forwardId: string) {
+    setForwardBusyId(forwardId);
+
+    try {
+      await deletePortForward(forwardId);
+      setForwardPendingDeleteId("");
+      await refreshPortForwards();
+      setStatus(messages.forwardsDeleted);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.forwardsToggleFailed));
+      setStatusTone("error");
+    } finally {
+      setForwardBusyId("");
+    }
   }
 
   async function handleSave() {
@@ -3486,6 +3609,15 @@ export default function App() {
               <FolderOpen size={18} />
               <span>{messages.sftp}</span>
             </button>
+
+            <button
+              type="button"
+              className={`side-nav ${isForwardsView ? "side-nav--active" : ""}`}
+              onClick={() => setActiveTabId(FORWARDS_TAB_ID)}
+            >
+              <ArrowLeftRight size={18} />
+              <span>{messages.forwards}</span>
+            </button>
           </div>
 
           <div className="sidebar__bottom">
@@ -4026,6 +4158,103 @@ export default function App() {
                   ))}
                 </div>
               </div> : null}
+            </section>
+          ) : isForwardsView ? (
+            <section className="forwards-screen">
+              <div className="forwards-screen__inner">
+                <header className="forwards-header">
+                  <div>
+                    <h2>{messages.forwards}</h2>
+                    <span>{messages.forwardsDescription}</span>
+                  </div>
+                  <button type="button" className="primary-button" onClick={openNewPortForwardEditor}>
+                    <Plus size={16} />
+                    {messages.newForward}
+                  </button>
+                </header>
+
+                {portForwards.length === 0 ? (
+                  <div className="forwards-empty">
+                    <ArrowLeftRight size={34} strokeWidth={1.4} />
+                    <strong>{messages.forwardsEmpty}</strong>
+                    <span>{messages.forwardsEmptyDescription}</span>
+                  </div>
+                ) : (
+                  <div className="forwards-list">
+                    {portForwards.map(({ forward, running }) => {
+                      const host = hosts.find((item) => item.id === forward.hostId) ?? null;
+                      const busy = forwardBusyId === forward.id;
+                      const pendingDelete = forwardPendingDeleteId === forward.id;
+                      const kindLabel =
+                        forward.kind === "local"
+                          ? messages.forwardKindLocal
+                          : forward.kind === "remote"
+                            ? messages.forwardKindRemote
+                            : messages.forwardKindDynamic;
+
+                      return (
+                        <div key={forward.id} className="forward-row">
+                          <span className={`forward-row__dot ${running ? "forward-row__dot--running" : ""}`.trim()} />
+                          <div className="forward-row__body">
+                            <div className="forward-row__titleline">
+                              <strong>
+                                {forward.label.trim() ||
+                                  `${forward.bindHost}:${forward.bindPort}${
+                                    forward.kind === "dynamic" ? "" : ` → ${forward.targetHost}:${forward.targetPort}`
+                                  }`}
+                              </strong>
+                              <span className="forward-row__kind">{kindLabel}</span>
+                              {forward.autoStart ? <span className="forward-row__kind">{messages.forwardAutoStart}</span> : null}
+                            </div>
+                            <div className="forward-row__meta">
+                              {forward.kind === "dynamic"
+                                ? `socks ${forward.bindHost}:${forward.bindPort}`
+                                : `${forward.bindHost}:${forward.bindPort} → ${forward.targetHost}:${forward.targetPort}`}
+                              {" · "}
+                              {host ? getDisplayHostTitle(host) : messages.forwardsHostMissing}
+                            </div>
+                          </div>
+                          <div className="forward-row__actions">
+                            <button
+                              type="button"
+                              className={running ? "secondary-button" : "primary-button"}
+                              disabled={busy}
+                              onClick={() => void handleTogglePortForward(forward, running)}
+                            >
+                              {busy ? messages.working : running ? messages.forwardStop : messages.forwardStart}
+                            </button>
+                            <button
+                              type="button"
+                              className="row-button"
+                              onClick={() => openEditPortForwardEditor(forward)}
+                            >
+                              {messages.edit}
+                            </button>
+                            {pendingDelete ? (
+                              <button
+                                type="button"
+                                className="danger-button"
+                                disabled={busy}
+                                onClick={() => void handleDeletePortForward(forward.id)}
+                              >
+                                {messages.forwardsConfirmDelete}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                className="row-button"
+                                onClick={() => setForwardPendingDeleteId(forward.id)}
+                              >
+                                {messages.delete}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </section>
           ) : isSettingsView ? (
             <section className="settings-screen">
@@ -4828,6 +5057,36 @@ export default function App() {
           </section>
         </div>
       ) : null}
+
+      <PortForwardEditorModal
+        open={forwardEditorOpen}
+        mode={forwardEditorMode}
+        draft={forwardDraft}
+        hosts={hosts}
+        labels={{
+          eyebrow: messages.forwards,
+          newTitle: messages.newForward,
+          editTitle: messages.editForward,
+          description: messages.forwardsDescription,
+          label: messages.forwardLabel,
+          kind: messages.forwardKind,
+          kindLocal: messages.forwardKindLocal,
+          kindRemote: messages.forwardKindRemote,
+          kindDynamic: messages.forwardKindDynamic,
+          host: messages.forwardHost,
+          bindHost: messages.forwardBindHost,
+          bindPort: messages.forwardBindPort,
+          targetHost: messages.forwardTargetHost,
+          targetPort: messages.forwardTargetPort,
+          autoStart: messages.forwardAutoStart,
+          autoStartDescription: messages.forwardAutoStartDescription,
+          cancel: messages.cancel,
+          save: messages.save
+        }}
+        onClose={closePortForwardEditor}
+        onSave={() => void handleSavePortForward()}
+        onDraftChange={setForwardDraft}
+      />
 
       <ProjectEditorModal
         open={projectEditorOpen}

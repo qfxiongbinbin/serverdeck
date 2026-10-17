@@ -256,6 +256,10 @@ struct TerminalSession {
 
 struct AppState {
     terminal_sessions: Mutex<HashMap<String, TerminalSession>>,
+    // author: BrianXiong
+    // time: 2026/10/18/00:10:00
+    // One long-lived `ssh -N` child per running port forward, keyed by forward id.
+    forward_processes: Mutex<HashMap<String, Arc<Mutex<std::process::Child>>>>,
     upload_processes: Mutex<HashMap<String, Arc<Mutex<std::process::Child>>>>,
     cancelled_uploads: Mutex<HashSet<String>>,
     download_processes: Mutex<HashMap<String, Arc<Mutex<std::process::Child>>>>,
@@ -370,6 +374,18 @@ fn init_db(conn: &Connection) -> Result<(), String> {
         CREATE TABLE IF NOT EXISTS local_terminal_recent_projects (
           project_id TEXT PRIMARY KEY,
           used_at INTEGER NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS port_forwards (
+          id TEXT PRIMARY KEY,
+          label TEXT NOT NULL DEFAULT '',
+          kind TEXT NOT NULL DEFAULT 'local',
+          bind_host TEXT NOT NULL DEFAULT '127.0.0.1',
+          bind_port INTEGER NOT NULL,
+          target_host TEXT NOT NULL DEFAULT '',
+          target_port INTEGER NOT NULL DEFAULT 0,
+          host_id TEXT NOT NULL,
+          auto_start INTEGER NOT NULL DEFAULT 0
         );
         "#,
     )
@@ -1036,6 +1052,18 @@ fn append_ssh_options(
 }
 
 fn build_ssh_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> Result<Command, String> {
+    build_ssh_command_with_args(host, ssh_options, &[])
+}
+
+// author: BrianXiong
+// time: 2026/10/18/00:10:00
+// ssh requires its options before the destination, so port forwards pass their
+// -N / -L flags through here instead of appending them afterwards.
+fn build_ssh_command_with_args(
+    host: &HostRecord,
+    ssh_options: &SshConnectionOptions,
+    extra_args: &[String],
+) -> Result<Command, String> {
     let jump_chain = resolve_jump_chain(&open_db()?, host)?;
     let destination = format!("{}@{}", host.username, host.address);
     let password = resolve_host_password(host);
@@ -1049,6 +1077,9 @@ fn build_ssh_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> R
     };
 
     append_ssh_options(&mut command, host, ssh_options, &jump_chain);
+    for arg in extra_args {
+        command.arg(arg);
+    }
     command.arg(destination);
     Ok(command)
 }
@@ -1839,6 +1870,11 @@ fn delete_host(id: String) -> Result<bool, String> {
     // Hosts that jumped through the deleted host fall back to a direct
     // connection instead of failing with "jump host not found".
     conn.execute("UPDATE hosts SET jump_host_id = NULL WHERE jump_host_id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    // author: BrianXiong
+    // time: 2026/10/18/00:10:00
+    // Tunnels cannot outlive their host: drop its forward rules with it.
+    conn.execute("DELETE FROM port_forwards WHERE host_id = ?1", params![id])
         .map_err(|error| error.to_string())?;
     keychain_delete_password(&id);
     Ok(true)
@@ -2730,16 +2766,333 @@ fn close_terminal_session(
     Ok(true)
 }
 
+// author: BrianXiong
+// time: 2026/10/18/00:10:00
+// Port forwards are persistent rules ("tunnels"): the record lives in SQLite,
+// while the running `ssh -N` process lives in AppState.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PortForwardRecord {
+    id: String,
+    label: String,
+    kind: String,
+    bind_host: String,
+    bind_port: u16,
+    target_host: String,
+    target_port: u16,
+    host_id: String,
+    auto_start: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PortForwardStatusPayload {
+    forward: PortForwardRecord,
+    running: bool,
+}
+
+fn load_port_forwards_from_db(conn: &Connection) -> Result<Vec<PortForwardRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, label, kind, bind_host, bind_port, target_host, target_port, host_id, auto_start FROM port_forwards ORDER BY label, bind_port",
+        )
+        .map_err(|error| error.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(PortForwardRecord {
+                id: row.get(0)?,
+                label: row.get(1)?,
+                kind: row.get(2)?,
+                bind_host: row.get(3)?,
+                bind_port: row.get(4)?,
+                target_host: row.get(5)?,
+                target_port: row.get(6)?,
+                host_id: row.get(7)?,
+                auto_start: row.get::<_, i64>(8)? != 0,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+fn save_port_forwards_to_db(conn: &Connection, forwards: &[PortForwardRecord]) -> Result<(), String> {
+    let tx = conn.unchecked_transaction().map_err(|error| error.to_string())?;
+    for forward in forwards {
+        tx.execute(
+            r#"
+            INSERT INTO port_forwards (id, label, kind, bind_host, bind_port, target_host, target_port, host_id, auto_start)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            ON CONFLICT(id) DO UPDATE SET
+              label=excluded.label,
+              kind=excluded.kind,
+              bind_host=excluded.bind_host,
+              bind_port=excluded.bind_port,
+              target_host=excluded.target_host,
+              target_port=excluded.target_port,
+              host_id=excluded.host_id,
+              auto_start=excluded.auto_start
+            "#,
+            params![
+                forward.id,
+                forward.label,
+                forward.kind,
+                forward.bind_host,
+                forward.bind_port,
+                forward.target_host,
+                forward.target_port,
+                forward.host_id,
+                if forward.auto_start { 1i64 } else { 0i64 },
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    tx.commit().map_err(|error| error.to_string())
+}
+
+// author: BrianXiong
+// time: 2026/10/18/00:10:00
+// Translates a forward rule into the ssh flags that create the tunnel.
+fn forward_argument(forward: &PortForwardRecord) -> Result<Vec<String>, String> {
+    let bind_host = if forward.bind_host.trim().is_empty() {
+        "127.0.0.1"
+    } else {
+        forward.bind_host.trim()
+    };
+
+    match forward.kind.as_str() {
+        "local" | "remote" => {
+            if forward.target_host.trim().is_empty() || forward.target_port == 0 {
+                return Err("A target host and port are required for local and remote forwards".to_string());
+            }
+
+            let flag = if forward.kind == "local" { "-L" } else { "-R" };
+            Ok(vec![
+                flag.to_string(),
+                format!(
+                    "{}:{}:{}:{}",
+                    bind_host,
+                    forward.bind_port,
+                    forward.target_host.trim(),
+                    forward.target_port
+                ),
+            ])
+        }
+        "dynamic" => Ok(vec!["-D".to_string(), format!("{}:{}", bind_host, forward.bind_port)]),
+        other => Err(format!("Unsupported forward type: {other}")),
+    }
+}
+
+fn default_ssh_connection_options() -> SshConnectionOptions {
+    SshConnectionOptions {
+        connect_timeout_seconds: 5,
+        server_alive_interval_seconds: 30,
+    }
+}
+
+fn spawn_port_forward(
+    state: &AppState,
+    forward: &PortForwardRecord,
+    ssh_options: &SshConnectionOptions,
+) -> Result<(), String> {
+    {
+        let processes = state
+            .forward_processes
+            .lock()
+            .map_err(|_| "Lock poisoned".to_string())?;
+        if processes.contains_key(&forward.id) {
+            return Ok(());
+        }
+    }
+
+    let conn = open_db()?;
+    let hosts = load_hosts_from_db(&conn)?;
+    let host = hosts
+        .iter()
+        .find(|candidate| candidate.id == forward.host_id)
+        .ok_or_else(|| format!("Host not found for forward: {}", forward.host_id))?;
+
+    let mut extra_args = vec![
+        "-N".to_string(),
+        "-o".to_string(),
+        "ExitOnForwardFailure=yes".to_string(),
+    ];
+    extra_args.extend(forward_argument(forward)?);
+
+    let mut command = build_ssh_command_with_args(host, ssh_options, &extra_args)?;
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("Failed to start tunnel: {error}"))?;
+
+    // Give ssh a moment to fail fast (port already bound, auth rejected, bad
+    // host) so the UI reports a real error instead of a tunnel that already died.
+    std::thread::sleep(std::time::Duration::from_millis(400));
+    if let Ok(Some(status)) = child.try_wait() {
+        let mut stderr = String::new();
+        if let Some(mut pipe) = child.stderr.take() {
+            let _ = pipe.read_to_string(&mut stderr);
+        }
+        let detail = stderr.trim().to_string();
+        return Err(if detail.is_empty() {
+            format!("Tunnel exited with status {status}")
+        } else {
+            detail
+        });
+    }
+
+    state
+        .forward_processes
+        .lock()
+        .map_err(|_| "Lock poisoned".to_string())?
+        .insert(forward.id.clone(), Arc::new(Mutex::new(child)));
+    Ok(())
+}
+
+fn stop_port_forward_process(state: &AppState, id: &str) -> Result<(), String> {
+    let child = state
+        .forward_processes
+        .lock()
+        .map_err(|_| "Lock poisoned".to_string())?
+        .remove(id);
+
+    if let Some(child) = child {
+        let mut child = child.lock().map_err(|_| "Lock poisoned".to_string())?;
+        child.kill().ok();
+        child.wait().ok();
+    }
+
+    Ok(())
+}
+
+fn stop_all_port_forwards(state: &AppState) {
+    let Ok(mut processes) = state.forward_processes.lock() else {
+        return;
+    };
+
+    for (_, child) in processes.drain() {
+        if let Ok(mut child) = child.lock() {
+            child.kill().ok();
+            child.wait().ok();
+        }
+    }
+}
+
+fn auto_start_port_forwards(app: &tauri::AppHandle) {
+    let Ok(conn) = open_db() else {
+        return;
+    };
+    let Ok(forwards) = load_port_forwards_from_db(&conn) else {
+        return;
+    };
+
+    let state = app.state::<AppState>();
+    for forward in forwards.iter().filter(|item| item.auto_start) {
+        if let Err(error) = spawn_port_forward(state.inner(), forward, &default_ssh_connection_options()) {
+            eprintln!("[forward] auto start failed for {}: {}", forward.id, error);
+        }
+    }
+}
+
+#[tauri::command]
+fn list_port_forwards(state: State<AppState>) -> Result<Vec<PortForwardStatusPayload>, String> {
+    let conn = open_db()?;
+    let forwards = load_port_forwards_from_db(&conn)?;
+    let processes = state
+        .forward_processes
+        .lock()
+        .map_err(|_| "Lock poisoned".to_string())?;
+
+    Ok(forwards
+        .into_iter()
+        .map(|forward| PortForwardStatusPayload {
+            running: processes.contains_key(&forward.id),
+            forward,
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn save_port_forward(mut forward: PortForwardRecord) -> Result<PortForwardRecord, String> {
+    if forward.id.trim().is_empty() {
+        forward.id = now_millis();
+    }
+
+    forward.label = forward.label.trim().to_string();
+    forward.kind = forward.kind.trim().to_string();
+    forward.bind_host = {
+        let trimmed = forward.bind_host.trim();
+        if trimmed.is_empty() {
+            "127.0.0.1".to_string()
+        } else {
+            trimmed.to_string()
+        }
+    };
+    forward.target_host = forward.target_host.trim().to_string();
+
+    if forward.kind != "local" && forward.kind != "remote" && forward.kind != "dynamic" {
+        return Err(format!("Unsupported forward type: {}", forward.kind));
+    }
+    if forward.host_id.trim().is_empty() {
+        return Err("Choose a host for this forward".to_string());
+    }
+    if forward.bind_port == 0 {
+        return Err("Bind port is required".to_string());
+    }
+    forward_argument(&forward)?;
+
+    let conn = open_db()?;
+    save_port_forwards_to_db(&conn, &[forward.clone()])?;
+    Ok(forward)
+}
+
+#[tauri::command]
+fn delete_port_forward(state: State<AppState>, id: String) -> Result<bool, String> {
+    stop_port_forward_process(&state, &id)?;
+    let conn = open_db()?;
+    conn.execute("DELETE FROM port_forwards WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn start_port_forward(
+    state: State<AppState>,
+    id: String,
+    ssh_options: SshConnectionOptions,
+) -> Result<bool, String> {
+    let conn = open_db()?;
+    let forwards = load_port_forwards_from_db(&conn)?;
+    let forward = forwards
+        .into_iter()
+        .find(|item| item.id == id)
+        .ok_or_else(|| "Port forward not found".to_string())?;
+
+    spawn_port_forward(&state, &forward, &ssh_options)?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn stop_port_forward(state: State<AppState>, id: String) -> Result<bool, String> {
+    stop_port_forward_process(&state, &id)?;
+    Ok(true)
+}
+
 fn main() {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .setup(|app| {
             #[cfg(desktop)]
             app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+            auto_start_port_forwards(app.handle());
             Ok(())
         })
         .manage(AppState {
             terminal_sessions: Mutex::new(HashMap::new()),
+            forward_processes: Mutex::new(HashMap::new()),
             upload_processes: Mutex::new(HashMap::new()),
             cancelled_uploads: Mutex::new(HashSet::new()),
             download_processes: Mutex::new(HashMap::new()),
@@ -2775,10 +3128,23 @@ fn main() {
             get_terminal_session_cwd,
             resize_terminal_session,
             write_terminal_input,
-            close_terminal_session
+            close_terminal_session,
+            list_port_forwards,
+            save_port_forward,
+            delete_port_forward,
+            start_port_forward,
+            stop_port_forward
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running ServerDeck");
+        .build(tauri::generate_context!())
+        .expect("error while building ServerDeck");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            if let Some(state) = app_handle.try_state::<AppState>() {
+                stop_all_port_forwards(state.inner());
+            }
+        }
+    });
 }
 
 #[cfg(test)]
@@ -2972,5 +3338,65 @@ mod tests {
         let loaded = load_hosts_from_db(&conn).expect("load hosts");
         let target = loaded.iter().find(|host| host.id == "target").expect("target host");
         assert_eq!(target.jump_host_id, None);
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/18/00:10:00
+    fn test_forward(kind: &str) -> PortForwardRecord {
+        PortForwardRecord {
+            id: "fwd-1".to_string(),
+            label: "local db".to_string(),
+            kind: kind.to_string(),
+            bind_host: "127.0.0.1".to_string(),
+            bind_port: 15432,
+            target_host: "10.0.0.5".to_string(),
+            target_port: 5432,
+            host_id: "host-1".to_string(),
+            auto_start: true,
+        }
+    }
+
+    #[test]
+    fn forward_argument_builds_ssh_flags() {
+        assert_eq!(
+            forward_argument(&test_forward("local")).expect("local"),
+            vec!["-L".to_string(), "127.0.0.1:15432:10.0.0.5:5432".to_string()]
+        );
+        assert_eq!(
+            forward_argument(&test_forward("remote")).expect("remote"),
+            vec!["-R".to_string(), "127.0.0.1:15432:10.0.0.5:5432".to_string()]
+        );
+
+        let dynamic = PortForwardRecord {
+            kind: "dynamic".to_string(),
+            ..test_forward("dynamic")
+        };
+        assert_eq!(
+            forward_argument(&dynamic).expect("dynamic"),
+            vec!["-D".to_string(), "127.0.0.1:15432".to_string()]
+        );
+
+        let broken = PortForwardRecord {
+            target_host: String::new(),
+            ..test_forward("local")
+        };
+        assert!(forward_argument(&broken).is_err(), "missing target must be rejected");
+    }
+
+    #[test]
+    fn port_forwards_roundtrip_through_db() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_db(&conn).expect("init db");
+
+        save_port_forwards_to_db(&conn, &[test_forward("local")]).expect("save forward");
+        let loaded = load_port_forwards_from_db(&conn).expect("load forwards");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].bind_port, 15432);
+        assert_eq!(loaded[0].target_port, 5432);
+        assert!(loaded[0].auto_start);
+
+        conn.execute("DELETE FROM port_forwards WHERE id = ?1", params!["fwd-1"])
+            .expect("delete forward");
+        assert!(load_port_forwards_from_db(&conn).expect("reload").is_empty());
     }
 }
