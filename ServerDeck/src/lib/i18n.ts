@@ -165,6 +165,9 @@ type Messages = {
   authType: string;
   authPassword: string;
   authKey: string;
+  jumpHost: string;
+  jumpHostNone: string;
+  jumpHostVia: (name: string) => string;
   password: string;
   passwordStoredPlaceholder: string;
   privateKeyPath: string;
@@ -444,6 +447,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     authType: "Auth Type",
     authPassword: "Password",
     authKey: "Private Key",
+    jumpHost: "Jump Host",
+    jumpHostNone: "Direct connection",
+    jumpHostVia: (name: string) => `via ${name}`,
     password: "Password",
     passwordStoredPlaceholder: "Saved in Keychain — leave blank to keep",
     privateKeyPath: "Private Key Path",
@@ -721,6 +727,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     authType: "认证方式",
     authPassword: "密码",
     authKey: "私钥",
+    jumpHost: "跳板机",
+    jumpHostNone: "直连（无跳板）",
+    jumpHostVia: (name: string) => `经 ${name}`,
     password: "密码",
     passwordStoredPlaceholder: "已存入钥匙串,留空表示不修改",
     privateKeyPath: "私钥路径",
@@ -998,6 +1007,9 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     authType: "認証方式",
     authPassword: "パスワード",
     authKey: "秘密鍵",
+    jumpHost: "ジャンプホスト",
+    jumpHostNone: "直接接続",
+    jumpHostVia: (name: string) => `${name} 経由`,
     password: "パスワード",
     passwordStoredPlaceholder: "キーチェーンに保存済み。変更しない場合は空欄",
     privateKeyPath: "秘密鍵パス",

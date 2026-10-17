@@ -27,6 +27,11 @@ struct HostRecord {
     password: Option<String>,
     private_key_path: Option<String>,
     // author: BrianXiong
+    // time: 2026/10/17/23:55:00
+    // Optional jump host: the connection reaches this host through it (`-J`).
+    #[serde(default)]
+    jump_host_id: Option<String>,
+    // author: BrianXiong
     // time: 2026/07/21/00:00:00
     // True when a password for this host is stored in the system keychain.
     // Passwords themselves are never sent to the UI anymore.
@@ -345,7 +350,8 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           username TEXT NOT NULL,
           auth_type TEXT NOT NULL,
           password TEXT,
-          private_key_path TEXT
+          private_key_path TEXT,
+          jump_host_id TEXT
         );
 
         CREATE TABLE IF NOT EXISTS projects (
@@ -385,6 +391,29 @@ fn init_db(conn: &Connection) -> Result<(), String> {
     )
     .map_err(|error| error.to_string())?;
 
+    ensure_hosts_jump_host_column(conn)?;
+
+    Ok(())
+}
+
+// author: BrianXiong
+// time: 2026/10/17/23:55:00
+// SQLite has no "ADD COLUMN IF NOT EXISTS", so databases created before jump
+// host support need an explicit, idempotent column check.
+fn ensure_hosts_jump_host_column(conn: &Connection) -> Result<(), String> {
+    let mut stmt = conn.prepare("PRAGMA table_info(hosts)").map_err(|error| error.to_string())?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+
+    if columns.iter().any(|name| name == "jump_host_id") {
+        return Ok(());
+    }
+
+    conn.execute("ALTER TABLE hosts ADD COLUMN jump_host_id TEXT", [])
+        .map_err(|error| error.to_string())?;
     Ok(())
 }
 
@@ -507,7 +536,7 @@ fn read_hosts() -> Result<Vec<HostRecord>, String> {
 fn load_hosts_from_db(conn: &Connection) -> Result<Vec<HostRecord>, String> {
     let mut stmt = conn
         .prepare(
-            "SELECT id, label, project_id, address, port, username, auth_type, password, private_key_path FROM hosts ORDER BY label, address",
+            "SELECT id, label, project_id, address, port, username, auth_type, password, private_key_path, jump_host_id FROM hosts ORDER BY label, address",
         )
         .map_err(|error| error.to_string())?;
 
@@ -530,6 +559,7 @@ fn load_hosts_from_db(conn: &Connection) -> Result<Vec<HostRecord>, String> {
                 auth_type: row.get(6)?,
                 password: None,
                 private_key_path: row.get(8)?,
+                jump_host_id: row.get(9)?,
                 has_password,
             })
         })
@@ -545,8 +575,8 @@ fn save_hosts_to_db(conn: &Connection, hosts: &[HostRecord]) -> Result<(), Strin
     for host in hosts {
         tx.execute(
             r#"
-            INSERT INTO hosts (id, label, project_id, address, port, username, auth_type, password, private_key_path)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            INSERT INTO hosts (id, label, project_id, address, port, username, auth_type, password, private_key_path, jump_host_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
             ON CONFLICT(id) DO UPDATE SET
               label=excluded.label,
               project_id=excluded.project_id,
@@ -555,7 +585,8 @@ fn save_hosts_to_db(conn: &Connection, hosts: &[HostRecord]) -> Result<(), Strin
               username=excluded.username,
               auth_type=excluded.auth_type,
               password=excluded.password,
-              private_key_path=excluded.private_key_path
+              private_key_path=excluded.private_key_path,
+              jump_host_id=excluded.jump_host_id
             "#,
             params![
                 host.id,
@@ -567,6 +598,7 @@ fn save_hosts_to_db(conn: &Connection, hosts: &[HostRecord]) -> Result<(), Strin
                 host.auth_type,
                 host.password,
                 host.private_key_path,
+                host.jump_host_id,
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -927,7 +959,55 @@ fn control_master_options() -> Vec<String> {
     ]
 }
 
-fn append_ssh_options(command: &mut Command, host: &HostRecord, ssh_options: &SshConnectionOptions) {
+// author: BrianXiong
+// time: 2026/10/17/23:55:00
+// Guards against a jump host chain that loops back on itself or grows past a
+// reasonable depth; both would otherwise spawn a doomed ssh process.
+const MAX_JUMP_HOPS: usize = 5;
+
+// author: BrianXiong
+// time: 2026/10/17/23:55:00
+// Walks `jump_host_id` links and returns the hop list in the order OpenSSH
+// expects for `-J`: the outermost hop first, the direct jump host last.
+fn resolve_jump_chain(conn: &Connection, host: &HostRecord) -> Result<Vec<String>, String> {
+    let hosts = load_hosts_from_db(conn)?;
+    let mut chain: Vec<String> = Vec::new();
+    let mut visited: Vec<String> = Vec::new();
+    let mut next_id = host.jump_host_id.clone();
+
+    while let Some(jump_id) = next_id {
+        if visited.iter().any(|visited_id| visited_id == &jump_id) {
+            return Err(format!(
+                "Jump host loop detected: {} -> {}",
+                visited.join(" -> "),
+                jump_id
+            ));
+        }
+
+        if chain.len() >= MAX_JUMP_HOPS {
+            return Err(format!("Jump host chain is limited to {} hops", MAX_JUMP_HOPS));
+        }
+
+        let jump = hosts
+            .iter()
+            .find(|candidate| candidate.id == jump_id)
+            .ok_or_else(|| format!("Jump host not found: {}", jump_id))?;
+
+        visited.push(jump_id);
+        chain.push(format!("{}@{}:{}", jump.username, jump.address, jump.port));
+        next_id = jump.jump_host_id.clone();
+    }
+
+    chain.reverse();
+    Ok(chain)
+}
+
+fn append_ssh_options(
+    command: &mut Command,
+    host: &HostRecord,
+    ssh_options: &SshConnectionOptions,
+    jump_chain: &[String],
+) {
     for option in control_master_options() {
         command.arg(option);
     }
@@ -942,6 +1022,10 @@ fn append_ssh_options(command: &mut Command, host: &HostRecord, ssh_options: &Ss
         .arg("-p")
         .arg(host.port.to_string());
 
+    if !jump_chain.is_empty() {
+        command.arg("-J").arg(jump_chain.join(","));
+    }
+
     if host.auth_type == "key" {
         if let Some(key_path) = &host.private_key_path {
             if !key_path.trim().is_empty() {
@@ -951,7 +1035,8 @@ fn append_ssh_options(command: &mut Command, host: &HostRecord, ssh_options: &Ss
     }
 }
 
-fn build_ssh_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> Command {
+fn build_ssh_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> Result<Command, String> {
+    let jump_chain = resolve_jump_chain(&open_db()?, host)?;
     let destination = format!("{}@{}", host.username, host.address);
     let password = resolve_host_password(host);
     let mut command = if host.auth_type == "password" && !password.is_empty() {
@@ -963,9 +1048,9 @@ fn build_ssh_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> C
         Command::new(resolve_binary("ssh").unwrap_or_else(|_| PathBuf::from("ssh")))
     };
 
-    append_ssh_options(&mut command, host, ssh_options);
+    append_ssh_options(&mut command, host, ssh_options, &jump_chain);
     command.arg(destination);
-    command
+    Ok(command)
 }
 
 fn parse_observation_value(output: &str, key: &str) -> String {
@@ -1701,6 +1786,21 @@ fn save_host(mut host: HostRecord) -> Result<HostRecord, String> {
 
     let conn = open_db()?;
 
+    // author: BrianXiong
+    // time: 2026/10/17/23:55:00
+    // Normalize the jump host and reject configurations ssh cannot use (a
+    // missing target or a loop) before they are persisted.
+    host.jump_host_id = host
+        .jump_host_id
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if host.jump_host_id.as_deref() == Some(host.id.as_str()) {
+        return Err("A host cannot use itself as its jump host".to_string());
+    }
+
+    resolve_jump_chain(&conn, &host)?;
+
     if host.auth_type == "password" {
         let provided = host.password.clone().unwrap_or_default();
         if !provided.is_empty() && provided != KEYCHAIN_PASSWORD_MARKER {
@@ -1733,6 +1833,12 @@ fn save_host(mut host: HostRecord) -> Result<HostRecord, String> {
 fn delete_host(id: String) -> Result<bool, String> {
     let conn = open_db()?;
     conn.execute("DELETE FROM hosts WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    // author: BrianXiong
+    // time: 2026/10/17/23:55:00
+    // Hosts that jumped through the deleted host fall back to a direct
+    // connection instead of failing with "jump host not found".
+    conn.execute("UPDATE hosts SET jump_host_id = NULL WHERE jump_host_id = ?1", params![id])
         .map_err(|error| error.to_string())?;
     keychain_delete_password(&id);
     Ok(true)
@@ -1773,7 +1879,7 @@ fn duplicate_host(id: String, label: String) -> Result<HostRecord, String> {
 fn test_connection(host: HostRecord, ssh_options: SshConnectionOptions) -> Result<String, String> {
     ensure_sftp_password_available(&host)?;
 
-    let output = build_ssh_command(&host, &ssh_options)
+    let output = build_ssh_command(&host, &ssh_options)?
         .arg("echo serverdeck-connected")
         .output()
         .map_err(|error| error.to_string())?;
@@ -1818,7 +1924,7 @@ printf 'network_usage=%s\n' "$NETWORK_USAGE"
 printf 'top_processes=%s\n' "$TOP_PROCESSES"
 "#;
 
-    let output = build_ssh_command(&host, &ssh_options)
+    let output = build_ssh_command(&host, &ssh_options)?
         .arg("sh")
         .arg("-lc")
         .arg(script)
@@ -2275,7 +2381,7 @@ async fn delete_remote_entry(
         // sftp `rmdir` only removes empty directories, so directories go
         // through `rm -rf` over ssh (the UI always confirms deletes first).
         if is_dir {
-            let output = build_ssh_command(&host, &ssh_options)
+            let output = build_ssh_command(&host, &ssh_options)?
                 .arg(format!("rm -rf -- {}", shell_single_quote(&remote_path)))
                 .output()
                 .map_err(|error| error.to_string())?;
@@ -2418,6 +2524,12 @@ fn start_terminal_session(
     cmd.arg(format!("ConnectTimeout={}", ssh_options.connect_timeout_seconds));
     cmd.arg("-p");
     cmd.arg(host.port.to_string());
+
+    let jump_chain = resolve_jump_chain(&open_db()?, &host)?;
+    if !jump_chain.is_empty() {
+        cmd.arg("-J");
+        cmd.arg(jump_chain.join(","));
+    }
 
     if host.auth_type == "key" {
         if let Some(key_path) = &host.private_key_path {
@@ -2690,6 +2802,7 @@ mod tests {
             auth_type: "password".to_string(),
             password: None,
             private_key_path: None,
+            jump_host_id: None,
             has_password: true,
         };
 
@@ -2758,6 +2871,7 @@ mod tests {
             auth_type: "password".to_string(),
             password: Some("typed-in-editor".to_string()),
             private_key_path: None,
+            jump_host_id: None,
             has_password: false,
         };
         assert!(ensure_sftp_password_available(&host).is_ok());
@@ -2765,5 +2879,98 @@ mod tests {
         host.auth_type = "key".to_string();
         host.password = None;
         assert!(ensure_sftp_password_available(&host).is_ok());
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/17/23:55:00
+    fn test_host(id: &str, label: &str, address: &str, jump_host_id: Option<&str>) -> HostRecord {
+        HostRecord {
+            id: id.to_string(),
+            label: label.to_string(),
+            project_id: "default".to_string(),
+            address: address.to_string(),
+            port: 22,
+            username: "root".to_string(),
+            auth_type: "key".to_string(),
+            password: None,
+            private_key_path: Some("~/.ssh/id_ed25519".to_string()),
+            jump_host_id: jump_host_id.map(|value| value.to_string()),
+            has_password: false,
+        }
+    }
+
+    // A chain of target -> bastion-b -> bastion-a must be handed to ssh as
+    // "bastion-a,bastion-b" because -J expects the outermost hop first.
+    #[test]
+    fn jump_chain_orders_hops_from_outermost() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_db(&conn).expect("init db");
+        save_hosts_to_db(
+            &conn,
+            &[
+                test_host("bastion-a", "Bastion A", "10.0.0.1", None),
+                test_host("bastion-b", "Bastion B", "10.0.0.2", Some("bastion-a")),
+                test_host("target", "Target", "10.0.0.9", Some("bastion-b")),
+            ],
+        )
+        .expect("seed hosts");
+
+        let hosts = load_hosts_from_db(&conn).expect("load hosts");
+        let target = hosts.iter().find(|host| host.id == "target").expect("target host");
+        let chain = resolve_jump_chain(&conn, target).expect("jump chain");
+
+        assert_eq!(
+            chain,
+            vec!["root@10.0.0.1:22".to_string(), "root@10.0.0.2:22".to_string()]
+        );
+    }
+
+    #[test]
+    fn jump_chain_rejects_loops_and_missing_hosts() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_db(&conn).expect("init db");
+        save_hosts_to_db(
+            &conn,
+            &[
+                test_host("first", "First", "10.1.0.1", Some("second")),
+                test_host("second", "Second", "10.1.0.2", Some("first")),
+            ],
+        )
+        .expect("seed hosts");
+
+        let hosts = load_hosts_from_db(&conn).expect("load hosts");
+        let first = hosts.iter().find(|host| host.id == "first").expect("first host");
+        let loop_error = resolve_jump_chain(&conn, first).expect_err("loop must fail");
+        assert!(loop_error.contains("loop"), "unexpected error: {loop_error}");
+
+        let orphan = test_host("orphan", "Orphan", "10.1.0.3", Some("missing-id"));
+        let missing_error = resolve_jump_chain(&conn, &orphan).expect_err("missing jump must fail");
+        assert!(missing_error.contains("not found"), "unexpected error: {missing_error}");
+    }
+
+    #[test]
+    fn jump_host_id_roundtrips_and_clears() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_db(&conn).expect("init db");
+        save_hosts_to_db(
+            &conn,
+            &[
+                test_host("bastion", "Bastion", "10.2.0.1", None),
+                test_host("target", "Target", "10.2.0.9", Some("bastion")),
+            ],
+        )
+        .expect("seed hosts");
+
+        let loaded = load_hosts_from_db(&conn).expect("load hosts");
+        let target = loaded.iter().find(|host| host.id == "target").expect("target host");
+        assert_eq!(target.jump_host_id.as_deref(), Some("bastion"));
+
+        let mut cleared = target.clone();
+        cleared.jump_host_id = None;
+        save_hosts_to_db(&conn, &[cleared]).expect("clear jump host");
+
+        let loaded = load_hosts_from_db(&conn).expect("load hosts");
+        let target = loaded.iter().find(|host| host.id == "target").expect("target host");
+        assert_eq!(target.jump_host_id, None);
     }
 }

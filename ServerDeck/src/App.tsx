@@ -3482,7 +3482,14 @@ export default function App() {
                               <div className="host-row__body">
                                 <div className="host-row__title">{getDisplayHostTitle(host)}</div>
                                 <div className="host-row__sub">ssh, {host.username}</div>
-                                <div className="host-row__meta">{host.address}:{host.port}</div>
+                                <div className="host-row__meta">
+                                  {host.address}:{host.port}
+                                  {host.jumpHostId
+                                    ? ` · ${messages.jumpHostVia(
+                                        getDisplayHostTitle(hosts.find((item) => item.id === host.jumpHostId) ?? host)
+                                      )}`
+                                    : ""}
+                                </div>
                               </div>
 
                               <div className="host-row__actions">
@@ -3636,6 +3643,23 @@ export default function App() {
                           value={draft.username}
                           onChange={(event) => setDraft({ ...draft, username: event.target.value })}
                         />
+                      </label>
+
+                      <label>
+                        <span>{messages.jumpHost}</span>
+                        <select
+                          value={draft.jumpHostId ?? ""}
+                          onChange={(event) => setDraft({ ...draft, jumpHostId: event.target.value || undefined })}
+                        >
+                          <option value="">{messages.jumpHostNone}</option>
+                          {hosts
+                            .filter((host) => host.id !== draft.id)
+                            .map((host) => (
+                              <option key={host.id} value={host.id}>
+                                {host.label.trim() || host.address} ({host.address})
+                              </option>
+                            ))}
+                        </select>
                       </label>
 
                       <label>
