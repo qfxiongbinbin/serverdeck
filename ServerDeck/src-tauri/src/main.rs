@@ -1,5 +1,3 @@
-mod agent;
-
 use dirs::home_dir;
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -14,12 +12,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{async_runtime, AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
-
-use agent::{
-    agent_get_project_context, agent_list_dir, agent_read_file, agent_search_in_files,
-    append_agent_user_message, create_agent_session, delete_agent_session,
-    get_agent_session_detail, list_agent_sessions, run_agent_turn,
-};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -137,54 +129,6 @@ struct ManagedProjectRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct AiProviderRecord {
-    id: String,
-    name: String,
-    provider_type: String,
-    base_url: String,
-    api_key: String,
-    model: String,
-    available_models: Vec<String>,
-    enabled_models: Vec<String>,
-    enabled: bool,
-    is_default: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct AiProviderFetchRequest {
-    provider_type: String,
-    base_url: String,
-    api_key: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AiProviderImportSuggestion {
-    source_id: String,
-    title: String,
-    provider_type: String,
-    base_url: String,
-    api_key: String,
-    model: String,
-    note: String,
-}
-
-// author: BrianXiong
-// time: 2026/05/07/23:30:00
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AiMemoryFile {
-    id: String,
-    agent_name: String,
-    file_name: String,
-    file_path: String,
-    file_size: u64,
-    modified_time: u64,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct AppPreferencesPayload {
     settings: AppSettingsRecord,
     recent_project_ids: Vec<String>,
@@ -196,7 +140,6 @@ struct AppSettingsRecord {
     app_theme: String,
     language: String,
     projects: Vec<ManagedProjectRecord>,
-    ai_providers: Vec<AiProviderRecord>,
     local_terminal_default_path: String,
     ssh_connect_timeout_seconds: u16,
     ssh_server_alive_interval_seconds: u16,
@@ -336,7 +279,6 @@ fn default_app_settings_record() -> AppSettingsRecord {
         app_theme: "dark".to_string(),
         language: "en".to_string(),
         projects: Vec::new(),
-        ai_providers: Vec::new(),
         local_terminal_default_path: String::new(),
         ssh_connect_timeout_seconds: 5,
         ssh_server_alive_interval_seconds: 30,
@@ -414,19 +356,6 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           project_type TEXT NOT NULL DEFAULT 'local'
         );
 
-        CREATE TABLE IF NOT EXISTS ai_providers (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          provider_type TEXT NOT NULL,
-          base_url TEXT NOT NULL DEFAULT '',
-          api_key TEXT NOT NULL DEFAULT '',
-          model TEXT NOT NULL DEFAULT '',
-          available_models_json TEXT NOT NULL DEFAULT '[]',
-          enabled_models_json TEXT NOT NULL DEFAULT '[]',
-          enabled INTEGER NOT NULL DEFAULT 1,
-          is_default INTEGER NOT NULL DEFAULT 0
-        );
-
         CREATE TABLE IF NOT EXISTS app_settings (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
@@ -436,76 +365,25 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           project_id TEXT PRIMARY KEY,
           used_at INTEGER NOT NULL
         );
-
-        CREATE TABLE IF NOT EXISTS agent_sessions (
-          id TEXT PRIMARY KEY,
-          project_id TEXT NOT NULL,
-          title TEXT NOT NULL DEFAULT '',
-          goal TEXT NOT NULL DEFAULT '',
-          status TEXT NOT NULL,
-          provider_id TEXT NOT NULL DEFAULT '',
-          model TEXT NOT NULL DEFAULT '',
-          root_path TEXT NOT NULL,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS agent_messages (
-          id TEXT PRIMARY KEY,
-          session_id TEXT NOT NULL,
-          role TEXT NOT NULL,
-          content TEXT NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS agent_plan_items (
-          id TEXT PRIMARY KEY,
-          session_id TEXT NOT NULL,
-          title TEXT NOT NULL,
-          status TEXT NOT NULL,
-          position INTEGER NOT NULL,
-          created_at INTEGER NOT NULL,
-          updated_at INTEGER NOT NULL
-        );
-
-        CREATE TABLE IF NOT EXISTS agent_tool_calls (
-          id TEXT PRIMARY KEY,
-          session_id TEXT NOT NULL,
-          tool_name TEXT NOT NULL,
-          arguments_summary TEXT NOT NULL,
-          result_summary TEXT NOT NULL,
-          visibility TEXT NOT NULL DEFAULT 'default',
-          status TEXT NOT NULL,
-          created_at INTEGER NOT NULL
-        );
-
-        CREATE INDEX IF NOT EXISTS idx_agent_sessions_updated_at
-          ON agent_sessions(updated_at DESC);
-
-        CREATE INDEX IF NOT EXISTS idx_agent_messages_session_id_created_at
-          ON agent_messages(session_id, created_at);
-
-        CREATE INDEX IF NOT EXISTS idx_agent_plan_items_session_id_position
-          ON agent_plan_items(session_id, position, created_at);
-
-        CREATE INDEX IF NOT EXISTS idx_agent_tool_calls_session_id_created_at
-          ON agent_tool_calls(session_id, created_at);
         "#,
     )
     .map_err(|error| error.to_string())?;
 
-    let _ = conn.execute(
-        "ALTER TABLE ai_providers ADD COLUMN available_models_json TEXT NOT NULL DEFAULT '[]'",
-        [],
-    );
-    let _ = conn.execute(
-        "ALTER TABLE ai_providers ADD COLUMN enabled_models_json TEXT NOT NULL DEFAULT '[]'",
-        [],
-    );
-    let _ = conn.execute(
-        "ALTER TABLE agent_tool_calls ADD COLUMN visibility TEXT NOT NULL DEFAULT 'default'",
-        [],
-    );
+    // author: BrianXiong
+    // time: 2026/08/19/21:00:00
+    // The agent workspace and AI provider settings were removed in 0.0.37.
+    // Drop their tables so upgrading machines do not keep leftover agent
+    // conversations or plaintext provider API keys around.
+    conn.execute_batch(
+        r#"
+        DROP TABLE IF EXISTS ai_providers;
+        DROP TABLE IF EXISTS agent_sessions;
+        DROP TABLE IF EXISTS agent_messages;
+        DROP TABLE IF EXISTS agent_plan_items;
+        DROP TABLE IF EXISTS agent_tool_calls;
+        "#,
+    )
+    .map_err(|error| error.to_string())?;
 
     Ok(())
 }
@@ -545,7 +423,6 @@ fn load_app_preferences() -> Result<AppPreferencesPayload, String> {
     let mut settings = default_app_settings_record();
 
     settings.projects = load_projects_from_db(&conn)?;
-    settings.ai_providers = load_ai_providers_from_db(&conn)?;
     settings.app_theme = get_setting(&conn, "appTheme")?.unwrap_or(settings.app_theme);
     settings.language = get_setting(&conn, "language")?.unwrap_or(settings.language);
     settings.local_terminal_default_path = get_setting(&conn, "localTerminalDefaultPath")?.unwrap_or(settings.local_terminal_default_path);
@@ -583,26 +460,6 @@ fn save_app_preferences(payload: AppPreferencesPayload) -> Result<bool, String> 
         .map_err(|error| error.to_string())?;
     }
 
-    tx.execute("DELETE FROM ai_providers", []).map_err(|error| error.to_string())?;
-    for provider in &payload.settings.ai_providers {
-        tx.execute(
-            "INSERT INTO ai_providers (id, name, provider_type, base_url, api_key, model, available_models_json, enabled_models_json, enabled, is_default) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                provider.id,
-                provider.name,
-                provider.provider_type,
-                provider.base_url,
-                provider.api_key,
-                provider.model,
-                serde_json::to_string(&provider.available_models).unwrap_or_else(|_| "[]".to_string()),
-                serde_json::to_string(&provider.enabled_models).unwrap_or_else(|_| "[]".to_string()),
-                provider.enabled,
-                provider.is_default,
-            ],
-        )
-        .map_err(|error| error.to_string())?;
-    }
-
     set_setting(&tx, "appTheme", &payload.settings.app_theme)?;
     set_setting(&tx, "language", &payload.settings.language)?;
     set_setting(&tx, "localTerminalDefaultPath", &payload.settings.local_terminal_default_path)?;
@@ -631,15 +488,6 @@ fn now_millis() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis().to_string())
         .unwrap_or_else(|_| "0".into())
-}
-
-// author: BrianXiong
-// time: 2026/04/08/16:24:00
-pub(crate) fn now_millis_i64() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(0)
 }
 
 // author: BrianXiong
@@ -746,33 +594,6 @@ fn load_projects_from_db(conn: &Connection) -> Result<Vec<ManagedProjectRecord>,
     rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
-fn load_ai_providers_from_db(conn: &Connection) -> Result<Vec<AiProviderRecord>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT id, name, provider_type, base_url, api_key, model, available_models_json, enabled_models_json, enabled, is_default FROM ai_providers ORDER BY is_default DESC, name",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map([], |row| {
-            let available_models_json: String = row.get(6)?;
-            let enabled_models_json: String = row.get(7)?;
-            Ok(AiProviderRecord {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                provider_type: row.get(2)?,
-                base_url: row.get(3)?,
-                api_key: row.get(4)?,
-                model: row.get(5)?,
-                available_models: serde_json::from_str(&available_models_json).unwrap_or_default(),
-                enabled_models: serde_json::from_str(&enabled_models_json).unwrap_or_default(),
-                enabled: row.get(8)?,
-                is_default: row.get(9)?,
-            })
-        })
-        .map_err(|error| error.to_string())?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
-}
-
 fn set_setting(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
     conn.execute(
         "INSERT INTO app_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -870,67 +691,6 @@ fn resolve_local_shell() -> Result<PathBuf, String> {
         .into_iter()
         .find(|path| path.is_file())
         .ok_or_else(|| "Local shell not found".to_string())
-}
-
-pub(crate) fn default_ai_provider_base_url(provider_type: &str) -> &str {
-    match provider_type {
-        "openai" => "https://api.openai.com/v1",
-        "anthropic" => "https://api.anthropic.com/v1",
-        "openrouter" => "https://openrouter.ai/api/v1",
-        "gemini" => "https://generativelanguage.googleapis.com/v1beta",
-        _ => "",
-    }
-}
-
-fn fetch_model_list_via_curl(url: &str, headers: &[(&str, String)]) -> Result<serde_json::Value, String> {
-    let mut command = Command::new(
-        resolve_binary("curl")
-            .map(|path| path.to_string_lossy().into_owned())
-            .map_err(|error| error.to_string())?,
-    );
-    command.arg("-sS").arg(url);
-
-    for (name, value) in headers {
-        command.arg("-H").arg(format!("{}: {}", name, value));
-    }
-
-    let output = command.output().map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() { "Failed to fetch models".to_string() } else { stderr });
-    }
-
-    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
-}
-
-fn binary_exists(name: &str) -> bool {
-    resolve_binary(name).is_ok()
-}
-
-fn read_json_if_exists(path: PathBuf) -> Option<serde_json::Value> {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
-}
-
-fn read_text_if_exists(path: PathBuf) -> Option<String> {
-    fs::read_to_string(path).ok()
-}
-
-fn parse_toml_string_value(content: &str, key: &str) -> Option<String> {
-    content.lines().find_map(|line| {
-        let trimmed = line.trim();
-        let prefix = format!("{} = ", key);
-        if !trimmed.starts_with(&prefix) {
-            return None;
-        }
-
-        let value = trimmed[prefix.len()..].trim();
-        value
-            .strip_prefix('"')
-            .and_then(|rest| rest.strip_suffix('"'))
-            .map(|rest| rest.to_string())
-    })
 }
 
 // author: BrianXiong
@@ -2748,216 +2508,6 @@ fn pick_local_directory() -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn fetch_ai_provider_models(request: AiProviderFetchRequest) -> Result<Vec<String>, String> {
-    let provider_type = request.provider_type.trim();
-
-    if provider_type == "anthropic" {
-        return Ok(vec![
-            "claude-3-7-sonnet-latest".to_string(),
-            "claude-3-5-sonnet-latest".to_string(),
-            "claude-3-5-haiku-latest".to_string(),
-        ]);
-    }
-
-    if provider_type == "azure-openai" {
-        return Err("Azure OpenAI deployments need to be configured manually".to_string());
-    }
-
-    if request.api_key.trim().is_empty() {
-        return Err("API key is required before fetching models".to_string());
-    }
-
-    let base_url = if request.base_url.trim().is_empty() {
-        default_ai_provider_base_url(provider_type)
-    } else {
-        request.base_url.trim()
-    };
-
-    if base_url.is_empty() {
-        return Err("Base URL is required for this provider".to_string());
-    }
-
-    if provider_type == "gemini" {
-        let url = format!("{}/models?key={}", base_url.trim_end_matches('/'), request.api_key.trim());
-        let json = fetch_model_list_via_curl(&url, &[])?;
-        let models = json
-            .get("models")
-            .and_then(|value| value.as_array())
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.get("name").and_then(|value| value.as_str()))
-                    .map(|name| name.trim_start_matches("models/").to_string())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        return Ok(models);
-    }
-
-    let url = format!("{}/models", base_url.trim_end_matches('/'));
-    let json = fetch_model_list_via_curl(&url, &[("Authorization", format!("Bearer {}", request.api_key.trim()))])?;
-    Ok(json
-        .get("data")
-        .and_then(|value| value.as_array())
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.get("id").and_then(|value| value.as_str()))
-                .map(|id| id.to_string())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default())
-}
-
-#[tauri::command]
-fn detect_ai_provider_imports() -> Result<Vec<AiProviderImportSuggestion>, String> {
-    let mut suggestions = Vec::new();
-
-    let anthropic_api_key = env::var("ANTHROPIC_API_KEY").unwrap_or_default();
-    let claude_installed = binary_exists("claude") || home_dir().map(|dir| dir.join(".claude").exists()).unwrap_or(false);
-    if claude_installed {
-        suggestions.push(AiProviderImportSuggestion {
-            source_id: "claude-code".to_string(),
-            title: "Claude Code".to_string(),
-            provider_type: "anthropic".to_string(),
-            base_url: String::new(),
-            api_key: anthropic_api_key.clone(),
-            model: env::var("ANTHROPIC_MODEL").unwrap_or_else(|_| "claude-3-7-sonnet-latest".to_string()),
-            note: if anthropic_api_key.is_empty() {
-                "Claude Code detected. API key not found in environment; please confirm credentials manually.".to_string()
-            } else {
-                "Imported from local Claude Code environment.".to_string()
-            },
-        });
-    }
-
-    let codex_installed = binary_exists("codex") || home_dir().map(|dir| dir.join(".codex").exists()).unwrap_or(false);
-    if codex_installed {
-        let codex_dir = home_dir().map(|dir| dir.join(".codex")).unwrap_or_default();
-        let config_toml = read_text_if_exists(codex_dir.join("config.toml")).unwrap_or_default();
-        let auth_json = read_json_if_exists(codex_dir.join("auth.json"));
-        let openai_api_key = env::var("OPENAI_API_KEY")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| {
-                auth_json
-                    .as_ref()
-                    .and_then(|value| value.get("OPENAI_API_KEY"))
-                    .and_then(|value| value.as_str())
-                    .map(|value| value.to_string())
-            })
-            .or_else(|| {
-                auth_json
-                    .as_ref()
-                    .and_then(|value| value.get("tokens"))
-                    .and_then(|tokens| tokens.get("access_token"))
-                    .and_then(|value| value.as_str())
-                    .map(|value| value.to_string())
-            })
-            .unwrap_or_default();
-
-        suggestions.push(AiProviderImportSuggestion {
-            source_id: "codex-cli".to_string(),
-            title: "Codex CLI".to_string(),
-            provider_type: if env::var("OPENAI_BASE_URL").ok().filter(|value| !value.trim().is_empty()).is_some() {
-                "custom-openai".to_string()
-            } else {
-                "openai".to_string()
-            },
-            base_url: env::var("OPENAI_BASE_URL").unwrap_or_default(),
-            api_key: openai_api_key.clone(),
-            model: parse_toml_string_value(&config_toml, "model").unwrap_or_default(),
-            note: if openai_api_key.is_empty() {
-                "Codex CLI detected. No API key found; imported model/profile defaults only.".to_string()
-            } else {
-                "Imported from local Codex CLI configuration.".to_string()
-            },
-        });
-    }
-
-    Ok(suggestions)
-}
-
-#[tauri::command]
-// author: BrianXiong
-// time: 2026/05/07/23:30:00
-fn scan_ai_memory_files() -> Result<Vec<AiMemoryFile>, String> {
-    let mut files = Vec::new();
-    let home = home_dir().ok_or("Cannot resolve home directory")?;
-
-    // Define AI agents and their memory file locations
-    let memory_locations: Vec<(&str, Vec<PathBuf>)> = vec![
-        ("Claude", vec![
-            home.join("CLAUDE.md"),
-            home.join(".claude/CLAUDE.md"),
-        ]),
-        ("Codex", vec![
-            home.join(".codex/AGENTS.md"),
-        ]),
-        ("Alma", vec![
-            home.join(".config/alma/MEMORY.md"),
-            home.join(".config/alma/USER.md"),
-        ]),
-        ("Hermes", vec![
-            home.join(".hermes/SOUL.md"),
-        ]),
-    ];
-
-    for (agent_name, paths) in memory_locations {
-        for path in paths {
-            if path.exists() && path.is_file() {
-                if let Ok(metadata) = fs::metadata(&path) {
-                    let modified_time = metadata
-                        .modified()
-                        .ok()
-                        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-                        .map(|duration| duration.as_secs())
-                        .unwrap_or(0);
-
-                    let file_name = path
-                        .file_name()
-                        .map(|name| name.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-
-                    files.push(AiMemoryFile {
-                        id: format!("{}:{}", agent_name.to_lowercase(), file_name),
-                        agent_name: agent_name.to_string(),
-                        file_name,
-                        file_path: path.display().to_string(),
-                        file_size: metadata.len(),
-                        modified_time,
-                    });
-                }
-            }
-        }
-    }
-
-    // Sort by agent name, then by file name
-    files.sort_by(|a, b| {
-        a.agent_name.cmp(&b.agent_name).then(a.file_name.cmp(&b.file_name))
-    });
-
-    Ok(files)
-}
-
-#[tauri::command]
-// author: BrianXiong
-// time: 2026/05/07/23:30:00
-fn read_ai_memory_file(path: String) -> Result<String, String> {
-    let expanded = expand_path(&path);
-
-    if !expanded.exists() {
-        return Err(format!("File not found: {}", expanded.display()));
-    }
-
-    if !expanded.is_file() {
-        return Err(format!("Path is not a file: {}", expanded.display()));
-    }
-
-    fs::read_to_string(&expanded).map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 // author: BrianXiong
 // time: 2026/04/05/16:20:45
 fn get_terminal_session_cwd(state: State<AppState>, session_id: String) -> Result<String, String> {
@@ -3087,20 +2637,6 @@ fn main() {
             clear_app_data,
             load_app_preferences,
             save_app_preferences,
-            list_agent_sessions,
-            get_agent_session_detail,
-            create_agent_session,
-            append_agent_user_message,
-            delete_agent_session,
-            run_agent_turn,
-            agent_get_project_context,
-            agent_list_dir,
-            agent_search_in_files,
-            agent_read_file,
-            fetch_ai_provider_models,
-            detect_ai_provider_imports,
-            scan_ai_memory_files,
-            read_ai_memory_file,
             list_hosts,
             save_host,
             delete_host,
@@ -3162,6 +2698,48 @@ mod tests {
         let message = result.unwrap_err();
         assert!(message.contains("Probe Host"), "message should name the host: {message}");
         assert!(message.contains("keychain"), "message should mention the keychain: {message}");
+    }
+
+    // author: BrianXiong
+    // time: 2026/08/19/21:10:00
+    // Version 0.0.37 removed the agent workspace: init_db must drop the
+    // leftover agent tables (they stored conversations and plaintext provider
+    // API keys) while keeping every core table the app still relies on.
+    #[test]
+    fn init_db_drops_legacy_agent_tables() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE ai_providers (id TEXT PRIMARY KEY);
+            CREATE TABLE agent_sessions (id TEXT PRIMARY KEY);
+            CREATE TABLE agent_messages (id TEXT PRIMARY KEY);
+            CREATE TABLE agent_plan_items (id TEXT PRIMARY KEY);
+            CREATE TABLE agent_tool_calls (id TEXT PRIMARY KEY);
+            "#,
+        )
+        .expect("seed legacy agent tables");
+
+        init_db(&conn).expect("init db");
+
+        let legacy: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN \
+                 ('ai_providers', 'agent_sessions', 'agent_messages', 'agent_plan_items', 'agent_tool_calls')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count legacy tables");
+        assert_eq!(legacy, 0, "legacy agent tables must be dropped");
+
+        let core: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN \
+                 ('hosts', 'projects', 'app_settings', 'local_terminal_recent_projects')",
+                [],
+                |row| row.get(0),
+            )
+            .expect("count core tables");
+        assert_eq!(core, 4, "core tables must still exist");
     }
 
     // author: BrianXiong
