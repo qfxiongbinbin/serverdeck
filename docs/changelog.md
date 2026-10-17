@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.42
+
+Compared with `v0.0.41`.
+
+### Added
+
+- List and generate ssh keys from the app
+
+### Changed
+
+- None
+
+### Fixed
+
+- None
+
 ## v0.0.41
 
 Compared with `v0.0.40`.
