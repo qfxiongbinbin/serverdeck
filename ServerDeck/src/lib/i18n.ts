@@ -133,6 +133,18 @@ type Messages = {
   sshErrorTooManyAttempts: string;
   sshErrorConnectionReset: string;
   sshErrorSshpassMissing: string;
+  sshKeys: string;
+  sshKeysDescription: string;
+  sshKeysEmpty: string;
+  sshKeyGenerate: string;
+  sshKeyGenerated: (name: string) => string;
+  sshKeyGenerateFailed: string;
+  sshKeyNamePlaceholder: string;
+  sshKeyCommentPlaceholder: string;
+  sshKeyCopyPublic: string;
+  sshKeyCopied: (name: string) => string;
+  sshKeyCopyFailed: string;
+  sshKeyLoadFailed: string;
   monitorDescription: string;
   monitorLoading: string;
   monitorLoadingDescription: string;
@@ -490,6 +502,18 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sshErrorTooManyAttempts: "Too many authentication attempts — narrow the keys ssh offers",
     sshErrorConnectionReset: "Connection reset by the remote side",
     sshErrorSshpassMissing: "sshpass is missing on this Mac — install it or switch to key auth",
+    sshKeys: "SSH Keys",
+    sshKeysDescription: "Keys found in ~/.ssh. Pick one in a host instead of typing a path, and generate new ed25519 keys without a passphrase.",
+    sshKeysEmpty: "No SSH keys found in ~/.ssh",
+    sshKeyGenerate: "Generate",
+    sshKeyGenerated: (name: string) => `Generated key ${name}`,
+    sshKeyGenerateFailed: "Failed to generate the SSH key",
+    sshKeyNamePlaceholder: "Key name, e.g. id_ed25519_work",
+    sshKeyCommentPlaceholder: "Comment (optional)",
+    sshKeyCopyPublic: "Copy public key",
+    sshKeyCopied: (name: string) => `Public key copied: ${name}`,
+    sshKeyCopyFailed: "Failed to copy the public key",
+    sshKeyLoadFailed: "Failed to read SSH keys",
     monitorDescription: "Observe key server status and refresh it on demand.",
     monitorLoading: "Loading server observation",
     monitorLoadingDescription: "Collecting a quick status snapshot from the remote server.",
@@ -845,6 +869,18 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sshErrorTooManyAttempts: "认证尝试次数过多 —— 精简 ssh 提供的密钥",
     sshErrorConnectionReset: "连接被远端重置",
     sshErrorSshpassMissing: "这台 Mac 缺少 sshpass —— 安装它或改用密钥认证",
+    sshKeys: "SSH 密钥",
+    sshKeysDescription: "~/.ssh 下已有的密钥。主机里可直接选择而不用手填路径，也能新建免密码的 ed25519 密钥。",
+    sshKeysEmpty: "~/.ssh 下还没有密钥",
+    sshKeyGenerate: "生成",
+    sshKeyGenerated: (name: string) => `已生成密钥 ${name}`,
+    sshKeyGenerateFailed: "生成 SSH 密钥失败",
+    sshKeyNamePlaceholder: "密钥名，例如 id_ed25519_work",
+    sshKeyCommentPlaceholder: "备注（可选）",
+    sshKeyCopyPublic: "复制公钥",
+    sshKeyCopied: (name: string) => `已复制公钥：${name}`,
+    sshKeyCopyFailed: "复制公钥失败",
+    sshKeyLoadFailed: "读取 SSH 密钥失败",
     monitorDescription: "观测服务器关键状态，并支持手动刷新。",
     monitorLoading: "正在加载服务器观测数据",
     monitorLoadingDescription: "正在从远程服务器采集一份快速状态快照。",
@@ -1200,6 +1236,18 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sshErrorTooManyAttempts: "認証の試行回数が多すぎます — 提示する鍵を絞ってください",
     sshErrorConnectionReset: "接続がリモート側でリセットされました",
     sshErrorSshpassMissing: "この Mac に sshpass がありません — インストールするか鍵認証に切り替えてください",
+    sshKeys: "SSH 鍵",
+    sshKeysDescription: "~/.ssh にある鍵。ホストでパスを手入力せずに選択でき、パスフレーズなしの ed25519 鍵も生成できます。",
+    sshKeysEmpty: "~/.ssh に鍵がありません",
+    sshKeyGenerate: "生成",
+    sshKeyGenerated: (name: string) => `鍵 ${name} を生成しました`,
+    sshKeyGenerateFailed: "SSH 鍵の生成に失敗しました",
+    sshKeyNamePlaceholder: "鍵の名前（例: id_ed25519_work）",
+    sshKeyCommentPlaceholder: "コメント（任意）",
+    sshKeyCopyPublic: "公開鍵をコピー",
+    sshKeyCopied: (name: string) => `公開鍵をコピーしました: ${name}`,
+    sshKeyCopyFailed: "公開鍵のコピーに失敗しました",
+    sshKeyLoadFailed: "SSH 鍵の読み込みに失敗しました",
     monitorDescription: "サーバーの主要な状態を確認し、必要に応じて手動更新します。",
     monitorLoading: "サーバー監視情報を読み込み中",
     monitorLoadingDescription: "リモートサーバーから簡易ステータスを収集中です。",
