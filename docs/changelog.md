@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.50
+
+Compared with `v0.0.49`.
+
+### Added
+
+- Persist transfer history and allow retrying transfers
+
+### Changed
+
+- None
+
+### Fixed
+
+- Cache keychain reads and harden terminal/sftp edge cases
+
 ## v0.0.49
 
 Compared with `v0.0.48`.
