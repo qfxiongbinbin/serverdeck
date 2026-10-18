@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.49
+
+Compared with `v0.0.48`.
+
+### Added
+
+- Bookmark remote directories in sftp
+
+### Changed
+
+- None
+
+### Fixed
+
+- Compact controls and thin scrollbars
+
 ## v0.0.48
 
 Compared with `v0.0.47`.
