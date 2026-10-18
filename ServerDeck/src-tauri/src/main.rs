@@ -1284,6 +1284,51 @@ fn escape_sftp_path(path: &str) -> String {
     format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
+// author: BrianXiong
+// time: 2026/10/18/22:10:00
+// `sftp ls -l` reports symlinks as `l...`, but knowing whether the target is a
+// directory needs a real filesystem check. One ssh round trip classifies all
+// symlinks in the listing instead of one process per entry.
+fn build_symlink_probe_script(remote_dir: &str, names: &[String]) -> String {
+    let mut script = format!("cd {} || exit 0\n", shell_single_quote(remote_dir));
+    script.push_str("for name in");
+    for name in names {
+        script.push(' ');
+        script.push_str(&shell_single_quote(name));
+    }
+    script.push_str("; do [ -d \"$name\" ] && printf '%s\\n' \"$name\"; done\n");
+    script
+}
+
+fn resolve_remote_link_directories(
+    host: &HostRecord,
+    ssh_options: &SshConnectionOptions,
+    remote_dir: &str,
+    names: &[String],
+) -> Result<Vec<String>, String> {
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let script = build_symlink_probe_script(remote_dir, names);
+    let output = build_ssh_command(host, ssh_options)?
+        .arg("sh")
+        .arg("-c")
+        .arg(script)
+        .output()
+        .map_err(|error| error.to_string())?;
+
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .filter(|line| !line.is_empty())
+        .collect())
+}
+
 fn parse_sftp_ls_line(line: &str) -> Option<FileEntry> {
     let trimmed = line.trim();
     if trimmed.is_empty() {
@@ -2203,6 +2248,22 @@ async fn list_remote_directory(
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         let mut entries = stdout.lines().filter_map(parse_sftp_ls_line).collect::<Vec<_>>();
+
+        // Symlinks are listed as files; resolve which ones point at directories
+        // so they can be entered like normal folders.
+        let symlink_names: Vec<String> = entries
+            .iter()
+            .filter(|entry| entry.is_symlink)
+            .map(|entry| entry.name.clone())
+            .collect();
+        if !symlink_names.is_empty() {
+            if let Ok(directories) = resolve_remote_link_directories(&host, &ssh_options, remote_path, &symlink_names) {
+                for entry in entries.iter_mut().filter(|entry| entry.is_symlink) {
+                    entry.is_dir = directories.iter().any(|name| name == &entry.name);
+                }
+            }
+        }
+
         entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         Ok(entries)
     })
@@ -5230,6 +5291,16 @@ Host target
 
         forget_password(host_id);
         assert_eq!(cached_password(host_id), None);
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/18/22:10:00
+    #[test]
+    fn symlink_probe_script_quotes_paths() {
+        let script = build_symlink_probe_script("/var/www", &["current".to_string(), "a b".to_string()]);
+        assert!(script.contains("cd '/var/www' || exit 0"));
+        assert!(script.contains("for name in 'current' 'a b'"));
+        assert!(script.contains("[ -d \"$name\" ]"));
     }
 
     #[test]
