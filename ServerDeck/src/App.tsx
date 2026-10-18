@@ -3664,6 +3664,14 @@ export default function App() {
     return `serverdeck-${base || "host"}-${suffix}`.toLowerCase();
   }
 
+  // author: BrianXiong
+  // time: 2026/10/18/21:55:00
+  // Single place that decides whether a terminal attaches to the host's tmux
+  // session, so reconnect (not just first connect) keeps its shell state.
+  function buildTerminalSessionOptions(host: SavedHost): SshConnectionOptions {
+    return settings.tmuxPersistence ? { ...sshOptions, tmuxSession: buildTmuxSessionName(host) } : sshOptions;
+  }
+
   async function handleOpenTerminal(
     targetHost: SavedHost = draft,
     options?: { allowInteractiveAuth?: boolean; queuedCommand?: string }
@@ -3687,10 +3695,7 @@ export default function App() {
       }
 
       setStatus(messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port));
-      const sessionOptions: SshConnectionOptions = settings.tmuxPersistence
-        ? { ...sshOptions, tmuxSession: buildTmuxSessionName(targetHost) }
-        : sshOptions;
-      const sessionId = await startTerminalSession(targetHost, sessionOptions);
+      const sessionId = await startTerminalSession(targetHost, buildTerminalSessionOptions(targetHost));
       if (options?.queuedCommand) {
         pendingTerminalCommandsRef.current.set(sessionId, options.queuedCommand);
       }
@@ -3870,7 +3875,7 @@ export default function App() {
     try {
       const sessionId =
         tab.kind === "remote" && tab.host
-          ? await startTerminalSession(tab.host, sshOptions)
+          ? await startTerminalSession(tab.host, buildTerminalSessionOptions(tab.host))
           : await startLocalTerminalSession(tab.cwd);
 
       terminalDecodersRef.current.delete(tab.sessionId);

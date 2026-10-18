@@ -9,7 +9,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{async_runtime, AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
@@ -52,13 +52,53 @@ fn keychain_entry(host_id: &str) -> Result<keyring::Entry, String> {
     keyring::Entry::new(KEYCHAIN_SERVICE, host_id).map_err(|error| error.to_string())
 }
 
+// author: BrianXiong
+// time: 2026/10/18/21:55:00
+// Keychain reads can raise a system permission dialog. A single SFTP operation
+// used to read the password twice (availability guard + command builder), and a
+// file transfer storm multiplied that. Cache the resolved password per host for
+// the process lifetime and invalidate it on write/delete.
+static PASSWORD_CACHE: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn password_cache() -> &'static Mutex<HashMap<String, String>> {
+    PASSWORD_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn cached_password(host_id: &str) -> Option<String> {
+    password_cache()
+        .lock()
+        .ok()
+        .and_then(|cache| cache.get(host_id).cloned())
+}
+
+fn remember_password(host_id: &str, password: &str) {
+    if host_id.is_empty() || password.is_empty() {
+        return;
+    }
+    if let Ok(mut cache) = password_cache().lock() {
+        cache.insert(host_id.to_string(), password.to_string());
+    }
+}
+
+fn forget_password(host_id: &str) {
+    if let Ok(mut cache) = password_cache().lock() {
+        cache.remove(host_id);
+    }
+}
+
 fn keychain_set_password(host_id: &str, password: &str) -> Result<(), String> {
     keychain_entry(host_id)?
         .set_password(password)
-        .map_err(|error| error.to_string())
+        .map_err(|error| error.to_string())?;
+    remember_password(host_id, password);
+    Ok(())
 }
 
 fn keychain_get_password(host_id: &str) -> Option<String> {
+    if let Some(cached) = cached_password(host_id) {
+        return Some(cached);
+    }
+
     let entry = match keychain_entry(host_id) {
         Ok(entry) => entry,
         Err(error) => {
@@ -68,7 +108,10 @@ fn keychain_get_password(host_id: &str) -> Option<String> {
     };
 
     match entry.get_password() {
-        Ok(value) if !value.is_empty() => Some(value),
+        Ok(value) if !value.is_empty() => {
+            remember_password(host_id, &value);
+            Some(value)
+        }
         Ok(_) => {
             eprintln!("[keychain] empty password stored for host {host_id}");
             None
@@ -81,6 +124,7 @@ fn keychain_get_password(host_id: &str) -> Option<String> {
 }
 
 fn keychain_delete_password(host_id: &str) {
+    forget_password(host_id);
     if let Ok(entry) = keychain_entry(host_id) {
         let _ = entry.delete_credential();
     }
@@ -1189,8 +1233,7 @@ fn ensure_sftp_password_available(host: &HostRecord) -> Result<(), String> {
     if host.auth_type == "password" && resolve_host_password(host).is_empty() {
         let display = if host.label.trim().is_empty() { &host.address } else { &host.label };
         return Err(format!(
-            "No password available for host {display}: its keychain entry is missing. \
-             Open the host settings and re-enter the password once to restore access."
+            "No password available for host {display}: its keychain entry is missing, or macOS denied access to it. Open the host settings and re-enter the password once — and click \"Always Allow\" on the keychain prompt."
         ));
     }
 
@@ -1236,11 +1279,9 @@ fn build_sftp_command(host: &HostRecord, ssh_options: &SshConnectionOptions) -> 
 }
 
 fn escape_sftp_path(path: &str) -> String {
-    if path.contains(' ') || path.contains('"') {
-        format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
-    } else {
-        path.to_string()
-    }
+    // Always quote: an unquoted path containing "#" would start a batch-file
+    // comment, and spaces/quotes would split the argument.
+    format!("\"{}\"", path.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 fn parse_sftp_ls_line(line: &str) -> Option<FileEntry> {
@@ -2813,6 +2854,12 @@ fn resize_terminal_session(
     cols: u16,
     rows: u16,
 ) -> Result<bool, String> {
+    // FitAddon can report 0x0 while a tab is hidden; resizing a pty to zero
+    // breaks the remote shell's line wrapping, so ignore those resizes.
+    if cols == 0 || rows == 0 {
+        return Ok(true);
+    }
+
     let sessions = state
         .terminal_sessions
         .lock()
@@ -3073,6 +3120,23 @@ fn stop_port_forward_process(state: &AppState, id: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+// author: BrianXiong
+// time: 2026/10/18/21:55:00
+// PTY children are not reaped automatically when the app exits; without this
+// every quit could leave remote ssh sessions running.
+fn stop_all_terminal_sessions(state: &AppState) {
+    let Ok(mut sessions) = state.terminal_sessions.lock() else {
+        return;
+    };
+
+    for (_, session) in sessions.drain() {
+        if let Ok(mut child) = session.child.lock() {
+            child.kill().ok();
+            child.wait().ok();
+        }
+    }
 }
 
 fn stop_all_port_forwards(state: &AppState) {
@@ -4151,8 +4215,14 @@ fn read_remote_text_file(
     path: String,
     ssh_options: SshConnectionOptions,
 ) -> Result<RemoteTextFilePayload, String> {
+    // Read one byte past the limit so oversized files are rejected without
+    // streaming the whole thing into memory first.
+    let read_limit = (REMOTE_EDIT_MAX_BYTES + 1).to_string();
     let output = build_ssh_command(&host, &ssh_options)?
-        .arg("cat")
+        .arg("head")
+        .arg("-c")
+        .arg(&read_limit)
+        .arg("--")
         .arg(shell_single_quote(&path))
         .output()
         .map_err(|error| error.to_string())?;
@@ -4656,6 +4726,7 @@ fn main() {
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {
             if let Some(state) = app_handle.try_state::<AppState>() {
+                stop_all_terminal_sessions(state.inner());
                 stop_all_port_forwards(state.inner());
             }
             stop_agent_socket();
@@ -5143,6 +5214,32 @@ Host target
     // time: 2026/10/18/03:40:00
     // author: BrianXiong
     // time: 2026/10/18/21:45:00
+    // author: BrianXiong
+    // time: 2026/10/18/21:55:00
+    #[test]
+    fn password_cache_avoids_repeated_keychain_reads() {
+        let host_id = "cache-test-host";
+        forget_password(host_id);
+        assert_eq!(cached_password(host_id), None);
+
+        remember_password(host_id, "secret-1");
+        assert_eq!(cached_password(host_id).as_deref(), Some("secret-1"));
+
+        remember_password(host_id, "");
+        assert_eq!(cached_password(host_id).as_deref(), Some("secret-1"), "empty writes must not clear it");
+
+        forget_password(host_id);
+        assert_eq!(cached_password(host_id), None);
+    }
+
+    #[test]
+    fn sftp_paths_are_always_quoted() {
+        assert_eq!(escape_sftp_path("/var/log/nginx.log"), "\"/var/log/nginx.log\"");
+        assert_eq!(escape_sftp_path("/tmp/a b"), "\"/tmp/a b\"");
+        assert_eq!(escape_sftp_path("/tmp/a#b"), "\"/tmp/a#b\"");
+        assert_eq!(escape_sftp_path("/tmp/a\"b"), "\"/tmp/a\\\"b\"");
+    }
+
     #[test]
     fn transfer_history_roundtrip_and_ordering() {
         let conn = Connection::open_in_memory().expect("in-memory db");
