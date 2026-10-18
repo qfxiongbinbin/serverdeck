@@ -308,6 +308,16 @@ type Messages = {
   sftpBookmarkAdded: (path: string) => string;
   sftpBookmarkRemoved: (name: string) => string;
   sftpBookmarkFailed: string;
+  transferHistory: string;
+  transferHistoryClear: string;
+  transferHistoryCleared: string;
+  transferHistoryDeleted: string;
+  transferStatusSuccess: string;
+  transferStatusError: string;
+  transferStatusCancelled: string;
+  retry: string;
+  transferRetryMissingHost: string;
+  transferRetryFailed: string;
   selectHost: string;
   selectHostPlaceholder: string;
   local: string;
@@ -720,6 +730,16 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sftpBookmarkAdded: (path: string) => `Bookmarked ${path}`,
     sftpBookmarkRemoved: (name: string) => `Removed bookmark ${name}`,
     sftpBookmarkFailed: "Bookmark action failed",
+    transferHistory: "Recent transfers",
+    transferHistoryClear: "Clear history",
+    transferHistoryCleared: "Transfer history cleared",
+    transferHistoryDeleted: "Transfer removed from history",
+    transferStatusSuccess: "Completed",
+    transferStatusError: "Failed",
+    transferStatusCancelled: "Cancelled",
+    retry: "Retry",
+    transferRetryMissingHost: "The host for this transfer no longer exists",
+    transferRetryFailed: "Transfer retry failed",
     selectHost: "Select Host",
     selectHostPlaceholder: "Select host",
     local: "Local",
@@ -1130,6 +1150,16 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sftpBookmarkAdded: (path: string) => `已收藏 ${path}`,
     sftpBookmarkRemoved: (name: string) => `已删除书签 ${name}`,
     sftpBookmarkFailed: "书签操作失败",
+    transferHistory: "最近传输",
+    transferHistoryClear: "清空历史",
+    transferHistoryCleared: "已清空传输历史",
+    transferHistoryDeleted: "已从历史中删除",
+    transferStatusSuccess: "已完成",
+    transferStatusError: "失败",
+    transferStatusCancelled: "已取消",
+    retry: "重试",
+    transferRetryMissingHost: "这条传输对应的主机已不存在",
+    transferRetryFailed: "重试传输失败",
     selectHost: "选择主机",
     selectHostPlaceholder: "请选择主机",
     local: "本地",
@@ -1540,6 +1570,16 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sftpBookmarkAdded: (path: string) => `${path} をブックマークしました`,
     sftpBookmarkRemoved: (name: string) => `ブックマーク ${name} を削除しました`,
     sftpBookmarkFailed: "ブックマーク操作に失敗しました",
+    transferHistory: "最近の転送",
+    transferHistoryClear: "履歴をクリア",
+    transferHistoryCleared: "転送履歴をクリアしました",
+    transferHistoryDeleted: "履歴から削除しました",
+    transferStatusSuccess: "完了",
+    transferStatusError: "失敗",
+    transferStatusCancelled: "キャンセル",
+    retry: "再試行",
+    transferRetryMissingHost: "この転送のホストは存在しません",
+    transferRetryFailed: "転送の再試行に失敗しました",
     selectHost: "ホストを選択",
     selectHostPlaceholder: "ホストを選択",
     local: "ローカル",

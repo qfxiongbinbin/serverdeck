@@ -420,6 +420,21 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           path TEXT NOT NULL,
           label TEXT NOT NULL DEFAULT ''
         );
+
+        CREATE TABLE IF NOT EXISTS transfer_history (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          direction TEXT NOT NULL,
+          status TEXT NOT NULL,
+          detail TEXT NOT NULL DEFAULT '',
+          host_id TEXT NOT NULL,
+          remote_path TEXT NOT NULL DEFAULT '',
+          local_path TEXT NOT NULL DEFAULT '',
+          is_directory INTEGER NOT NULL DEFAULT 0,
+          total_bytes INTEGER,
+          transferred_bytes INTEGER,
+          created_at INTEGER NOT NULL
+        );
         "#,
     )
     .map_err(|error| error.to_string())?;
@@ -4437,6 +4452,130 @@ fn delete_sftp_bookmark(id: String) -> Result<bool, String> {
     Ok(true)
 }
 
+// author: BrianXiong
+// time: 2026/10/18/21:45:00
+// Finished transfers are recorded so they survive restarts and can be retried.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TransferRecord {
+    id: String,
+    name: String,
+    direction: String,
+    status: String,
+    detail: String,
+    host_id: String,
+    remote_path: String,
+    local_path: String,
+    is_directory: bool,
+    total_bytes: Option<i64>,
+    transferred_bytes: Option<i64>,
+    created_at: i64,
+}
+
+fn load_transfer_history_from_db(conn: &Connection, limit: u32) -> Result<Vec<TransferRecord>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, name, direction, status, detail, host_id, remote_path, local_path, is_directory, total_bytes, transferred_bytes, created_at FROM transfer_history ORDER BY created_at DESC LIMIT ?1",
+        )
+        .map_err(|error| error.to_string())?;
+
+    let rows = stmt
+        .query_map([limit as i64], |row| {
+            Ok(TransferRecord {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                direction: row.get(2)?,
+                status: row.get(3)?,
+                detail: row.get(4)?,
+                host_id: row.get(5)?,
+                remote_path: row.get(6)?,
+                local_path: row.get(7)?,
+                is_directory: row.get::<_, i64>(8)? != 0,
+                total_bytes: row.get(9)?,
+                transferred_bytes: row.get(10)?,
+                created_at: row.get(11)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn list_transfer_history(limit: Option<u32>) -> Result<Vec<TransferRecord>, String> {
+    let capped = limit.unwrap_or(50).clamp(1, 200);
+    load_transfer_history_from_db(&open_db()?, capped)
+}
+
+#[tauri::command]
+fn save_transfer_history(mut record: TransferRecord) -> Result<TransferRecord, String> {
+    record.name = record.name.trim().to_string();
+    record.detail = record.detail.trim().to_string();
+    record.direction = record.direction.trim().to_string();
+    record.status = record.status.trim().to_string();
+
+    if record.id.trim().is_empty() {
+        return Err("Transfer id is required".to_string());
+    }
+    if record.direction != "upload" && record.direction != "download" {
+        return Err(format!("Unsupported transfer direction: {}", record.direction));
+    }
+    if record.status != "success" && record.status != "error" && record.status != "cancelled" {
+        return Err(format!("Unsupported transfer status: {}", record.status));
+    }
+    if record.created_at == 0 {
+        record.created_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as i64)
+            .unwrap_or(0);
+    }
+
+    let conn = open_db()?;
+    conn.execute(
+        r#"
+        INSERT INTO transfer_history (id, name, direction, status, detail, host_id, remote_path, local_path, is_directory, total_bytes, transferred_bytes, created_at)
+        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ON CONFLICT(id) DO UPDATE SET
+          status=excluded.status,
+          detail=excluded.detail,
+          transferred_bytes=excluded.transferred_bytes
+        "#,
+        params![
+            record.id,
+            record.name,
+            record.direction,
+            record.status,
+            record.detail,
+            record.host_id,
+            record.remote_path,
+            record.local_path,
+            if record.is_directory { 1i64 } else { 0i64 },
+            record.total_bytes,
+            record.transferred_bytes,
+            record.created_at,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+
+    Ok(record)
+}
+
+#[tauri::command]
+fn delete_transfer_history(id: String) -> Result<bool, String> {
+    let conn = open_db()?;
+    conn.execute("DELETE FROM transfer_history WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+#[tauri::command]
+fn clear_transfer_history() -> Result<bool, String> {
+    let conn = open_db()?;
+    conn.execute("DELETE FROM transfer_history", [])
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -4505,7 +4644,11 @@ fn main() {
             write_remote_text_file,
             list_sftp_bookmarks,
             save_sftp_bookmark,
-            delete_sftp_bookmark
+            delete_sftp_bookmark,
+            list_transfer_history,
+            save_transfer_history,
+            delete_transfer_history,
+            clear_transfer_history
         ])
         .build(tauri::generate_context!())
         .expect("error while building ServerDeck");
@@ -4998,6 +5141,63 @@ Host target
     // time: 2026/10/18/03:20:00
     // author: BrianXiong
     // time: 2026/10/18/03:40:00
+    // author: BrianXiong
+    // time: 2026/10/18/21:45:00
+    #[test]
+    fn transfer_history_roundtrip_and_ordering() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_db(&conn).expect("init db");
+
+        let older = TransferRecord {
+            id: "transfer-1".to_string(),
+            name: "app.jar".to_string(),
+            direction: "upload".to_string(),
+            status: "error".to_string(),
+            detail: "connection reset".to_string(),
+            host_id: "host-1".to_string(),
+            remote_path: "/home/deploy/app.jar".to_string(),
+            local_path: "/Users/me/build/app.jar".to_string(),
+            is_directory: false,
+            total_bytes: Some(1024),
+            transferred_bytes: Some(512),
+            created_at: 1_700_000_000_000,
+        };
+        conn.execute(
+            "INSERT INTO transfer_history (id, name, direction, status, detail, host_id, remote_path, local_path, is_directory, total_bytes, transferred_bytes, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![older.id, older.name, older.direction, older.status, older.detail, older.host_id, older.remote_path, older.local_path, 0i64, older.total_bytes, older.transferred_bytes, older.created_at],
+        )
+        .expect("insert older");
+
+        let newer = TransferRecord {
+            id: "transfer-2".to_string(),
+            name: "logs".to_string(),
+            direction: "download".to_string(),
+            status: "success".to_string(),
+            detail: "done".to_string(),
+            host_id: "host-1".to_string(),
+            remote_path: "/var/log".to_string(),
+            local_path: "/Users/me/logs".to_string(),
+            is_directory: true,
+            total_bytes: None,
+            transferred_bytes: None,
+            created_at: 1_700_000_100_000,
+        };
+        conn.execute(
+            "INSERT INTO transfer_history (id, name, direction, status, detail, host_id, remote_path, local_path, is_directory, total_bytes, transferred_bytes, created_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+            params![newer.id, newer.name, newer.direction, newer.status, newer.detail, newer.host_id, newer.remote_path, newer.local_path, 1i64, newer.total_bytes, newer.transferred_bytes, newer.created_at],
+        )
+        .expect("insert newer");
+
+        let history = load_transfer_history_from_db(&conn, 10).expect("load history");
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].id, "transfer-2", "newest transfer must come first");
+        assert!(history[0].is_directory);
+        assert_eq!(history[1].status, "error");
+
+        let limited = load_transfer_history_from_db(&conn, 1).expect("load limited");
+        assert_eq!(limited.len(), 1);
+    }
+
     #[test]
     fn sftp_bookmarks_roundtrip_through_db() {
         let conn = Connection::open_in_memory().expect("in-memory db");
