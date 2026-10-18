@@ -303,6 +303,11 @@ type Messages = {
   sftpBackToServers: string;
   sftpFollowCwd: string;
   sftpOpenInTerminal: string;
+  sftpBookmarkAddCurrent: string;
+  sftpBookmarkRemove: string;
+  sftpBookmarkAdded: (path: string) => string;
+  sftpBookmarkRemoved: (name: string) => string;
+  sftpBookmarkFailed: string;
   selectHost: string;
   selectHostPlaceholder: string;
   local: string;
@@ -710,6 +715,11 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sftpBackToServers: "Back to servers",
     sftpFollowCwd: "Follow terminal directory",
     sftpOpenInTerminal: "Open this directory in terminal",
+    sftpBookmarkAddCurrent: "Bookmark this directory",
+    sftpBookmarkRemove: "Remove bookmark",
+    sftpBookmarkAdded: (path: string) => `Bookmarked ${path}`,
+    sftpBookmarkRemoved: (name: string) => `Removed bookmark ${name}`,
+    sftpBookmarkFailed: "Bookmark action failed",
     selectHost: "Select Host",
     selectHostPlaceholder: "Select host",
     local: "Local",
@@ -1115,6 +1125,11 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sftpBackToServers: "返回服务器列表",
     sftpFollowCwd: "跟随终端目录",
     sftpOpenInTerminal: "在此目录打开终端",
+    sftpBookmarkAddCurrent: "收藏当前目录",
+    sftpBookmarkRemove: "删除书签",
+    sftpBookmarkAdded: (path: string) => `已收藏 ${path}`,
+    sftpBookmarkRemoved: (name: string) => `已删除书签 ${name}`,
+    sftpBookmarkFailed: "书签操作失败",
     selectHost: "选择主机",
     selectHostPlaceholder: "请选择主机",
     local: "本地",
@@ -1520,6 +1535,11 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     sftpBackToServers: "サーバー一覧へ戻る",
     sftpFollowCwd: "ターミナルのディレクトリに追従",
     sftpOpenInTerminal: "このディレクトリでターミナルを開く",
+    sftpBookmarkAddCurrent: "このディレクトリをブックマーク",
+    sftpBookmarkRemove: "ブックマークを削除",
+    sftpBookmarkAdded: (path: string) => `${path} をブックマークしました`,
+    sftpBookmarkRemoved: (name: string) => `ブックマーク ${name} を削除しました`,
+    sftpBookmarkFailed: "ブックマーク操作に失敗しました",
     selectHost: "ホストを選択",
     selectHostPlaceholder: "ホストを選択",
     local: "ローカル",

@@ -95,6 +95,10 @@ import {
   deleteSnippet,
   readRemoteTextFile,
   writeRemoteTextFile,
+  listSftpBookmarks,
+  saveSftpBookmark,
+  deleteSftpBookmark,
+  type SftpBookmark,
   type SnippetRecord,
   type KnownHostRecord,
   type SshKeyRecord,
@@ -833,6 +837,7 @@ export default function App() {
   } | null>(null);
   const [remoteEditorBusy, setRemoteEditorBusy] = useState(false);
   const [remoteEditorSaved, setRemoteEditorSaved] = useState(false);
+  const [sftpBookmarks, setSftpBookmarks] = useState<SftpBookmark[]>([]);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<DrawerMode>("new");
   const [status, setStatus] = useState(messagesByLanguage[DEFAULT_APP_SETTINGS.language].ready);
@@ -1709,6 +1714,32 @@ export default function App() {
       cancelled = true;
     };
   }, [isLocalTerminalView, isSftpView, localPath, localPreviewOpen, localRefreshTick, messages.failedLoadLocalDirectory]);
+
+  // author: BrianXiong
+  // time: 2026/10/18/03:40:00
+  useEffect(() => {
+    if (!sftpHost) {
+      setSftpBookmarks([]);
+      return;
+    }
+
+    let cancelled = false;
+    void listSftpBookmarks(sftpHost.id)
+      .then((bookmarks) => {
+        if (!cancelled) {
+          setSftpBookmarks(bookmarks);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSftpBookmarks([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sftpHost]);
 
   useEffect(() => {
     if (!isSftpView || !sftpHost) {
@@ -2880,6 +2911,46 @@ export default function App() {
       setStatusTone("error");
     } finally {
       setRemoteEditorBusy(false);
+    }
+  }
+
+  // author: BrianXiong
+  // time: 2026/10/18/03:40:00
+  async function handleAddSftpBookmark() {
+    if (!sftpHost || remotePath === ".") {
+      return;
+    }
+
+    const segments = remotePath.split("/").filter(Boolean);
+    const fallbackLabel = segments[segments.length - 1] || remotePath;
+
+    try {
+      const bookmark = await saveSftpBookmark({
+        id: "",
+        hostId: sftpHost.id,
+        path: remotePath,
+        label: fallbackLabel
+      });
+      setSftpBookmarks((current) =>
+        [...current, bookmark].sort((left, right) => (left.label || left.path).localeCompare(right.label || right.path))
+      );
+      setStatus(messages.sftpBookmarkAdded(remotePath));
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.sftpBookmarkFailed));
+      setStatusTone("error");
+    }
+  }
+
+  async function handleDeleteSftpBookmark(bookmark: SftpBookmark) {
+    try {
+      await deleteSftpBookmark(bookmark.id);
+      setSftpBookmarks((current) => current.filter((item) => item.id !== bookmark.id));
+      setStatus(messages.sftpBookmarkRemoved(bookmark.label || bookmark.path));
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.sftpBookmarkFailed));
+      setStatusTone("error");
     }
   }
 
@@ -4631,6 +4702,42 @@ export default function App() {
                   ) : (
                     <p className="sftp-welcome__empty">{messages.noHostsHint}</p>
                   )}
+                </div>
+              ) : null}
+
+              {sftpHost ? (
+                <div className="sftp-bookmarks">
+                  {sftpBookmarks.map((bookmark) => (
+                    <span key={bookmark.id} className="sftp-bookmark">
+                      <button
+                        type="button"
+                        className="sftp-bookmark__open"
+                        title={bookmark.path}
+                        onClick={() => setRemotePath(bookmark.path)}
+                      >
+                        {bookmark.label || bookmark.path}
+                      </button>
+                      <button
+                        type="button"
+                        className="sftp-bookmark__remove"
+                        aria-label={messages.sftpBookmarkRemove}
+                        title={messages.sftpBookmarkRemove}
+                        onClick={() => void handleDeleteSftpBookmark(bookmark)}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+
+                  {remotePath !== "." ? (
+                    <button
+                      type="button"
+                      className="sftp-bookmark__add"
+                      onClick={() => void handleAddSftpBookmark()}
+                    >
+                      + {messages.sftpBookmarkAddCurrent}
+                    </button>
+                  ) : null}
                 </div>
               ) : null}
 

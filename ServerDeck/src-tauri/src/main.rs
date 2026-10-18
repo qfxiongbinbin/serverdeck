@@ -413,6 +413,13 @@ fn init_db(conn: &Connection) -> Result<(), String> {
           host_id TEXT,
           dangerous INTEGER NOT NULL DEFAULT 0
         );
+
+        CREATE TABLE IF NOT EXISTS sftp_bookmarks (
+          id TEXT PRIMARY KEY,
+          host_id TEXT NOT NULL,
+          path TEXT NOT NULL,
+          label TEXT NOT NULL DEFAULT ''
+        );
         "#,
     )
     .map_err(|error| error.to_string())?;
@@ -1913,6 +1920,8 @@ fn delete_host(id: String) -> Result<bool, String> {
     conn.execute("DELETE FROM ssh_config_links WHERE host_id = ?1", params![id])
         .map_err(|error| error.to_string())?;
     conn.execute("UPDATE snippets SET host_id = NULL WHERE host_id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    conn.execute("DELETE FROM sftp_bookmarks WHERE host_id = ?1", params![id])
         .map_err(|error| error.to_string())?;
     keychain_delete_password(&id);
     Ok(true)
@@ -4329,6 +4338,105 @@ fn agent_exec(request: &serde_json::Value) -> Result<serde_json::Value, String> 
     }))
 }
 
+// author: BrianXiong
+// time: 2026/10/18/03:40:00
+// Saved remote directories per host ("deploy dir", "nginx conf", ...).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SftpBookmarkRecord {
+    id: String,
+    host_id: String,
+    path: String,
+    label: String,
+}
+
+fn load_sftp_bookmarks_from_db(conn: &Connection) -> Result<Vec<SftpBookmarkRecord>, String> {
+    let mut stmt = conn
+        .prepare("SELECT id, host_id, path, label FROM sftp_bookmarks ORDER BY label, path")
+        .map_err(|error| error.to_string())?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(SftpBookmarkRecord {
+                id: row.get(0)?,
+                host_id: row.get(1)?,
+                path: row.get(2)?,
+                label: row.get(3)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
+}
+
+fn save_sftp_bookmark_to_db(conn: &Connection, bookmark: &SftpBookmarkRecord) -> Result<(), String> {
+    conn.execute(
+        r#"
+        INSERT INTO sftp_bookmarks (id, host_id, path, label)
+        VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(id) DO UPDATE SET
+          host_id=excluded.host_id,
+          path=excluded.path,
+          label=excluded.label
+        "#,
+        params![bookmark.id, bookmark.host_id, bookmark.path, bookmark.label],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn list_sftp_bookmarks(host_id: String) -> Result<Vec<SftpBookmarkRecord>, String> {
+    let conn = open_db()?;
+    let mut bookmarks: Vec<SftpBookmarkRecord> = load_sftp_bookmarks_from_db(&conn)?
+        .into_iter()
+        .filter(|bookmark| bookmark.host_id == host_id)
+        .collect();
+    bookmarks.sort_by(|left, right| {
+        let left_label = if left.label.trim().is_empty() { &left.path } else { &left.label };
+        let right_label = if right.label.trim().is_empty() { &right.path } else { &right.label };
+        left_label.cmp(right_label)
+    });
+    Ok(bookmarks)
+}
+
+#[tauri::command]
+fn save_sftp_bookmark(mut bookmark: SftpBookmarkRecord) -> Result<SftpBookmarkRecord, String> {
+    bookmark.host_id = bookmark.host_id.trim().to_string();
+    bookmark.path = bookmark.path.trim().to_string();
+    bookmark.label = bookmark.label.trim().to_string();
+
+    if bookmark.host_id.is_empty() {
+        return Err("A host is required for a bookmark".to_string());
+    }
+    if !bookmark.path.starts_with('/') {
+        return Err("Bookmark paths must be absolute".to_string());
+    }
+    if bookmark.id.trim().is_empty() {
+        bookmark.id = Uuid::new_v4().to_string();
+    }
+
+    let conn = open_db()?;
+    let existing = load_sftp_bookmarks_from_db(&conn)?;
+    let duplicate = existing
+        .iter()
+        .any(|item| item.host_id == bookmark.host_id && item.path == bookmark.path && item.id != bookmark.id);
+    if duplicate {
+        return Err("This path is already bookmarked for the host".to_string());
+    }
+
+    save_sftp_bookmark_to_db(&conn, &bookmark)?;
+    Ok(bookmark)
+}
+
+#[tauri::command]
+fn delete_sftp_bookmark(id: String) -> Result<bool, String> {
+    let conn = open_db()?;
+    conn.execute("DELETE FROM sftp_bookmarks WHERE id = ?1", params![id])
+        .map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
@@ -4394,7 +4502,10 @@ fn main() {
             save_snippet,
             delete_snippet,
             read_remote_text_file,
-            write_remote_text_file
+            write_remote_text_file,
+            list_sftp_bookmarks,
+            save_sftp_bookmark,
+            delete_sftp_bookmark
         ])
         .build(tauri::generate_context!())
         .expect("error while building ServerDeck");
@@ -4885,6 +4996,39 @@ Host target
     // time: 2026/10/18/03:00:00
     // author: BrianXiong
     // time: 2026/10/18/03:20:00
+    // author: BrianXiong
+    // time: 2026/10/18/03:40:00
+    #[test]
+    fn sftp_bookmarks_roundtrip_through_db() {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        init_db(&conn).expect("init db");
+
+        let bookmark = SftpBookmarkRecord {
+            id: "bookmark-1".to_string(),
+            host_id: "host-1".to_string(),
+            path: "/home/hiyond-deploy/nginx".to_string(),
+            label: "nginx".to_string(),
+        };
+        save_sftp_bookmark_to_db(&conn, &bookmark).expect("save bookmark");
+
+        let saved = load_sftp_bookmarks_from_db(&conn).expect("load bookmarks");
+        assert_eq!(saved.len(), 1);
+        assert_eq!(saved[0].path, "/home/hiyond-deploy/nginx");
+        assert_eq!(saved[0].label, "nginx");
+
+        let renamed = SftpBookmarkRecord {
+            label: "nginx conf".to_string(),
+            ..bookmark.clone()
+        };
+        save_sftp_bookmark_to_db(&conn, &renamed).expect("update bookmark");
+        let saved = load_sftp_bookmarks_from_db(&conn).expect("reload");
+        assert_eq!(saved[0].label, "nginx conf");
+
+        conn.execute("DELETE FROM sftp_bookmarks WHERE id = ?1", params!["bookmark-1"])
+            .expect("delete bookmark");
+        assert!(load_sftp_bookmarks_from_db(&conn).expect("reload").is_empty());
+    }
+
     #[test]
     fn agent_exec_requires_host_and_remote_command_fields() {
         let missing_host: serde_json::Value =
