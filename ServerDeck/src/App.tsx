@@ -98,7 +98,12 @@ import {
   listSftpBookmarks,
   saveSftpBookmark,
   deleteSftpBookmark,
+  listTransferHistory,
+  saveTransferHistory,
+  deleteTransferHistory,
+  clearTransferHistory,
   type SftpBookmark,
+  type TransferRecord,
   type SnippetRecord,
   type KnownHostRecord,
   type SshKeyRecord,
@@ -248,7 +253,10 @@ type TransferJob = {
   totalBytes?: number;
   host?: SavedHost;
   remoteDir?: string;
+  remotePath?: string;
+  sourcePath?: string;
   localTargetPath?: string;
+  isDirectory?: boolean;
 };
 
 type TerminalCharset = "utf-8" | "gb18030" | "gbk" | "big5";
@@ -848,6 +856,7 @@ export default function App() {
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
   const [terminalMountNode, setTerminalMountNode] = useState<HTMLDivElement | null>(null);
   const [transferJobs, setTransferJobs] = useState<TransferJob[]>([]);
+  const [transferHistory, setTransferHistory] = useState<TransferRecord[]>([]);
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdate | null>(null);
   const [appVersion, setAppVersion] = useState(packageJson.version);
   const [updateCheckState, setUpdateCheckState] = useState<UpdateCheckState>(
@@ -965,6 +974,16 @@ export default function App() {
       lastTerminalTabIdRef.current = activeTabId;
     }
   }, [activeTabId, terminalTabs]);
+
+  // author: BrianXiong
+  // time: 2026/10/18/21:45:00
+  // Kept in a ref so finishTransferJob can snapshot the finished job and persist
+  // it even though the success state is removed from the list a moment later.
+  const transferJobsRef = useRef<TransferJob[]>([]);
+
+  useEffect(() => {
+    transferJobsRef.current = transferJobs;
+  }, [transferJobs]);
 
   const isLocalTerminalView = activeTerminalTab?.kind === "local";
   const selectedLocalBrowserEntry = useMemo(
@@ -2682,11 +2701,120 @@ export default function App() {
     setSettings((current) => ({ ...current, localTerminalDefaultPath: path }));
   }
 
+  // author: BrianXiong
+  // time: 2026/10/18/21:45:00
+  async function refreshTransferHistory() {
+    try {
+      setTransferHistory(await listTransferHistory(50));
+    } catch {
+      // Transfer history is a convenience; ignore read failures.
+    }
+  }
+
+  useEffect(() => {
+    void refreshTransferHistory();
+  }, []);
+
+  function transferJobToRecord(job: TransferJob, status: TransferJob["status"]): TransferRecord {
+    return {
+      id: job.id,
+      name: job.name,
+      direction: job.direction,
+      status: status === "running" ? "cancelled" : status,
+      detail: job.detail,
+      hostId: job.host?.id ?? "",
+      remotePath: job.remotePath ?? "",
+      localPath: job.direction === "upload" ? job.sourcePath ?? "" : job.localTargetPath ?? "",
+      isDirectory: Boolean(job.isDirectory),
+      totalBytes: job.totalBytes ?? null,
+      transferredBytes: job.transferredBytes ?? null,
+      createdAt: Date.now()
+    };
+  }
+
+  async function persistTransferJob(job: TransferJob, status: TransferJob["status"]) {
+    try {
+      await saveTransferHistory(transferJobToRecord(job, status));
+      await refreshTransferHistory();
+    } catch {
+      // Best effort: the in-memory list already shows the result.
+    }
+  }
+
+  async function handleRetryTransfer(record: TransferRecord) {
+    const host = hosts.find((item) => item.id === record.hostId) ?? null;
+    if (!host) {
+      setStatus(messages.transferRetryMissingHost);
+      setStatusTone("error");
+      return;
+    }
+
+    const remoteDir = getParentPath(record.remotePath) || "/";
+    const localDir = getParentPath(record.localPath) || "~";
+    const direction = record.direction;
+    const jobId = startTransferJob(
+      record.name,
+      direction,
+      direction === "upload" ? messages.uploadingTo(remoteDir) : messages.downloadingTo(localDir),
+      {
+        host,
+        remoteDir,
+        remotePath: record.remotePath,
+        sourcePath: direction === "upload" ? record.localPath : undefined,
+        localTargetPath: direction === "download" ? record.localPath : undefined,
+        isDirectory: record.isDirectory,
+        totalBytes: record.totalBytes ?? undefined
+      }
+    );
+
+    try {
+      if (direction === "upload") {
+        await startUploadToRemote(host, record.localPath, remoteDir, sshOptions, jobId);
+      } else {
+        await startDownloadFromRemote(host, record.remotePath, localDir, record.isDirectory, sshOptions, jobId);
+      }
+    } catch (error) {
+      const message = getErrorMessage(error, messages.transferRetryFailed);
+      setStatus(message);
+      setStatusTone("error");
+      finishTransferJob(jobId, "error", message);
+    }
+  }
+
+  async function handleDeleteTransferRecord(record: TransferRecord) {
+    try {
+      await deleteTransferHistory(record.id);
+      await refreshTransferHistory();
+      setStatus(messages.transferHistoryDeleted);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.transferRetryFailed));
+      setStatusTone("error");
+    }
+  }
+
+  async function handleClearTransferHistory() {
+    try {
+      await clearTransferHistory();
+      setTransferHistory([]);
+      setStatus(messages.transferHistoryCleared);
+      setStatusTone("success");
+    } catch (error) {
+      setStatus(getErrorMessage(error, messages.transferRetryFailed));
+      setStatusTone("error");
+    }
+  }
+
   function startTransferJob(
     name: string,
     direction: TransferJob["direction"],
     detail: string,
-    metadata: Partial<Pick<TransferJob, "host" | "remoteDir" | "localTargetPath" | "totalBytes">> = {}
+    metadata: Partial<
+      Pick<
+        TransferJob,
+        "host" | "remoteDir" | "remotePath" | "sourcePath" | "localTargetPath" | "isDirectory" | "totalBytes"
+      >
+    > = {}
   ) {
     const id = crypto.randomUUID();
     const nextJob: TransferJob = {
@@ -2712,12 +2840,21 @@ export default function App() {
   }
 
   function finishTransferJob(id: string, status: TransferJob["status"], detail: string) {
+    const finishedJob = transferJobsRef.current.find((job) => job.id === id) ?? null;
+    const nextJob = finishedJob
+      ? { ...finishedJob, status, detail, progressPercent: status === "success" ? 100 : finishedJob.progressPercent }
+      : null;
+
     setTransferJobs((current) => current.map((job) => (job.id === id ? {
       ...job,
       status,
       detail,
       progressPercent: status === "success" ? 100 : job.progressPercent
     } : job)));
+
+    if (nextJob) {
+      void persistTransferJob(nextJob, status);
+    }
 
     if (status === "success") {
       window.setTimeout(() => {
@@ -2731,6 +2868,9 @@ export default function App() {
     const jobId = startTransferJob(entry.name, "upload", messages.uploadingTo(remotePath), {
       host: sftpHost,
       remoteDir: remotePath,
+      remotePath: joinChildPath(remotePath, entry.name),
+      sourcePath: entry.path,
+      isDirectory: entry.is_dir,
       totalBytes: entry.size,
     });
     setFileMenu(null);
@@ -2778,7 +2918,11 @@ export default function App() {
     if (!sftpHost) return;
     const remoteTarget = joinChildPath(remotePath, entry.name);
     const jobId = startTransferJob(entry.name, "download", messages.downloadingTo(localPath), {
+      host: sftpHost,
+      remoteDir: remotePath,
+      remotePath: remoteTarget,
       localTargetPath: joinChildPath(localPath, entry.name),
+      isDirectory: entry.is_dir,
       totalBytes: entry.is_dir ? undefined : entry.size,
     });
     setFileMenu(null);
@@ -3520,6 +3664,14 @@ export default function App() {
     return `serverdeck-${base || "host"}-${suffix}`.toLowerCase();
   }
 
+  // author: BrianXiong
+  // time: 2026/10/18/21:55:00
+  // Single place that decides whether a terminal attaches to the host's tmux
+  // session, so reconnect (not just first connect) keeps its shell state.
+  function buildTerminalSessionOptions(host: SavedHost): SshConnectionOptions {
+    return settings.tmuxPersistence ? { ...sshOptions, tmuxSession: buildTmuxSessionName(host) } : sshOptions;
+  }
+
   async function handleOpenTerminal(
     targetHost: SavedHost = draft,
     options?: { allowInteractiveAuth?: boolean; queuedCommand?: string }
@@ -3543,10 +3695,7 @@ export default function App() {
       }
 
       setStatus(messages.connectingToHost(targetHost.username, targetHost.address, targetHost.port));
-      const sessionOptions: SshConnectionOptions = settings.tmuxPersistence
-        ? { ...sshOptions, tmuxSession: buildTmuxSessionName(targetHost) }
-        : sshOptions;
-      const sessionId = await startTerminalSession(targetHost, sessionOptions);
+      const sessionId = await startTerminalSession(targetHost, buildTerminalSessionOptions(targetHost));
       if (options?.queuedCommand) {
         pendingTerminalCommandsRef.current.set(sessionId, options.queuedCommand);
       }
@@ -3726,7 +3875,7 @@ export default function App() {
     try {
       const sessionId =
         tab.kind === "remote" && tab.host
-          ? await startTerminalSession(tab.host, sshOptions)
+          ? await startTerminalSession(tab.host, buildTerminalSessionOptions(tab.host))
           : await startLocalTerminalSession(tab.cwd);
 
       terminalDecodersRef.current.delete(tab.sessionId);
@@ -4794,7 +4943,7 @@ export default function App() {
                 />
               </div> : null}
 
-              {transferJobs.length ? <div className="transfer-panel">
+              {transferJobs.length || transferHistory.length ? <div className="transfer-panel">
                 <div className="transfer-panel__header">
                   <strong>{messages.transfers}</strong>
                   <span>{messages.transferCount(transferJobs.length)}</span>
@@ -4828,6 +4977,56 @@ export default function App() {
                     </div>
                   ))}
                 </div>
+
+                {transferHistory.length ? (
+                  <div className="transfer-history">
+                    <div className="transfer-history__header">
+                      <span>{messages.transferHistory}</span>
+                      <button
+                        type="button"
+                        className="transfer-item__clear"
+                        onClick={() => void handleClearTransferHistory()}
+                      >
+                        {messages.transferHistoryClear}
+                      </button>
+                    </div>
+
+                    {transferHistory.slice(0, 6).map((record) => (
+                      <div key={record.id} className="transfer-history__item">
+                        <span className={`transfer-history__dot transfer-history__dot--${record.status}`} />
+                        <div className="transfer-history__meta">
+                          <strong>{record.name}</strong>
+                          <span>
+                            {record.direction === "upload" ? messages.transferUpload : messages.transferDownload}
+                            {" · "}
+                            {record.status === "success"
+                              ? messages.transferStatusSuccess
+                              : record.status === "error"
+                                ? messages.transferStatusError
+                                : messages.transferStatusCancelled}
+                            {record.detail ? ` · ${record.detail}` : ""}
+                          </span>
+                        </div>
+                        <div className="transfer-history__actions">
+                          <button
+                            type="button"
+                            className="row-button"
+                            onClick={() => void handleRetryTransfer(record)}
+                          >
+                            {messages.retry}
+                          </button>
+                          <button
+                            type="button"
+                            className="row-button"
+                            onClick={() => void handleDeleteTransferRecord(record)}
+                          >
+                            {messages.delete}
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
               </div> : null}
             </section>
           ) : isForwardsView ? (

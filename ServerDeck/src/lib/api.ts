@@ -700,3 +700,48 @@ export async function deleteSftpBookmark(id: string) {
   }
   return true;
 }
+
+// author: BrianXiong
+// time: 2026/10/18/21:45:00
+export type TransferRecord = {
+  id: string;
+  name: string;
+  direction: "upload" | "download";
+  status: "success" | "error" | "cancelled";
+  detail: string;
+  hostId: string;
+  remotePath: string;
+  localPath: string;
+  isDirectory: boolean;
+  totalBytes?: number | null;
+  transferredBytes?: number | null;
+  createdAt: number;
+};
+
+export async function listTransferHistory(limit = 50) {
+  if (hasTauri()) {
+    return tauriInvoke<TransferRecord[]>("list_transfer_history", { limit });
+  }
+  return [] as TransferRecord[];
+}
+
+export async function saveTransferHistory(record: TransferRecord) {
+  if (hasTauri()) {
+    return tauriInvoke<TransferRecord>("save_transfer_history", { record });
+  }
+  return record;
+}
+
+export async function deleteTransferHistory(id: string) {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("delete_transfer_history", { id });
+  }
+  return true;
+}
+
+export async function clearTransferHistory() {
+  if (hasTauri()) {
+    return tauriInvoke<boolean>("clear_transfer_history");
+  }
+  return true;
+}
