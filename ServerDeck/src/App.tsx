@@ -2886,28 +2886,62 @@ export default function App() {
     }
   }
 
+  // author: BrianXiong
+  // time: 2026/10/18/22:10:00
+  // A killed transfer leaves a half-written file behind. Clean it up so the
+  // remote deploy directory (or local folder) never keeps a truncated artifact.
+  async function cleanupCancelledTransfer(job: TransferJob) {
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+
+    if (job.direction === "upload") {
+      if (!job.host || !job.remotePath) {
+        return;
+      }
+      await deleteRemoteEntry(job.host, job.remotePath, Boolean(job.isDirectory), sshOptions).catch(() => {});
+      setRemoteRefreshTick((current) => current + 1);
+      return;
+    }
+
+    if (job.localTargetPath) {
+      await deleteLocalEntry(job.localTargetPath, Boolean(job.isDirectory)).catch(() => {});
+      setLocalRefreshTick((current) => current + 1);
+    }
+  }
+
   async function handleClearTransferJob(job: TransferJob) {
     if (job.status === "running" && job.direction === "upload") {
       try {
         await cancelUploadToRemote(job.id);
-        removeTransferJob(job.id);
       } catch (error) {
         const message = getErrorMessage(error, messages.uploadFailed(job.name));
         setStatus(message);
         setStatusTone("error");
+        return;
       }
+
+      await cleanupCancelledTransfer(job);
+      removeTransferJob(job.id);
+      void persistTransferJob(job, "cancelled");
+      setStatus(messages.transferCancelled);
+      setStatusTone("neutral");
       return;
     }
 
     if (job.status === "running" && job.direction === "download") {
       try {
         await cancelDownloadFromRemote(job.id);
-        removeTransferJob(job.id);
       } catch (error) {
         const message = getErrorMessage(error, messages.downloadFailed(job.name));
         setStatus(message);
         setStatusTone("error");
+        return;
       }
+
+      await cleanupCancelledTransfer(job);
+      removeTransferJob(job.id);
+      void persistTransferJob(job, "cancelled");
+      setStatus(messages.transferCancelled);
+      setStatusTone("neutral");
       return;
     }
 
@@ -3878,10 +3912,16 @@ export default function App() {
           ? await startTerminalSession(tab.host, buildTerminalSessionOptions(tab.host))
           : await startLocalTerminalSession(tab.cwd);
 
+      // Keep the previous output so the reconnect does not wipe the scrollback;
+      // append a separator so the session break stays visible.
+      const previousBuffer = terminalBuffersRef.current.get(tab.sessionId) ?? [];
       terminalDecodersRef.current.delete(tab.sessionId);
       terminalBuffersRef.current.delete(tab.sessionId);
       void closeTerminalSession(tab.sessionId).catch(() => {});
-      terminalBuffersRef.current.set(sessionId, []);
+      terminalBuffersRef.current.set(sessionId, [
+        ...previousBuffer,
+        "\r\n\u001b[90m[serverdeck] reconnected\u001b[0m\r\n"
+      ]);
 
       const statusText =
         tab.kind === "remote" && tab.host
@@ -3913,7 +3953,9 @@ export default function App() {
     const targetTab = currentTabs[targetIndex];
     terminalDecodersRef.current.delete(targetTab.sessionId);
     terminalBuffersRef.current.delete(targetTab.sessionId);
-    await closeTerminalSession(targetTab.sessionId);
+    // The backend session may already be gone (crashed ssh, app restart), which
+    // must not stop the tab from closing.
+    await closeTerminalSession(targetTab.sessionId).catch(() => {});
 
     const nextTabs = currentTabs.filter((tab) => tab.id !== tabId);
     const nextActiveTabId =

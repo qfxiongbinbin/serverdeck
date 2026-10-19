@@ -318,6 +318,7 @@ type Messages = {
   retry: string;
   transferRetryMissingHost: string;
   transferRetryFailed: string;
+  transferCancelled: string;
   selectHost: string;
   selectHostPlaceholder: string;
   local: string;
@@ -740,6 +741,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     retry: "Retry",
     transferRetryMissingHost: "The host for this transfer no longer exists",
     transferRetryFailed: "Transfer retry failed",
+    transferCancelled: "Transfer cancelled — partial files were cleaned up",
     selectHost: "Select Host",
     selectHostPlaceholder: "Select host",
     local: "Local",
@@ -1160,6 +1162,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     retry: "重试",
     transferRetryMissingHost: "这条传输对应的主机已不存在",
     transferRetryFailed: "重试传输失败",
+    transferCancelled: "传输已取消，未完成的文件已清理",
     selectHost: "选择主机",
     selectHostPlaceholder: "请选择主机",
     local: "本地",
@@ -1580,6 +1583,7 @@ export const messagesByLanguage: Record<AppLanguage, Messages> = {
     retry: "再試行",
     transferRetryMissingHost: "この転送のホストは存在しません",
     transferRetryFailed: "転送の再試行に失敗しました",
+    transferCancelled: "転送をキャンセルし、途中のファイルを削除しました",
     selectHost: "ホストを選択",
     selectHostPlaceholder: "ホストを選択",
     local: "ローカル",
