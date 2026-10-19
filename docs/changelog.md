@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.51
+
+Compared with `v0.0.50`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Finish terminal and sftp edge cases
+
 ## v0.0.50
 
 Compared with `v0.0.49`.
