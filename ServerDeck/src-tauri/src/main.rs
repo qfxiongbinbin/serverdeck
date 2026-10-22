@@ -876,13 +876,22 @@ fn apply_local_terminal_utf8_env(cmd: &mut CommandBuilder) {
         cmd.env("LC_ALL", preferred_utf8_locale);
     }
 
-    if cmd.get_env("TERM").is_none() {
-        cmd.env("TERM", "xterm-256color");
-    }
+    apply_terminal_emulator_env(cmd);
+}
 
-    if cmd.get_env("COLORTERM").is_none() {
-        cmd.env("COLORTERM", "truecolor");
-    }
+// author: BrianXiong
+// time: 2026/10/22/19:45:00
+// Both terminal panes are rendered by xterm.js, so the child process must
+// identify as one no matter how the app was launched. A GUI launch has no TERM
+// in its environment at all and a shell launch can inherit TERM=dumb; ssh
+// forwards that value unchanged in its pty request, the remote login then runs
+// on a dumb terminal, and tmux refuses to attach ("open terminal failed:
+// terminal does not support clear") before the session ever reaches a shell.
+// The value is forced because the emulator is always xterm.js, not whatever
+// terminal happened to launch the app.
+fn apply_terminal_emulator_env(cmd: &mut CommandBuilder) {
+    cmd.env("TERM", "xterm-256color");
+    cmd.env("COLORTERM", "truecolor");
 }
 
 pub(crate) fn file_entries_from_dir(path: &Path) -> Result<Vec<FileEntry>, String> {
@@ -2747,6 +2756,11 @@ fn start_terminal_session(
                 })?,
         )
     };
+
+    // The terminal pane is xterm.js, so ssh must request that terminal type
+    // from the remote side instead of forwarding the app's own (often absent)
+    // TERM — otherwise tmux refuses to attach on a dumb terminal.
+    apply_terminal_emulator_env(&mut cmd);
 
     cmd.arg("-tt");
     for option in control_master_options() {
@@ -5252,6 +5266,25 @@ Host target
         assert!(command.contains("command -v tmux"));
         assert!(command.contains("tmux new -A -s 'serverdeck-web-01'"));
         assert!(command.contains("exec \"${SHELL:-/bin/sh}\" -l"));
+    }
+
+    // author: BrianXiong
+    // time: 2026/10/22/19:50:00
+    // Regression test: a dumb/absent local TERM used to be forwarded to the
+    // remote side, where tmux then refused to attach.
+    #[test]
+    fn terminal_pty_forces_an_xterm_terminal_type() {
+        let mut cmd = CommandBuilder::new("ssh");
+        cmd.env("TERM", "dumb");
+        apply_terminal_emulator_env(&mut cmd);
+        assert_eq!(
+            cmd.get_env("TERM").and_then(|value| value.to_str()),
+            Some("xterm-256color")
+        );
+        assert_eq!(
+            cmd.get_env("COLORTERM").and_then(|value| value.to_str()),
+            Some("truecolor")
+        );
     }
 
     // author: BrianXiong
