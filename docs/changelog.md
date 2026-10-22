@@ -2,6 +2,22 @@
 
 This file records release notes for each published version.
 
+## v0.0.52
+
+Compared with `v0.0.51`.
+
+### Added
+
+- None
+
+### Changed
+
+- None
+
+### Fixed
+
+- Make tmux terminal sessions attach with a valid TERM
+
 ## v0.0.51
 
 Compared with `v0.0.50`.
